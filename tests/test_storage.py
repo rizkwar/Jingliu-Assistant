@@ -97,7 +97,7 @@ class StoreTests(unittest.TestCase):
             with closing(Store(path)) as migrated:
                 self.assertEqual(migrated.context(conversation)[0]["content"], "Keep the original question")
                 self.assertEqual(migrated.memories()[0]["content"], "Keep this memory")
-                self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 2)
+                self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 3)
                 migrated.save_summary(conversation, "Reviewed notes", turn[1])
             with closing(Store(path)) as reopened:
                 self.assertEqual(reopened.summary(conversation)["through_id"], turn[1])
@@ -172,3 +172,22 @@ class StoreTests(unittest.TestCase):
                 Store(path)
             with closing(sqlite3.connect(path)) as database:
                 self.assertEqual(database.execute("PRAGMA user_version").fetchone()[0], 99)
+
+    def test_version_two_chats_are_claimed_once_and_character_archives_remain_separate(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "legacy.sqlite3"
+            with closing(sqlite3.connect(path)) as database:
+                database.executescript("""
+                    CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL,
+                        created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+                    INSERT INTO conversations VALUES ('legacy', 'An old chat', 'a', 'a');
+                    PRAGMA user_version=2;
+                """)
+            with closing(Store(path)) as store:
+                store.claim_legacy_conversations("jingliu")
+                second = store.create_conversation("luna")
+                store.claim_legacy_conversations("luna")
+                self.assertEqual([row["id"] for row in store.conversations("jingliu")], ["legacy"])
+                self.assertEqual([row["id"] for row in store.conversations("luna")], [second])
+                self.assertEqual(len(store.conversations()), 2)
+                self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 3)

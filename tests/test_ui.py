@@ -263,7 +263,7 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.window.input.toPlainText(), "Keep this draft")
         self.assertEqual(self.window._conversation_id, conversation)
         with patch("companion.ui.QDesktopServices.openUrl", return_value=True) as open_file:
-            self.window.edit_character.click()
+            self.window.open_character_file.click()
         self.assertEqual(Path(open_file.call_args.args[0].toLocalFile()), character.path)
         self.window.voice.setCurrentText("vera")
         self.window._preview_voice()

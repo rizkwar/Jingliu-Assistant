@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 import tempfile
 
-from .config import Settings, VOICES
+from .config import Settings, VOICES, PROJECT_ROOT, with_character
+from .character import character_key, load_character
 from .voice_settings import validate_rate
 
 
@@ -14,6 +15,7 @@ FIELDS = {
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
     "tts_rate": int,
     "tts_reference": str,
+    "character_path": str,
     "stt_model": str, "stt_auto_send": bool, "stt_microphone": str,
     "memory_enabled": bool, "close_to_tray": bool,
     "stt_pause_ms": int,
@@ -37,6 +39,8 @@ def validate(values):
         validate_rate(clean["tts_rate"])
     if len(clean.get("tts_reference", "")) > 4096:
         raise ValueError("Saved reference audio path is too long.")
+    if len(clean.get("character_path", "")) > 4096:
+        raise ValueError("Saved character profile path is too long.")
     if "stt_model" in clean and clean["stt_model"] not in {"tiny.en", "base.en", "small.en"}:
         raise ValueError("Saved transcription model is not available.")
     if "stt_pause_ms" in clean and not 600 <= clean["stt_pause_ms"] <= 2500:
@@ -51,6 +55,10 @@ class Preferences:
     def __init__(self, path: Path | None = None):
         self.path = path
         self._values = {}
+        self._voices = {}
+
+    def character_paths(self):
+        return tuple(self._voices)
 
     def load(self, defaults: Settings) -> Settings:
         if self.path is not None and self.path.exists():
@@ -61,12 +69,34 @@ class Preferences:
             if not isinstance(document, dict) or document.get("version") != 1:
                 raise ValueError("Saved preferences have an unsupported format.")
             values = validate(document.get("settings"))
+            voices = document.get("character_voices", {})
+            if not isinstance(voices, dict) or any(not isinstance(key, str) or len(key) > 4096 for key in voices):
+                raise ValueError("Saved character voices have an invalid format.")
+            self._voices = {key: {field: value for field, value in validate(audio).items()
+                                 if field in {"tts_voice", "tts_reference", "tts_rate"}} for key, audio in voices.items()}
         else:
             values = self._values
-        return replace(defaults, **values)
+        settings = replace(defaults, **values)
+        if settings.character_path:
+            settings = with_character(settings, load_character(PROJECT_ROOT, settings.character_path, defaults.name))
+        return settings
 
-    def save(self, settings: Settings) -> None:
+    def select(self, current: Settings, character, *, use_profile_voice=False) -> Settings:
+        """Persist the selection and each character's voice without storing prompts or credentials."""
+        settings = with_character(current, character, use_voice=True)
+        audio = self._voices.get(character_key(settings.character_path))
+        if audio and not use_profile_voice:
+            settings = replace(settings, **audio)
+        self.save(settings, previous=current)
+        return settings
+
+    def save(self, settings: Settings, *, previous=None) -> None:
         values = validate({key: getattr(settings, key) for key in FIELDS})
+        voices = dict(self._voices)
+        for item in (previous, settings):
+            if item is not None and item.character_path:
+                voices[character_key(item.character_path)] = {
+                    key: getattr(item, key) for key in ("tts_voice", "tts_reference", "tts_rate")}
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = None
@@ -74,7 +104,7 @@ class Preferences:
                 with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
                                                  prefix="preferences-", suffix=".tmp", delete=False) as output:
                     temporary = Path(output.name)
-                    json.dump({"version": 1, "settings": values}, output, indent=2)
+                    json.dump({"version": 1, "settings": values, "character_voices": voices}, output, indent=2)
                     output.write("\n")
                     output.flush()
                     os.fsync(output.fileno())
@@ -83,3 +113,4 @@ class Preferences:
                 if temporary is not None:
                     temporary.unlink(missing_ok=True)
         self._values = values
+        self._voices = voices

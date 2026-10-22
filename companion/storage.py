@@ -12,6 +12,7 @@ from .continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
+SCHEMA_VERSION = 3
 STOP_WORDS = set("a an and are as at be been but by can do for from have how i in is it me my of on or that the this to was we what with you your".split())
 
 
@@ -34,7 +35,7 @@ class Store:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(str(path), timeout=0.5)
         self.connection.row_factory = sqlite3.Row
-        if self.connection.execute("PRAGMA user_version").fetchone()[0] > 2:
+        if self.connection.execute("PRAGMA user_version").fetchone()[0] > SCHEMA_VERSION:
             self.close()
             raise sqlite3.DatabaseError("This database was created by a newer version of the companion.")
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -63,30 +64,42 @@ class Store:
                 content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 6000),
                 through_id INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
             );
-            PRAGMA user_version = 2;
         """)
+        with self.connection:
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(conversations)")}
+            if "character_key" not in columns:
+                self.connection.execute("ALTER TABLE conversations ADD COLUMN character_key TEXT NOT NULL DEFAULT ''")
+            self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def close(self):
         if self.connection is not None:
             self.connection.close()
             self.connection = None
 
-    def conversations(self):
+    def conversations(self, character=None):
         return [dict(row) for row in self.connection.execute(
             "SELECT c.*, COUNT(m.id) AS message_count FROM conversations c "
-            "LEFT JOIN messages m ON m.conversation_id=c.id GROUP BY c.id "
-            "ORDER BY c.updated_at DESC, c.rowid DESC"
+            "LEFT JOIN messages m ON m.conversation_id=c.id "
+            + ("WHERE c.character_key=? " if character is not None else "")
+            + "GROUP BY c.id ORDER BY c.updated_at DESC, c.rowid DESC",
+            (character,) if character is not None else (),
         )]
 
     def conversation(self, conversation_id):
         row = self.connection.execute("SELECT * FROM conversations WHERE id=?", (conversation_id,)).fetchone()
         return dict(row) if row else None
 
-    def create_conversation(self):
+    def claim_legacy_conversations(self, character):
+        """Attach unassigned chats once, preserving the previous single-character archive."""
+        if character:
+            with self.connection:
+                self.connection.execute("UPDATE conversations SET character_key=? WHERE character_key=''", (character,))
+
+    def create_conversation(self, character=""):
         conversation_id, timestamp = uuid4().hex, now()
         with self.connection:
-            self.connection.execute("INSERT INTO conversations VALUES (?, ?, ?, ?)",
-                                    (conversation_id, "New conversation", timestamp, timestamp))
+            self.connection.execute("INSERT INTO conversations(id,title,created_at,updated_at,character_key) VALUES (?, ?, ?, ?, ?)",
+                                    (conversation_id, "New conversation", timestamp, timestamp, character))
         return conversation_id
 
     def delete_conversation(self, conversation_id):

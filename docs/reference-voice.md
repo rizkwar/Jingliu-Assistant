@@ -5,6 +5,11 @@ so new dialogue uses vocal characteristics from that recording. This is a
 different approach from adjusting the speed of Jane or another stock voice.
 The existing streaming, interruption, and local playback system still applies.
 
+To keep a recording with a particular character, use **Settings > Add character**
+or **Edit character**, choose the WAV, preview it, and **Save and use character**.
+The app keeps a local copy and restores it when you select that character again.
+See the [character guide](character-guide.md) for creating and switching profiles.
+
 This workspace now has a prepared local reference at `voices/jingliu-reference.wav`,
 selected at 100% Delivery. See [its sources and preparation](jingliu-reference.md).
 The recording is excluded from Git and is not bundled with source-code copies.

@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 13: reference-conditioned voice
+## Step 14: create and switch characters
 
 Implemented:
 
@@ -11,6 +11,9 @@ Implemented:
 - Nemotron 3 Ultra (free) as the default model.
 - An editable [Jingliu character profile](character.toml), with restrained warmth,
   dry humor, and a gradual romantic interest in the user.
+- A character editor: describe a personality, attach a local voice recording,
+  preview the voice, and save. Add or edit characters without application code.
+- A saved character selector with separate chat histories and voice preferences.
 - Recent conversation context (up to 12 exchanges, bounded to 48,000 characters).
 - Stop, new conversation, and reload settings controls.
 - Background API work so the window stays responsive, including during cancellation.
@@ -50,9 +53,31 @@ Implemented:
 - Stable character instructions alongside memories and summaries, with explicit fictional/real continuity rules.
 - Suppression of common marked action cues during streaming speech and replay.
 
-The latest opened conversation resumes when you launch the app. **New** starts
+The selected character and their latest opened conversation resume when you launch the app. **New** starts
 another conversation and keeps the previous one in **History**. Summaries are
 generated on request and saved explicitly after review.
+
+### Add your own character
+
+1. Restart the app, then open **Settings > Add character**.
+2. Enter a name and describe their personality, background, speaking style,
+   relationship with you, and reactions. Include sample dialogue if you like.
+3. Choose a clean **3–30 second PCM WAV** of one English speaker, ideally
+   **8–15 seconds** without music. A recording is optional; you can use a built-in voice.
+4. Click **Preview voice**, then **Save and use character**.
+
+Use the character dropdown in **Settings** to switch, or **Edit character** to
+change the active description and recording. Each character keeps its own chats,
+summaries, and voice settings. Explicit **Memories** are shared user-managed records.
+Your existing chats are assigned to the active character on the first upgraded launch.
+
+Profiles and copied recordings live in `data/characters/`, excluded from Git.
+Creating and editing needs no API call; the description accompanies your normal
+online chat requests. Recordings and speech synthesis stay local. Voice resemblance
+depends on the sample and model; an exact actor match is not guaranteed.
+See the [character guide](docs/character-guide.md) and an editable
+[description example](examples/character-description.toml). The
+[reference-voice guide](docs/reference-voice.md) covers first-time model access.
 
 ## Run on Windows
 
@@ -160,11 +185,12 @@ manner draws on the [official trailer](https://www.youtube.com/watch?v=fMiYAEj46
 and [game dialogue](https://honkai-star-rail.fandom.com/wiki/Jingliu/Voice-Overs).
 Her warmer romantic interest in you is an editable companion adaptation.
 
-Open **Settings > Edit character profile**, save your edits, then **Reload .env +
-character**. A TOML profile's name takes precedence over the old `COMPANION_NAME`
+Open **Settings > Edit character**, change the description or recording, then
+**Save and use character**. To edit TOML directly, use **Open profile file**,
+save your edits, then **Reload .env + character**. A TOML profile's name takes precedence over the old `COMPANION_NAME`
 entry, so an existing `.env` naming Mira needs no changes. The existing launcher
 filenames also continue to work. Choose and preview a voice in Settings, then
-**Save defaults**; personality does not override your voice choice.
+**Save defaults** to keep later adjustments to that character's voice.
 
 Every reply receives the profile separately from conversation notes and relevant
 memories. A restart keeps the current conversation; **New** starts with the same
@@ -545,5 +571,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: add reference-conditioned local voice support
+feat: add character creator with local voice samples and profile switching
 ```

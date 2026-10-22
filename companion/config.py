@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import os
 from pathlib import Path
 
@@ -37,6 +37,7 @@ class Settings:
     character_voice: str = ""
     character_voice_rate: int = 100
     character_voice_description: str = ""
+    character_reference: str = ""
     tts_reference: str = ""
     hf_token: str = field(default="", repr=False)
 
@@ -100,7 +101,19 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
         character_voice=character.voice,
         character_voice_rate=character.rate,
         character_voice_description=character.voice_description,
+        character_reference=character.reference,
         tts_reference=str((root / reference).resolve()) if reference else "",
         hf_token=(values.get("HF_TOKEN") or "").strip(),
     )
+
+
+def with_character(settings: Settings, character, *, use_voice=False) -> Settings:
+    values = dict(name=character.name, system_prompt=character.prompt, character_path=str(character.path),
+                  voice_preview=character.preview, character_voice=character.voice,
+                  character_voice_rate=character.rate, character_voice_description=character.voice_description,
+                  character_reference=character.reference)
+    if use_voice:
+        values.update(tts_voice="reference" if character.reference else character.voice or "alba",
+                      tts_reference=character.reference, tts_rate=character.rate)
+    return replace(settings, **values)
 

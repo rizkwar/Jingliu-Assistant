@@ -6,10 +6,13 @@ from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QScrollArea, QSlider, QTextBrowser, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from .config import Settings, VOICES, load_settings
+from .config import PROJECT_ROOT, Settings, VOICES, load_settings
+from .character import character_key, load_character, read_profile
+from .characters import CharacterLibrary
+from .character_ui import CharacterDialog
 from .speech import SpeechController
 from .microphone import MicrophoneController
 from .worker import ReplyWorker
@@ -66,7 +69,7 @@ class CompanionWindow(QMainWindow):
     suspended_changed = Signal(bool)
     activity_changed = Signal(str)
 
-    def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None):
+    def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None):
         super().__init__()
         self.settings = settings
         self.activity = "ready"
@@ -84,6 +87,7 @@ class CompanionWindow(QMainWindow):
         self.tray_enabled = False
         self.suspended = False
         self.preferences = preferences if preferences is not None else Preferences()
+        self.characters = characters if characters is not None else CharacterLibrary(PROJECT_ROOT)
         self._last_reply = ""
         self.speech = speech if speech is not None else SpeechController(self)
         if hasattr(self.speech, "set_hf_token"):
@@ -104,8 +108,10 @@ class CompanionWindow(QMainWindow):
         # The entry point injects a disk store. Isolated previews/tests use RAM.
         self.store = store if store is not None else Store(":memory:")
         self._owns_store = store is None
-        conversations = self.store.conversations()
-        self._conversation_id = conversations[0]["id"] if conversations else self.store.create_conversation()
+        key = character_key(settings.character_path)
+        self.store.claim_legacy_conversations(key)
+        conversations = self.store.conversations(key)
+        self._conversation_id = conversations[0]["id"] if conversations else self.store.create_conversation(key)
         self._active_turn = None
         self._reply_status = "pending"
         self._reply_notice = ""
@@ -194,12 +200,27 @@ class CompanionWindow(QMainWindow):
         character_row = QHBoxLayout()
         self.character_label = QLabel()
         self.character_label.setWordWrap(True)
+        self.character_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         character_row.addWidget(self.character_label, 1)
-        self.edit_character = QPushButton("Edit character profile")
-        self.edit_character.clicked.connect(self._edit_character)
-        character_row.addWidget(self.edit_character)
         settings_layout.addLayout(character_row)
+        self.character_select = QComboBox()
+        self.character_select.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.character_select.setMinimumContentsLength(12)
+        self.character_select.activated.connect(self._select_character)
+        settings_layout.addWidget(self.character_select)
+        character_buttons = QHBoxLayout()
+        self.add_character = QPushButton("Add character")
+        self.add_character.clicked.connect(self._add_character)
+        self.edit_character = QPushButton("Edit character")
+        self.edit_character.clicked.connect(self._edit_character)
+        self.open_character_file = QPushButton("Open profile file")
+        self.open_character_file.clicked.connect(self._open_character_file)
+        character_buttons.addWidget(self.add_character)
+        character_buttons.addWidget(self.edit_character)
+        character_buttons.addWidget(self.open_character_file)
+        settings_layout.addLayout(character_buttons)
         self._refresh_character_label()
+        self._refresh_characters()
         voice_row = QHBoxLayout()
         self.auto_speak = QCheckBox("Speak replies")
         self.auto_speak.setChecked(settings.tts_enabled)
@@ -220,6 +241,7 @@ class CompanionWindow(QMainWindow):
         self.reference_label = QLabel()
         self.reference_label.setObjectName("hint")
         self.reference_label.setWordWrap(True)
+        self.reference_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         reference_row.addWidget(self.reference_label, 1)
         self.choose_reference = QPushButton("Choose reference WAV")
         self.choose_reference.clicked.connect(self._choose_reference)
@@ -333,7 +355,7 @@ class CompanionWindow(QMainWindow):
         self.animate_avatar = QCheckBox("Animate avatar")
         self.animate_avatar.setChecked(settings.avatar_animated)
         settings_layout.addWidget(self.animate_avatar)
-        self.preference_status = QLabel("API key stays in .env. Edit the character profile, then reload to apply it.")
+        self.preference_status = QLabel("Character selection is saved automatically. Save defaults keeps further voice and app adjustments. API keys stay in .env.")
         self.preference_status.setObjectName("hint")
         self.preference_status.setWordWrap(True)
         settings_layout.addWidget(self.preference_status)
@@ -516,6 +538,9 @@ class CompanionWindow(QMainWindow):
         self.context_button.setEnabled(not busy)
         self.preview.setEnabled(not busy and not self.speech.busy)
         self.character_voice_button.setEnabled(bool(self.settings.character_voice) and not busy)
+        self.character_select.setEnabled(not busy)
+        self.add_character.setEnabled(not busy)
+        self.edit_character.setEnabled(not busy and Path(self.settings.character_path).suffix.lower() == ".toml")
         self.choose_reference.setEnabled(not busy)
         self.clear_reference.setEnabled(bool(self._reference_path) and not busy)
         self.replay.setEnabled(not busy and bool(self._last_reply) and not self.speech.busy)
@@ -637,7 +662,7 @@ class CompanionWindow(QMainWindow):
         if self._active_turn and not self._save_active_turn():
             return
         try:
-            conversation_id = self.store.create_conversation()
+            conversation_id = self.store.create_conversation(character_key(self.settings.character_path))
         except sqlite3.Error:
             self.privacy.setText("Could not create a conversation. Please try again.")
             return
@@ -671,12 +696,31 @@ class CompanionWindow(QMainWindow):
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Could not reload settings", str(exc))
             return
+        conversation = self._conversation_id
+        if character_key(settings.character_path) != character_key(self.settings.character_path):
+            try:
+                key = character_key(settings.character_path)
+                if not self.settings.character_path:
+                    self.store.claim_legacy_conversations(key)
+                conversations = self.store.conversations(key)
+                conversation = conversations[0]["id"] if conversations else self.store.create_conversation(key)
+            except sqlite3.Error:
+                self.preference_status.setText("Could not load this character's conversations. Please try again.")
+                return
+        self._apply_settings(settings, retry_voice=True)
+        if conversation != self._conversation_id:
+            self._restore_conversation(conversation)
+        self._write("\nSettings reloaded.\n", "#a4adbf")
+        self.preference_status.setText("Reloaded .env and the character profile, with saved app preferences.")
+
+    def _apply_settings(self, settings, *, retry_voice=False):
         self.settings = settings
         self._refresh_character_label()
+        self._refresh_characters()
         self._interrupt_speech()
         if hasattr(self.speech, "set_hf_token"):
             self.speech.set_hf_token(settings.hf_token)
-        if settings.tts_voice == "reference":
+        if retry_voice and settings.tts_voice == "reference":
             self.speech.shutdown()  # Retry gated weights after CLI login/access changes.
         self._reference_path = settings.tts_reference
         self.auto_speak.setChecked(settings.tts_enabled)
@@ -702,8 +746,6 @@ class CompanionWindow(QMainWindow):
         self.title.setText(settings.name)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
         self.status.setText("Ready" if settings.api_key else "Add API key")
-        self._write("\nSettings reloaded.\n", "#a4adbf")
-        self.preference_status.setText("Reloaded .env and the character profile, with saved app preferences.")
         self._activity_error = False
         self._refresh_controls()
         self._refresh_activity()
@@ -713,10 +755,98 @@ class CompanionWindow(QMainWindow):
         path = self.settings.character_path
         self.character_label.setText("Character: " + self.settings.name + (" · " + Path(path).name if path else ""))
         self.character_label.setToolTip(path)
-        self.edit_character.setEnabled(bool(path))
+        self.edit_character.setEnabled(Path(path).suffix.lower() == ".toml")
+        self.open_character_file.setEnabled(bool(path))
+
+    def _refresh_characters(self):
+        self.character_select.clear()
+        for path, name, error in self.characters.profiles(self.settings.character_path, self.preferences.character_paths()):
+            label = name
+            if self.character_select.findText(label) >= 0:
+                label += " · " + Path(path).parent.name[:12]
+            self.character_select.addItem(label, path)
+            self.character_select.setItemData(self.character_select.count() - 1, error or path, Qt.ItemDataRole.ToolTipRole)
+        current = str(Path(self.settings.character_path).resolve()) if self.settings.character_path else ""
+        index = self.character_select.findData(current)
+        if index < 0:
+            self.character_select.addItem(self.settings.name, current)
+            index = self.character_select.count() - 1
+        self.character_select.setCurrentIndex(index)
+
+    @Slot(int)
+    def _select_character(self, index):
+        path = self.character_select.itemData(index)
+        if path and character_key(path) != character_key(self.settings.character_path):
+            self._activate_character(path)
+
+    def _activate_character(self, path, *, use_profile_voice=False):
+        self._end_handsfree()
+        if self._closing or self._worker or self.microphone.busy or self.suspended:
+            self._refresh_characters()
+            return False
+        if self._active_turn and not self._save_active_turn():
+            return False
+        try:
+            character = (load_character(PROJECT_ROOT, str(path), load_settings().name)
+                         if Path(path).suffix.lower() == ".md" else read_profile(Path(path)))
+            key = character_key(str(character.path))
+            conversations = self.store.conversations(key)
+            conversation = conversations[0]["id"] if conversations else self.store.create_conversation(key)
+            settings = self.preferences.select(self._current_preferences(), character,
+                                               use_profile_voice=use_profile_voice)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Could not use character", str(exc))
+            self._refresh_characters()
+            return False
+        self._apply_settings(settings)
+        self._restore_conversation(conversation)
+        self.preference_status.setText("Character saved and selected. Each character keeps its own chats and voice; explicit Memories are shared.")
+        return True
+
+    @Slot()
+    def _add_character(self):
+        self._character_editor()
 
     @Slot()
     def _edit_character(self) -> None:
+        self._character_editor(self.settings.character_path)
+
+    def _character_editor(self, existing=None):
+        self._end_handsfree()
+        if self._worker or self.microphone.busy or self.suspended:
+            return
+        self._interrupt_speech()
+        try:
+            draft = self.characters.draft(existing) if existing else None
+            if draft:
+                draft = replace(draft, reference=self._reference_path if self.voice.currentData() == "reference" else "",
+                                builtin=self.voice.currentData() if self.voice.currentData() in VOICES else draft.builtin,
+                                rate=self.delivery_rate.value())
+            dialog = CharacterDialog(self.characters, self, existing=existing, draft=draft)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not edit character", str(exc))
+            return
+        dialog.preview_requested.connect(self._preview_character_voice)
+        dialog.stop_requested.connect(self._interrupt_speech)
+        self.speech.changed.connect(dialog.feedback.setText)
+        self.speech.failed.connect(dialog.feedback.setText)
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            self._interrupt_speech()
+            if accepted and not self._closing:
+                self._activate_character(dialog.saved_path, use_profile_voice=True)
+        finally:
+            dialog.deleteLater()
+
+    @Slot(str, str, int)
+    def _preview_character_voice(self, text, voice, rate):
+        if self._worker or self.microphone.busy or self.suspended:
+            return
+        self._interrupt_speech()
+        self.speech.speak(text, voice, self.volume.value(), rate)
+
+    @Slot()
+    def _open_character_file(self) -> None:
         if self.settings.character_path and not QDesktopServices.openUrl(QUrl.fromLocalFile(self.settings.character_path)):
             self.preference_status.setText("Open this file in your editor: " + self.settings.character_path)
 
@@ -730,9 +860,8 @@ class CompanionWindow(QMainWindow):
         self.settings_dialog.raise_()
         self.settings_dialog.activateWindow()
 
-    @Slot()
-    def _save_preferences(self) -> None:
-        settings = replace(
+    def _current_preferences(self):
+        return replace(
             self.settings, tts_enabled=self.auto_speak.isChecked(), tts_voice=self.voice.currentData(),
             tts_reference=self._reference_path,
             tts_volume=self.volume.value(), tts_rate=self.delivery_rate.value(), stt_auto_send=self.auto_send.isChecked(),
@@ -743,6 +872,10 @@ class CompanionWindow(QMainWindow):
             avatar_enabled=self.show_avatar.isChecked(), avatar_animated=self.animate_avatar.isChecked(),
             avatar_x=self.avatar.position()[0], avatar_y=self.avatar.position()[1],
         )
+
+    @Slot()
+    def _save_preferences(self) -> None:
+        settings = self._current_preferences()
         try:
             self.preferences.save(settings)
         except (OSError, ValueError) as exc:
@@ -954,7 +1087,9 @@ class CompanionWindow(QMainWindow):
             return
         self._end_handsfree()
         self._interrupt_speech()
-        self.voice.setCurrentText(self.settings.character_voice)
+        self._reference_path = self.settings.character_reference
+        self.voice.setCurrentIndex(self.voice.findData("reference" if self._reference_path else self.settings.character_voice))
+        self._refresh_reference_label()
         self.delivery_rate.setValue(self.settings.character_voice_rate)
         self.preference_status.setText("Character voice applied. Preview to listen; Save defaults to keep it.")
 
@@ -1078,7 +1213,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _toggle_recording(self) -> None:
-        if self._closing or self.suspended:
+        if self._closing or self.suspended or QApplication.activeModalWidget() is not None:
             return
         self._end_handsfree()
         if self.microphone.state in {"opening", "recording"}:
@@ -1355,8 +1490,9 @@ class CompanionWindow(QMainWindow):
                 return
             selected = dialog.selected_id if accepted else self._conversation_id
             if not self.store.conversation(selected):
-                conversations = self.store.conversations()
-                selected = conversations[0]["id"] if conversations else self.store.create_conversation()
+                key = character_key(self.settings.character_path)
+                conversations = self.store.conversations(key)
+                selected = conversations[0]["id"] if conversations else self.store.create_conversation(key)
             self._restore_conversation(selected)
             dialog.deleteLater()
         except sqlite3.Error:

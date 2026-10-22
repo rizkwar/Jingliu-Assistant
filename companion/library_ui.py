@@ -1,6 +1,7 @@
 """Small native managers for saved conversations and explicit memories."""
 
 import sqlite3
+from .character import character_key
 
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
@@ -13,11 +14,12 @@ class HistoryDialog(QDialog):
     def __init__(self, store, parent=None):
         super().__init__(parent)
         self.store = store
+        self.character = character_key(parent.settings.character_path) if parent is not None else None
         self.selected_id = None
         self.setWindowTitle("Saved conversations")
         self.resize(560, 440)
         layout = QVBoxLayout(self)
-        description = QLabel("Open a conversation to continue it. New conversations keep older chats saved.")
+        description = QLabel("Open a conversation with this character to continue it. New conversations keep older chats saved.")
         description.setWordWrap(True)
         layout.addWidget(description)
         self.items = QListWidget()
@@ -39,7 +41,7 @@ class HistoryDialog(QDialog):
 
     def refresh(self):
         self.items.clear()
-        for conversation in self.store.conversations():
+        for conversation in self.store.conversations(self.character):
             item = QListWidgetItem(f"{conversation['title']}\n{conversation['message_count']} saved messages")
             item.setData(Qt.ItemDataRole.UserRole, conversation["id"])
             self.items.addItem(item)
@@ -76,7 +78,7 @@ class MemoryDialog(QDialog):
         self.setWindowTitle(f"{name}'s memory")
         self.resize(620, 560)
         layout = QVBoxLayout(self)
-        description = QLabel("Memories are saved only when you add them. Included memories are sent with online replies. Pinned memories are preferred; others are matched to your topic.")
+        description = QLabel("Memories are shared across characters and saved only when you add them. Included memories are sent with online replies. Pinned memories are preferred; others are matched to your topic.")
         description.setWordWrap(True)
         layout.addWidget(description)
         self.items = QListWidget()

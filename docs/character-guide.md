@@ -9,23 +9,57 @@ companion. All sample dialogue is newly written, rather than copied game lines.
 ## Apply and personalize
 
 1. Launch using **Start Mira.cmd**; the existing script name still works for any character.
-2. Open **Settings > Edit character profile** to open the active file in your
-   system's associated editor. You can also open `character.toml` directly in VS Code.
-3. Edit the profile, save it, then click **Reload .env + character**. Restarting
-   also loads it. A malformed file produces an error; a failed reload keeps your
-   current profile and unsent draft intact.
-4. Click **Use character voice**, then **Preview**, and **Save defaults** to
-   retain it. The Jingliu preset uses **Jane at 94% delivery**, aiming for a calm,
-   slightly lower English sound. You can still select any built-in **Voice** and
-   adjust **Delivery**. This is a stock voice approximation, not the game's actor
-   or a voice clone. The preview sentence comes from the profile.
-   To use a recording's vocal characteristics, select **Choose reference WAV**;
-   the [reference-voice guide](reference-voice.md) covers model access and setup.
-5. Use **New** to sample the character without old conversation messages shaping
-   the exchange. Your selected saved memories can still accompany the new chat.
+2. Open **Settings > Add character**. Give them a name and describe their identity,
+   personality, background, interests, speaking style, reactions, and relationship
+   with you. Add example conversations and behaviors to avoid in the same text.
+   The [description example](../examples/character-description.toml) shows one approach.
+3. Optionally choose a clean voice recording: one English speaker, no music,
+   **3–30 seconds of PCM WAV** (8–15 seconds recommended). The editor validates
+   the format and copies it locally; it does not change your source recording.
+   Use **Preview voice** to audition and **Stop voice** to cancel.
+4. Click **Save and use character**. The selection is saved automatically and
+   remains active after restarting. Pick another profile from the dropdown to
+   switch back. Characters have separate chat histories and conversation notes.
+   Explicit **Memories** remain shared; review any records about a particular
+   character before reusing them with another. Other characters' experiences
+   are not evidence of this character's relationship with you.
+5. **Edit character** lets you revise the active description and recording, then
+   save and apply them to the same profile without losing its chats. For an older
+   structured profile, the full traits, reactions, and dialogue examples appear
+   in the description. Saving converts it to that editable description format;
+   a `.toml.bak` file preserves the original before the first edit, and research
+   references are retained. Cancel leaves the profile unchanged.
+
+Creation and editing use your description directly, without an extra model request.
+Every normal chat request includes it as character instructions. The voice recording
+is used by the local speech engine, rather than sent with the description. This
+adapts the generated voice to a sample; it does not guarantee an identical performance.
+
+New profiles and their recordings are stored in `data/characters/` and excluded
+from Git. Do not delete a character's folder if you intend to keep using it.
+The selector remembers your last applied voice adjustments for each profile.
+Saving an edit intentionally applies the voice chosen in the editor.
+Selecting a profile also saves current app adjustments. Use **Save defaults**
+for later changes to volume, voice, microphone, or other settings.
+
+### Editing TOML directly
+
+Use **Settings > Open profile file** to open the active file in your associated
+editor. Save it, then choose **Reload .env + character**. Restarting also loads
+it. A malformed file produces an error; a failed reload keeps the current profile
+and unsent draft intact.
+
+For the original Jingliu profile, **Use character voice** applies **Jane at 94%
+delivery**, a stock approximation of a calm, slightly lower English sound. The
+preview sentence comes from the profile. To use your chosen recording, select
+**Choose reference WAV** or save it through **Edit character**. The
+[reference-voice guide](reference-voice.md) covers model access and setup.
+
+Use **New** to sample a changed personality without older messages shaping the
+exchange. Your selected saved memories can still accompany the new chat.
 
 The default file is `character.toml`. To keep several profiles, copy it to another
-`.toml` file and select it in `.env`, using a path relative to the project:
+`.toml` file and set an initial selection in `.env`, using a path relative to the project:
 
 ```dotenv
 CHARACTER_PROFILE=characters/my-jingliu.toml
@@ -34,6 +68,10 @@ CHARACTER_PROFILE=characters/my-jingliu.toml
 Absolute paths also work. A TOML profile's `identity.name` is authoritative,
 including when an older `.env` still contains `COMPANION_NAME=Mira`. Your existing
 `.env` is not rewritten. No API key belongs in the character file.
+An app-saved character selection takes precedence over `CHARACTER_PROFILE`.
+The selector lists the original profile, the active profile, library profiles,
+and previously selected profiles. Markdown profiles can be selected and opened
+in an external editor; the in-app editor creates and edits TOML profiles.
 
 Without an explicit selection, projects lacking `character.toml` fall back to
 the older `character.md` and `COMPANION_NAME` mechanism. To select that legacy
@@ -51,7 +89,7 @@ multiple lines. Lists use square brackets and quoted items. Keep the file under
 | `identity` | `name`, `identity`, `background` | Name, portrayal, and optional fictional history. |
 | `personality` | `traits`, `interests`, `likes`, `dislikes`, `opinions` | Stable temperament and judgments. |
 | `speech` | `style`, `vocabulary`, `humor`, `response_length`, `preview` | Spoken phrasing and a local voice audition. |
-| `voice` | `builtin`, `rate`, `description` | Optional local stock-voice preset, applied with Use character voice. |
+| `voice` | `builtin`, `rate`, `description`, `reference` | Local voice preset and optional recording, applied with Use character voice. |
 | `relationship` | `dynamic`, `affection`, `boundaries` | How she expresses interest and responds to your comfort. |
 | `reactions` | `excited`, `confused`, `frustrated`, `joking`, `disagreeing`, `vulnerable` | Situational reactions without changing her core identity. |
 | `continuity` | `shared_developments` | Relevant kinds of real discussion to acknowledge. |
@@ -63,10 +101,20 @@ multiple lines. Lists use square brackets and quoted items. Keep the file under
 required. The other fields are optional. Unknown fields are rejected to expose
 typos rather than silently ignoring your edits.
 
+Alternatively, use a top-level `description` string with `[identity].name`,
+optional `[speech].preview`, `[voice]`, and `[reference]`, as shown in the
+description example. In this format the entire personality and any examples
+go inside `description` (up to 24,000 characters, still within the 32 KiB file
+limit). Do not combine it with structured personality/reaction/example sections:
+the reader rejects competing sets of instructions. The form saves this format.
+
 If present, `[voice]` needs a valid built-in `builtin` name. `rate` is a whole
 percentage from 80 to 115, defaulting to 100. Below 100%, playback becomes slower
 and lower-pitched together; above 100%, faster and higher-pitched. This changes
 acoustic delivery, rather than asking the language model to narrate a voice.
+An optional `voice.reference` names a local WAV relative to the profile's folder
+or by absolute path. The editor uses relative paths for its managed audio copies.
+**Use character voice** applies this recording if present, or the built-in preset.
 The voice section is kept out of the dialogue prompt. Existing saved voices
 remain in effect until you apply a preset or choose another voice yourself.
 

@@ -1,6 +1,7 @@
 """Load an editable TOML character profile, with legacy Markdown compatibility."""
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import tomllib
 
@@ -12,7 +13,7 @@ FIELDS = {
     "identity": {"name": str, "identity": str, "background": str},
     "personality": {"traits": list, "interests": list, "likes": list, "dislikes": list, "opinions": list},
     "speech": {"style": str, "vocabulary": str, "humor": str, "response_length": str, "preview": str},
-    "voice": {"builtin": str, "rate": int, "description": str},
+    "voice": {"builtin": str, "rate": int, "description": str, "reference": str},
     "relationship": {"dynamic": str, "affection": str, "boundaries": str},
     "reactions": {"excited": str, "confused": str, "frustrated": str, "joking": str, "disagreeing": str, "vulnerable": str},
     "continuity": {"shared_developments": str},
@@ -30,6 +31,8 @@ class Character:
     voice: str = ""
     rate: int = 100
     voice_description: str = ""
+    reference: str = ""
+    description: str = ""
 
 
 def _text(value, field):
@@ -38,7 +41,7 @@ def _text(value, field):
     return value.strip()
 
 
-def read_profile(path: Path) -> Character:
+def profile_document(path: Path) -> dict:
     with path.open("rb") as source:
         raw = source.read(MAX_PROFILE_BYTES + 1)
     if len(raw) > MAX_PROFILE_BYTES:
@@ -50,8 +53,11 @@ def read_profile(path: Path) -> Character:
         raise ValueError("Character profile has invalid TOML. Check quotes, arrays, and section headers.") from exc
     if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
         raise ValueError("Character profile requires schema_version = 1.")
-    if data.keys() - {"schema_version", "examples", *FIELDS}:
+    if data.keys() - {"schema_version", "description", "examples", *FIELDS}:
         raise ValueError("Character profile contains an unknown section. See docs/character-guide.md.")
+    description = data.get("description")
+    if description is not None and (not isinstance(description, str) or not description.strip() or len(description) > 24000):
+        raise ValueError("Character description must contain 1 to 24,000 characters.")
     for section, fields in FIELDS.items():
         values = data.get(section, {})
         if not isinstance(values, dict) or values.keys() - fields.keys():
@@ -70,10 +76,14 @@ def read_profile(path: Path) -> Character:
     if voice and voice.get("builtin") not in VOICES:
         raise ValueError("Character profile: voice.builtin must name an available built-in voice.")
     name = data.get("identity", {}).get("name")
-    if not name or len(name) > 80 or "\n" in name:
+    if not name or len(name) > 80 or any(char in name for char in "\r\n"):
         raise ValueError("Character profile: identity.name must be a single line of 1 to 80 characters.")
-    if not data.get("personality", {}).get("traits") or not data.get("speech", {}).get("style"):
+    if description is None and (not data.get("personality", {}).get("traits") or not data.get("speech", {}).get("style")):
         raise ValueError("Character profile requires personality.traits and speech.style.")
+    if description is not None and (data.keys() & {"personality", "relationship", "reactions", "continuity", "avoid", "examples"}
+                                    or data.get("identity", {}).keys() - {"name"}
+                                    or data.get("speech", {}).keys() - {"preview"}):
+        raise ValueError("Use either a description or structured personality fields, so instructions do not conflict.")
     examples = data.get("examples", [])
     if not isinstance(examples, list) or len(examples) > 16:
         raise ValueError("Character profile: use at most 16 [[examples]] tables.")
@@ -84,6 +94,14 @@ def read_profile(path: Path) -> Character:
             example[key] = _text(example.get(key), f"examples.{key}")
         if "context" in example:
             example["context"] = _text(example["context"], "examples.context")
+    return data
+
+
+def read_profile(path: Path) -> Character:
+    data = profile_document(path)
+    examples = data.get("examples", [])
+    name = data["identity"]["name"]
+    voice = data.get("voice", {})
     parts = [f"Editable character profile: {name}"]
     for section in FIELDS:
         if section in {"reference", "voice"}:
@@ -100,8 +118,21 @@ def read_profile(path: Path) -> Character:
         if example.get("context"):
             parts.append("Illustrative context: " + example["context"])
         parts.extend(("User: " + example["user"], name + ": " + example["assistant"]))
+    # A form-created description is authoritative. Structured profiles remain compatible.
+    editable_parts = [part for part in parts[1:] if part != "name: " + name]
+    description = data.get("description", "\n".join(editable_parts).strip()).strip()
+    if "description" in data:
+        parts = [f"Editable character profile: {name}", "Character description:\n" + description,
+                 "Any sample conversations in this description are invented style demonstrations, never memories of this user."]
+    reference = voice.get("reference", "")
     return Character(name, "\n".join(parts), path.resolve(), data.get("speech", {}).get("preview", ""),
-                     voice.get("builtin", ""), voice.get("rate", 100), voice.get("description", ""))
+                     voice.get("builtin", ""), voice.get("rate", 100), voice.get("description", ""),
+                     str((path.parent / reference).resolve()) if reference else "", description)
+
+
+def character_key(path: str) -> str:
+    """A stable archive/preferences key, independent of a character's display name."""
+    return os.path.normcase(str(Path(path).resolve())) if path else ""
 
 
 def load_character(root: Path, selected="", legacy_name="Mira") -> Character:
