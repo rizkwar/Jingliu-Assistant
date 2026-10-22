@@ -1,4 +1,5 @@
 import sys
+import sqlite3
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QEvent
@@ -6,6 +7,7 @@ from PySide6.QtCore import QEvent
 from .config import load_settings
 from .ui import CompanionWindow
 from .hotkey import RecordingHotkey
+from .storage import Store
 
 
 def main() -> int:
@@ -14,10 +16,11 @@ def main() -> int:
     app.setStyle("Fusion")
     try:
         settings = load_settings()
-    except (OSError, ValueError) as exc:
+        store = Store()
+        window = CompanionWindow(settings, store=store)
+    except (OSError, ValueError, sqlite3.Error) as exc:
         QMessageBox.critical(None, "Could not start companion", str(exc))
         return 1
-    window = CompanionWindow(settings)
     hotkey = RecordingHotkey(app)
     hotkey.activated.connect(window._toggle_recording)
     if not hotkey.register():
@@ -31,6 +34,7 @@ def main() -> int:
         window.speech.shutdown()
         window.deleteLater()
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        store.close()
 
 
 if __name__ == "__main__":

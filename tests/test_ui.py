@@ -2,6 +2,8 @@ import asyncio
 import os
 import time
 import threading
+import json
+import sqlite3
 import unittest
 from dataclasses import replace
 from unittest.mock import patch
@@ -16,6 +18,7 @@ from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
 from companion.worker import ReplyWorker
 from companion.speech_text import SpeechSegmenter
+from companion.storage import Store
 
 
 SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.", tts_enabled=False)
@@ -367,4 +370,102 @@ class WindowTests(unittest.TestCase):
         self.window._read_last_reply()
         self.assertEqual(message["content"], "Hello")
         self.assertEqual(speech.calls[0][0], "Hello")
+
+    def use_shared_store(self):
+        self.window.close()
+        self.window.deleteLater()
+        store = Store(":memory:")
+        self.addCleanup(store.close)
+        self.window = CompanionWindow(SETTINGS, store=store)
+        return store
+
+    def test_saved_conversation_is_restored_without_playing_audio(self):
+        store = self.use_shared_store()
+        def handler(request):
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"Saved answer"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler):
+            self.send("Remember our discussion")
+            self.wait_until(lambda: self.window._worker is None)
+        conversation = self.window._conversation_id
+        self.window.close()
+        self.window.deleteLater()
+        self.window = CompanionWindow(SETTINGS, store=store)
+        self.assertEqual(self.window._conversation_id, conversation)
+        self.assertIn("Saved answer", self.window.transcript.toPlainText())
+        self.assertEqual(self.window._messages[-1]["content"], "Saved answer")
+        self.assertFalse(self.window.speech.busy)
+
+    def test_new_conversation_keeps_history_and_memories_but_clears_context(self):
+        store = self.use_shared_store()
+        old = self.window._conversation_id
+        turn = store.start_turn(old, "Earlier question")
+        store.save_turn(turn, "Earlier answer", "Earlier answer", "complete")
+        store.save_memory("Prefer examples first")
+        self.window._restore_conversation(old)
+        self.window._new_conversation()
+        self.assertNotEqual(self.window._conversation_id, old)
+        self.assertEqual(self.window._messages, [])
+        self.assertEqual(len(store.messages(old)), 2)
+        self.assertEqual(len(store.memories()), 1)
+
+    def test_memory_commands_work_without_a_key_and_are_not_model_context(self):
+        self.window.settings = replace(SETTINGS, api_key="")
+        self.send("/remember Prefer examples first")
+        memory_id = self.window.store.memories()[0]["id"]
+        self.assertIn(f"Saved memory #{memory_id}", self.window.transcript.toPlainText())
+        self.assertEqual(self.window._messages, [])
+        self.assertIsNone(self.window._worker)
+        self.send(f"/forget {memory_id}")
+        self.assertEqual(self.window.store.memories(), [])
+
+    def test_only_selected_memories_enter_prompt_and_key_is_not_saved(self):
+        self.window.store.save_memory("Prefer examples first")
+        self.window.store.save_memory("Orchids bloom in winter", False)
+        payloads = []
+        def handler(request):
+            payloads.append(json.loads(request.content))
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"An example"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler):
+            self.send("Explain recursion")
+            self.wait_until(lambda: self.window._worker is None)
+        prompt = payloads[0]["messages"][0]["content"]
+        self.assertIn("Prefer examples first", prompt)
+        self.assertNotIn("Orchids", prompt)
+        self.assertNotIn(SETTINGS.api_key, "\n".join(self.window.store.connection.iterdump()))
+
+    def test_partial_reply_can_be_restored_from_a_checkpoint(self):
+        store = self.use_shared_store()
+        conversation = self.window._conversation_id
+        turn = store.start_turn(conversation, "Question")
+        store.save_turn(turn, "Partial text", "Partial text", "pending")
+        self.window._restore_conversation(conversation)
+        self.assertIn("Interrupted during a previous session", self.window.transcript.toPlainText())
+        self.assertIn("app closed during", self.window._messages[-1]["content"])
+
+    def test_final_save_failure_keeps_reply_and_can_be_retried(self):
+        def handler(request):
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"Keep this reply"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler), patch.object(self.window.store, "save_turn", side_effect=sqlite3.OperationalError("disk full")):
+            self.send()
+            self.wait_until(lambda: self.window._worker is None)
+            self.assertIn("not fully saved", self.window.privacy.text())
+            self.assertIsNotNone(self.window._active_turn)
+            self.assertIn("Keep this reply", self.window.transcript.toPlainText())
+        self.assertTrue(self.window._save_active_turn())
+        self.assertIsNone(self.window._active_turn)
+        self.assertEqual(self.window.store.context(self.window._conversation_id)[-1]["content"], "Keep this reply")
+
+    def test_message_save_failure_does_not_send_request_or_clear_draft(self):
+        with patch.object(self.window.store, "start_turn", side_effect=sqlite3.OperationalError("locked")):
+            self.send("Unsent draft")
+        self.assertEqual(self.window.input.toPlainText(), "Unsent draft")
+        self.assertIsNone(self.window._worker)
+        self.assertIn("No request was sent", self.window.privacy.text())
+
+    def test_saved_memory_is_confirmed_even_if_archiving_its_command_fails(self):
+        with patch.object(self.window.store, "local_exchange", side_effect=sqlite3.OperationalError("locked")):
+            self.send("/remember Prefer short examples")
+        self.assertEqual(len(self.window.store.memories()), 1)
+        self.assertIn("Saved memory #", self.window.transcript.toPlainText())
+        self.assertIn("Memory changed", self.window.privacy.text())
 

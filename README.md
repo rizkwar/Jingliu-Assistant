@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 4: streamed spoken replies
+## Step 5: saved conversations and explicit memory
 
 Implemented:
 
@@ -26,9 +26,14 @@ Implemented:
 - A Windows global shortcut: **Ctrl+Alt+Space** starts or finishes recording.
 - Local English transcription with Faster-Whisper on CPU using INT8 computation.
 - Editable transcripts, optional automatic sending, and interruption of current replies.
+- Automatic SQLite conversation storage, restart recovery, and a History manager.
+- Explicit memories with add, edit, pin, and delete controls, plus local commands.
+- Bounded memory retrieval: up to 6 relevant or pinned records, totaling at most
+  3,000 characters, accompany each model request.
 
-Tray operation and saved memory are future steps. Conversations are held in RAM
-and disappear when you close the app or start a new conversation.
+The latest opened conversation resumes when you launch the app. **New** starts
+another conversation and keeps the previous one in **History**. Tray operation
+and automatic conversation summaries are future steps.
 
 ## Run on Windows
 
@@ -65,7 +70,8 @@ Then launch:
 
 Type a message and press **Enter**. Use **Shift+Enter** for a new line. You can
 edit `.env` or `character.md` while the app is open and click **Reload settings**.
-Use **New conversation** when testing a changed personality from a clean context.
+Use **New** when testing a changed personality from a clean conversation.
+Saved memories can still apply to new conversations; manage them in **Memories**.
 
 The API model ID includes the `nvidia/` prefix. `#providers` is part of the model
 webpage URL and must not be included in the API request.
@@ -160,11 +166,64 @@ file or uploaded. Only the resulting text is sent to the language model when
 you send a message. Cancelling transcription terminates its process; the next
 turn reloads the model from the disk cache. Normal turns keep it ready in RAM.
 
+## Saved conversations and memory
+
+Messages and memories are stored in `data/companion.sqlite3`. The database is
+local SQLite storage, is not encrypted, and is excluded from Git. The app does
+not put your API key or microphone recordings into this database.
+
+Use **History** to reopen or delete an earlier conversation. The full visible
+conversation is restored, but model requests still include only recent context
+(up to 12 answered exchanges within the existing 48,000-character budget).
+The assistant cannot independently search the archive; reopen a conversation
+to discuss its recent messages. Merely reopening it does not make an API call
+or play its audio again.
+
+Streaming replies are checkpointed about every half-second and finalized at the
+end of a turn. After an unexpected exit, the latest saved partial reply appears
+as interrupted; up to the most recent half-second may be missing. Failed turns
+remain visible in History, and unanswered failures are excluded from model
+context. A save failure is reported in the window; a failed final save can be
+retried before the next message or when closing.
+
+Use **Memories** to add, inspect, edit, pin, and delete individual facts or
+preferences. Save is explicit: Mira does not silently extract a profile from
+ordinary conversation. A memory is limited to 1,000 characters. Pinned memories
+are preferred across topics; unpinned memories are selected by word overlap with
+your current message and recent user messages. Retrieval is deliberately simple
+and does not use embeddings. If many memories are pinned, only a bounded subset
+fits in each request.
+
+These commands also work without an API key:
+
+```text
+/remember I prefer intuition and examples before formal explanations.
+/memories
+/forget 1
+```
+
+`/remember` saves a pinned memory and displays its number. `/memories` opens the
+manager. `/forget` deletes the memory with that number. Command confirmations
+are local and are not included in subsequent model context. Deleting a memory
+does not delete the original conversation or messages containing that fact;
+delete the conversation from History if you also want those removed. Neither
+deletion retracts data already sent to an online provider.
+
+**Check persistence:** save a preference with `/remember`, open **Memories** to
+confirm it, start a new conversation, and ask a question where that preference
+matters. Close and reopen the app: the conversation and memory should remain.
+Then edit or delete the memory and check that the next response uses the changed
+record. No new API request is made by the memory manager itself.
+
+For a backup, close the app and copy the `data` folder. Keep it separate from
+source-code commits. Closing first ensures pending writes and SQLite's temporary
+transaction files have settled.
+
 ## Data and provider behavior
 
 Typed or submitted transcribed messages, character instructions, and recent context are sent to
-OpenRouter and the selected model provider. Local conversation storage is not
-implemented yet. The free Nemotron endpoint's provider notice says requests
+OpenRouter and the selected model provider. Selected saved memories are included
+with those requests too. The free Nemotron endpoint's provider notice says requests
 are logged for security and product improvement, and asks users not to send
 confidential or personal data. See the
 [model page](https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free).
@@ -182,14 +241,15 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Persistent companion** — SQLite history, manageable memory, and tray support.
-2. **Natural interaction** — speech detection, echo handling, and optional avatar.
+1. **Background companion** — tray operation, compact settings, and memory-use controls.
+2. **Long conversation continuity** — inspectable summaries of older exchanges.
+3. **Natural interaction** — speech detection, echo handling, and optional avatar.
 
 ## Verification
 
 Tests use mocked HTTP streams, fake microphone capture, and small fake local
 processes. They do not require an API key, access your microphone, download
-models, or play audio:
+models, or play audio. Storage tests use isolated in-memory or temporary databases:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -205,5 +265,5 @@ Local recognition follows [Faster-Whisper](https://github.com/SYSTRAN/faster-whi
 Suggested commit for this step:
 
 ```text
-feat: stream spoken replies with queued phrase playback
+feat: persist conversations and add managed companion memory
 ```
