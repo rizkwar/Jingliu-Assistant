@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 5: saved conversations and explicit memory
+## Step 6: system tray and saved preferences
 
 Implemented:
 
@@ -30,10 +30,14 @@ Implemented:
 - Explicit memories with add, edit, pin, and delete controls, plus local commands.
 - Bounded memory retrieval: up to 6 relevant or pinned records, totaling at most
   3,000 characters, accompany each model request.
+- System tray controls to show, hide, suspend, resume, open settings, and quit.
+- A compact conversation window with a separate Settings window.
+- Saved audio, microphone, memory retrieval, and close-to-tray preferences.
+- Single-instance protection so launching again does not create another hidden companion.
 
 The latest opened conversation resumes when you launch the app. **New** starts
-another conversation and keeps the previous one in **History**. Tray operation
-and automatic conversation summaries are future steps.
+another conversation and keeps the previous one in **History**. Automatic
+conversation summaries are a future step.
 
 ## Run on Windows
 
@@ -69,7 +73,8 @@ Then launch:
 ```
 
 Type a message and press **Enter**. Use **Shift+Enter** for a new line. You can
-edit `.env` or `character.md` while the app is open and click **Reload settings**.
+edit `.env` or `character.md` while the app is open and choose **Settings →
+Reload .env + character**.
 Use **New** when testing a changed personality from a clean conversation.
 Saved memories can still apply to new conversations; manage them in **Memories**.
 
@@ -83,7 +88,7 @@ Failed turns with no answer stay visible but are excluded from later context.
 
 ## Try her voice
 
-1. Launch the app and click **Preview**. This works without an OpenRouter key.
+1. Launch the app, open **Settings**, and click **Preview**. This works without an OpenRouter key.
 2. The first preview downloads the English speech model and selected voice from
    Hugging Face into `.cache/huggingface/` in this project. It can take a few
    minutes. Subsequent previews reuse cached files.
@@ -92,10 +97,11 @@ Failed turns with no answer stay visible but are excluded from later context.
 4. Leave **Speak replies** checked to hear answers as phrases become available. Use **Stop** at
    any time, or **Read last reply** to hear an answer again.
 
-The selected voice, toggle, and volume controls apply during the current app
-session. To set startup defaults, edit the `TTS_*` values in `.env` and click
-**Reload settings**. Existing `.env` files do not need updating; defaults apply
-when these entries are absent. Volume changes stop current playback; the new
+The selected voice, toggle, and volume controls apply immediately. Click **Save
+defaults** in Settings to keep them after restarting. Saved preferences override
+audio defaults in `.env`; reloading keeps the saved preferences while refreshing
+your API key, model, name, and character. Existing `.env` files do not need
+updating; defaults apply when entries are absent. Volume changes stop current playback; the new
 volume applies to the next preview or reply. A volume of zero skips synthesis.
 Changing the voice, volume, or turning speech off stops the current reply's
 speech queue. Enabling speech again applies to the next response; use **Read
@@ -127,8 +133,8 @@ visible text remains available in the conversation.
 
 **Stop** terminates the speech process, so the next spoken request reloads the
 model into RAM from its disk cache. Normal completed requests keep the model
-and voice states loaded. Closing the window releases the speech process too.
-Voice playback failures are shown beside the voice controls; text chat remains
+and voice states loaded. **Suspend** or **Quit** releases the speech process too.
+Voice playback failures are shown above the talk button; text chat remains
 available. Check your Windows default output device if you hear nothing.
 
 ## Talk through your microphone
@@ -148,23 +154,55 @@ available. Check your Windows default output device if you hear nothing.
 5. **Stop** cancels recording or transcription and discards pending recognition.
    Silent or very short recordings do not send a message.
 
-Choose **Refresh** to list input devices, then select a microphone if the Windows
+In **Settings**, choose **Refresh** to list input devices, then select a microphone if the Windows
 default is not the one you want. The level meter should move while you speak.
 If the microphone cannot open, check **Settings > Privacy & security > Microphone**
 in Windows and allow desktop apps to use it. A conflicting global shortcut is
 reported in the window; the hold button remains available.
 
 The default `STT_MODEL=base.en` balances size and English recognition quality.
-Use `tiny.en` for a smaller model or `small.en` for a larger one. `STT_AUTO_SEND`
+Choose `tiny.en` in Settings for a smaller model or `small.en` for a larger one. `STT_AUTO_SEND`
 sets the startup checkbox. Leave `STT_MICROPHONE` blank for the Windows default,
 or set it to an input device index or a name accepted by sounddevice. Device
 indices can change after reconnecting hardware. Existing `.env` files continue
-working without these settings; reload settings to apply edited startup defaults.
+working without these settings. Use **Save defaults** to retain your current selections.
 
 Audio stays in memory, is limited to one minute, and is never written to a recording
 file or uploaded. Only the resulting text is sent to the language model when
 you send a message. Cancelling transcription terminates its process; the next
 turn reloads the model from the disk cache. Normal turns keep it ready in RAM.
+
+## Running in the background
+
+Closing the main window keeps Mira running in the Windows notification area by
+default. Look for the purple face icon, including under the hidden-icons arrow.
+Click the icon to reopen the conversation, or right-click for **Show companion**,
+**Hide to tray**, **Settings**, **Suspend/Resume**, and **Quit**.
+
+Hiding the window cancels recording or transcription and clears any pending
+automatic send. An existing text reply and its speech can continue in the
+background. The global recording shortcut brings the window forward again.
+
+**Suspend** stops generation, recording, transcription, and playback, and releases
+the local audio model processes. While suspended, sending, previews, and the
+recording shortcut do nothing. **Resume** re-enables them; interrupted work does
+not restart automatically. Suspension lasts for the current session.
+
+Choose **Quit** to save the latest reply and fully exit. Alternatively, uncheck
+**Keep running in the system tray when I close the window** in Settings. If Windows
+does not provide a tray, closing the window exits normally. Launching a second
+copy displays a reminder to use the existing tray icon.
+
+**Check it:** open Settings, change volume, and click **Save defaults**. Close
+the main window and reopen it through the tray. Try Suspend and Resume, then
+choose Quit and launch again: your saved volume and conversation should return.
+
+Settings changes apply immediately; **Done** closes the settings window. **Save
+defaults** writes only nonsecret preferences to `data/preferences.json`, which
+is excluded from Git. Your API key remains in `.env`. To return to `.env` audio
+defaults, quit the app, delete `data/preferences.json`, and relaunch. A damaged
+preferences file produces a warning and falls back to `.env`; Save defaults
+replaces it with valid settings.
 
 ## Saved conversations and memory
 
@@ -194,6 +232,13 @@ your current message and recent user messages. Retrieval is deliberately simple
 and does not use embeddings. If many memories are pinned, only a bounded subset
 fits in each request.
 
+Uncheck **Include relevant saved memories in online replies** in Settings to
+skip memory retrieval for future requests. This keeps the saved records available
+in Memories; click **Save defaults** to retain the choice. Facts already present
+in recent conversation context still accompany that conversation. Start **New**
+for a conversation without that previous context. The toggle does not retract
+an active request or remove anything already sent to a provider.
+
 These commands also work without an API key:
 
 ```text
@@ -211,12 +256,12 @@ deletion retracts data already sent to an online provider.
 
 **Check persistence:** save a preference with `/remember`, open **Memories** to
 confirm it, start a new conversation, and ask a question where that preference
-matters. Close and reopen the app: the conversation and memory should remain.
+matters. Quit through the tray and relaunch: the conversation and memory should remain.
 Then edit or delete the memory and check that the next response uses the changed
 record. No new API request is made by the memory manager itself.
 
-For a backup, close the app and copy the `data` folder. Keep it separate from
-source-code commits. Closing first ensures pending writes and SQLite's temporary
+For a backup, **Quit** through the tray and copy the `data` folder. Keep it separate from
+source-code commits. Quitting first ensures pending writes and SQLite's temporary
 transaction files have settled.
 
 ## Data and provider behavior
@@ -241,9 +286,8 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Background companion** — tray operation, compact settings, and memory-use controls.
-2. **Long conversation continuity** — inspectable summaries of older exchanges.
-3. **Natural interaction** — speech detection, echo handling, and optional avatar.
+1. **Long conversation continuity** — inspectable summaries of older exchanges.
+2. **Natural interaction** — speech detection, echo handling, and optional avatar.
 
 ## Verification
 
@@ -265,5 +309,5 @@ Local recognition follows [Faster-Whisper](https://github.com/SYSTRAN/faster-whi
 Suggested commit for this step:
 
 ```text
-feat: persist conversations and add managed companion memory
+feat: add system tray controls and saved companion preferences
 ```

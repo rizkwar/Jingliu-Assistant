@@ -5,7 +5,7 @@ import sqlite3
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
+    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QSlider, QTextBrowser, QVBoxLayout, QWidget,
 )
 
@@ -15,6 +15,7 @@ from .microphone import MicrophoneController
 from .worker import ReplyWorker
 from .storage import Store
 from .library_ui import HistoryDialog, MemoryDialog
+from .preferences import Preferences
 
 
 STYLE = """
@@ -55,13 +56,20 @@ class MessageInput(QPlainTextEdit):
 
 
 class CompanionWindow(QMainWindow):
-    def __init__(self, settings: Settings, speech=None, microphone=None, store=None):
+    closed = Signal()
+    suspended_changed = Signal(bool)
+
+    def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None):
         super().__init__()
         self.settings = settings
         self._worker: ReplyWorker | None = None
         self._messages: list[dict[str, str]] = []
         self._reply = ""
         self._closing = False
+        self._quitting = False
+        self.tray_enabled = False
+        self.suspended = False
+        self.preferences = preferences if preferences is not None else Preferences()
         self._last_reply = ""
         self.speech = speech if speech is not None else SpeechController(self)
         self.microphone = microphone if microphone is not None else MicrophoneController(self)
@@ -90,8 +98,8 @@ class CompanionWindow(QMainWindow):
         self._scroll_timer.setSingleShot(True)
         self._scroll_timer.timeout.connect(self._scroll_to_latest)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
-        self.resize(740, 960)
-        self.setMinimumSize(560, 740)
+        self.resize(740, 800)
+        self.setMinimumSize(600, 660)
         self.setStyleSheet(STYLE)
 
         root = QWidget()
@@ -118,8 +126,10 @@ class CompanionWindow(QMainWindow):
         toolbar = QHBoxLayout()
         self.new_chat = QPushButton("New")
         self.new_chat.setToolTip("Start a new conversation; keep the current one in History")
-        self.reload = QPushButton("Reload")
-        self.reload.setToolTip("Reload settings from .env and character.md")
+        self.reload = QPushButton("Reload .env + character")
+        self.reload.setToolTip("Reload connection and character; keep saved app preferences")
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.clicked.connect(self.open_settings)
         self.history_button = QPushButton("History")
         self.memory_button = QPushButton("Memories")
         self.history_button.clicked.connect(self._open_history)
@@ -130,9 +140,19 @@ class CompanionWindow(QMainWindow):
         toolbar.addWidget(self.history_button)
         toolbar.addWidget(self.memory_button)
         toolbar.addStretch()
-        toolbar.addWidget(self.reload)
+        toolbar.addWidget(self.settings_button)
         layout.addLayout(toolbar)
 
+        self.settings_dialog = QDialog(self)
+        self.settings_dialog.setWindowTitle("Companion settings")
+        self.settings_dialog.setMinimumWidth(540)
+        settings_layout = QVBoxLayout(self.settings_dialog)
+        settings_layout.setContentsMargins(22, 22, 22, 22)
+        settings_layout.setSpacing(14)
+        settings_hint = QLabel("Changes apply now. Save defaults to keep them after restarting.")
+        settings_hint.setObjectName("hint")
+        settings_hint.setWordWrap(True)
+        settings_layout.addWidget(settings_hint)
         voice_row = QHBoxLayout()
         self.auto_speak = QCheckBox("Speak replies")
         self.auto_speak.setChecked(settings.tts_enabled)
@@ -146,7 +166,7 @@ class CompanionWindow(QMainWindow):
         self.preview = QPushButton("Preview")
         self.preview.clicked.connect(self._preview_voice)
         voice_row.addWidget(self.preview)
-        layout.addLayout(voice_row)
+        settings_layout.addLayout(voice_row)
         audio_row = QHBoxLayout()
         audio_row.addWidget(QLabel("Volume"))
         self.volume = QSlider(Qt.Orientation.Horizontal)
@@ -162,7 +182,7 @@ class CompanionWindow(QMainWindow):
         self.replay.setEnabled(False)
         self.replay.clicked.connect(self._read_last_reply)
         audio_row.addWidget(self.replay)
-        layout.addLayout(audio_row)
+        settings_layout.addLayout(audio_row)
         self.voice_status = QLabel("Voice loads on first use")
         self.voice_status.setObjectName("hint")
         self.voice_status.setWordWrap(True)
@@ -187,23 +207,61 @@ class CompanionWindow(QMainWindow):
         self.refresh_mics.setToolTip("Find available microphones")
         self.refresh_mics.clicked.connect(self.microphone.refresh_devices)
         mic_row.addWidget(self.refresh_mics)
+        settings_layout.addLayout(mic_row)
+        self.stt_model = QComboBox()
+        self.stt_model.addItems(("tiny.en", "base.en", "small.en"))
+        self.stt_model.setCurrentText(settings.stt_model)
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel("English transcription model"))
+        model_row.addStretch()
+        model_row.addWidget(self.stt_model)
+        settings_layout.addLayout(model_row)
+        self.auto_send = QCheckBox("Send transcription automatically")
+        self.auto_send.setChecked(settings.stt_auto_send)
+        settings_layout.addWidget(self.auto_send)
+        self.use_memories = QCheckBox("Include relevant saved memories in online replies")
+        self.use_memories.setChecked(settings.memory_enabled)
+        self.use_memories.toggled.connect(self._memory_toggled)
+        settings_layout.addWidget(self.use_memories)
+        memory_hint = QLabel("Turning this off affects future requests. Existing conversation context still applies.")
+        memory_hint.setObjectName("hint")
+        memory_hint.setWordWrap(True)
+        settings_layout.addWidget(memory_hint)
+        self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
+        self.close_to_tray.setChecked(settings.close_to_tray)
+        settings_layout.addWidget(self.close_to_tray)
+        self.preference_status = QLabel("API key and character stay in .env and character.md.")
+        self.preference_status.setObjectName("hint")
+        self.preference_status.setWordWrap(True)
+        settings_layout.addWidget(self.preference_status)
+        settings_actions = QHBoxLayout()
+        settings_actions.addWidget(self.reload)
+        settings_actions.addStretch()
+        self.save_defaults = QPushButton("Save defaults")
+        self.save_defaults.clicked.connect(self._save_preferences)
+        settings_actions.addWidget(self.save_defaults)
+        done = QPushButton("Done")
+        done.clicked.connect(self.settings_dialog.hide)
+        settings_actions.addWidget(done)
+        settings_layout.addLayout(settings_actions)
+
+        talk_row = QHBoxLayout()
         self.record_button = QPushButton("Hold to talk")
         self.record_button.setToolTip("Hold to record, release to transcribe. Maximum 60 seconds.")
         self.record_button.pressed.connect(self._begin_recording)
         self.record_button.released.connect(self._finish_recording)
-        mic_row.addWidget(self.record_button)
-        layout.addLayout(mic_row)
-        mic_options = QHBoxLayout()
-        self.auto_send = QCheckBox("Send transcription automatically")
-        self.auto_send.setChecked(settings.stt_auto_send)
-        mic_options.addWidget(self.auto_send)
+        talk_row.addWidget(self.record_button)
         self.mic_level = QProgressBar()
         self.mic_level.setRange(0, 100)
         self.mic_level.setValue(0)
         self.mic_level.setTextVisible(False)
         self.mic_level.setMaximumWidth(100)
-        mic_options.addWidget(self.mic_level, 1)
-        layout.addLayout(mic_options)
+        talk_row.addWidget(self.mic_level)
+        talk_row.addStretch()
+        self.suspend_button = QPushButton("Suspend")
+        self.suspend_button.clicked.connect(self.toggle_suspended)
+        talk_row.addWidget(self.suspend_button)
+        layout.addLayout(talk_row)
         self.mic_hint = QLabel("Hold to talk · Ctrl+Alt+Space toggles recording · 60-second limit")
         self.mic_hint.setObjectName("hint")
         self.mic_hint.setWordWrap(True)
@@ -240,7 +298,7 @@ class CompanionWindow(QMainWindow):
         self.send_button.clicked.connect(self._send)
         controls.addWidget(self.send_button)
         layout.addLayout(controls)
-        self.privacy = QLabel("Saved locally · Relevant memories accompany online replies")
+        self.privacy = QLabel(self._privacy_text())
         self.privacy.setObjectName("hint")
         self.privacy.setWordWrap(True)
         layout.addWidget(self.privacy)
@@ -266,14 +324,14 @@ class CompanionWindow(QMainWindow):
         )
         if not self.settings.api_key:
             self.status.setText("Add API key")
-            self._write("Setup: add your OpenRouter key to .env, then click Reload settings.\n", "#d6be8c")
+            self._write("Setup: add your OpenRouter key to .env, then open Settings and reload .env.\n", "#d6be8c")
         else:
             self.status.setText("Ready")
 
     @Slot()
     def _send(self) -> None:
         text = self.input.toPlainText().strip()
-        if self._closing or self._worker or self.microphone.busy or not text:
+        if self._closing or self.suspended or self._worker or self.microphone.busy or not text:
             return
         if self._local_command(text):
             return
@@ -290,7 +348,7 @@ class CompanionWindow(QMainWindow):
             return
         try:
             recent_topics = "\n".join(message["content"] for message in self._messages[-4:] if message["role"] == "user")
-            memories = self.store.relevant_memories(recent_topics[-4000:] + "\n" + text)
+            memories = self.store.relevant_memories(recent_topics[-4000:] + "\n" + text) if self.use_memories.isChecked() else []
             turn = self.store.start_turn(self._conversation_id, text)
         except sqlite3.Error:
             self.privacy.setText("Could not save this message. No request was sent. Please try again.")
@@ -337,12 +395,14 @@ class CompanionWindow(QMainWindow):
         self.status.setText("Thinking…" if busy else "Ready")
         if self.microphone.busy:
             self.status.setText("Listening…" if self.microphone.state in {"opening", "recording"} else "Transcribing…")
+        if self.suspended:
+            self.status.setText("Suspended")
 
     def _refresh_controls(self) -> None:
-        busy = self._worker is not None or self.microphone.busy
+        busy = self._worker is not None or self.microphone.busy or self.suspended
         self.send_button.setEnabled(not busy)
         self.input.setEnabled(not self.microphone.busy)
-        self.stop_button.setEnabled(busy or self.speech.busy)
+        self.stop_button.setEnabled(self._worker is not None or self.microphone.busy or self.speech.busy)
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
         self.history_button.setEnabled(not busy)
@@ -351,7 +411,8 @@ class CompanionWindow(QMainWindow):
         self.replay.setEnabled(not busy and bool(self._last_reply) and not self.speech.busy)
         self.mic_device.setEnabled(not busy)
         self.refresh_mics.setEnabled(not busy)
-        self.record_button.setEnabled(self.microphone.state not in {"loading", "transcribing"})
+        self.stt_model.setEnabled(not busy)
+        self.record_button.setEnabled(not self.suspended and self.microphone.state not in {"loading", "transcribing"})
 
     @Slot(str, str)
     def _on_chunk(self, turn_id: str, text: str) -> None:
@@ -460,7 +521,7 @@ class CompanionWindow(QMainWindow):
         if self._worker or self.microphone.busy:
             return
         try:
-            settings = load_settings()
+            settings = self.preferences.load(load_settings())
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Could not reload settings", str(exc))
             return
@@ -470,6 +531,9 @@ class CompanionWindow(QMainWindow):
         self.voice.setCurrentText(settings.tts_voice)
         self.volume.setValue(settings.tts_volume)
         self.auto_send.setChecked(settings.stt_auto_send)
+        self.stt_model.setCurrentText(settings.stt_model)
+        self.use_memories.setChecked(settings.memory_enabled)
+        self.close_to_tray.setChecked(settings.close_to_tray)
         self.mic_device.clear()
         self.mic_device.addItem("Windows default microphone", None)
         if settings.stt_microphone:
@@ -479,14 +543,101 @@ class CompanionWindow(QMainWindow):
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
         self.status.setText("Ready" if settings.api_key else "Add API key")
         self._write("\nSettings reloaded.\n", "#a4adbf")
+        self.preference_status.setText("Reloaded .env and character.md, with saved app preferences.")
+
+    @Slot()
+    def open_settings(self) -> None:
+        if self._closing:
+            return
+        self.show_companion()
+        self.settings_dialog.show()
+        self.settings_dialog.raise_()
+        self.settings_dialog.activateWindow()
+
+    @Slot()
+    def _save_preferences(self) -> None:
+        settings = replace(
+            self.settings, tts_enabled=self.auto_speak.isChecked(), tts_voice=self.voice.currentText(),
+            tts_volume=self.volume.value(), stt_auto_send=self.auto_send.isChecked(),
+            stt_model=self.stt_model.currentText(),
+            stt_microphone="" if self.mic_device.currentData() is None else str(self.mic_device.currentData()),
+            memory_enabled=self.use_memories.isChecked(), close_to_tray=self.close_to_tray.isChecked(),
+        )
+        try:
+            self.preferences.save(settings)
+        except (OSError, ValueError) as exc:
+            self.preference_status.setText(f"Could not save defaults: {exc}")
+            return
+        self.settings = settings
+        self.preference_status.setText("Defaults saved. These preferences override the audio defaults in .env.")
+
+    def _privacy_text(self) -> str:
+        return "Saved locally · " + (
+            "Relevant memories accompany online replies" if self.use_memories.isChecked()
+            else "Saved memory retrieval is off"
+        )
+
+    @Slot(bool)
+    def _memory_toggled(self, enabled: bool) -> None:
+        self.privacy.setText(self._privacy_text())
+
+    @Slot()
+    def show_companion(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    @Slot()
+    def hide_to_tray(self) -> None:
+        if not self.tray_enabled or self._closing:
+            return
+        # Never leave an invisible recording or pending automatic send behind.
+        self._pending_transcription = ""
+        if self.microphone.busy:
+            self.microphone.cancel()
+            self.mic_status.setText("Recording or transcription cancelled when the window was hidden")
+        self._dismiss_dialogs()
+        self.hide()
+
+    def _dismiss_dialogs(self) -> None:
+        self.settings_dialog.hide()
+        for dialog in self.findChildren(QDialog):
+            if dialog is not self.settings_dialog and dialog.isVisible():
+                dialog.reject()
+
+    @Slot()
+    def toggle_suspended(self) -> None:
+        if self._closing:
+            return
+        self.suspended = not self.suspended
+        if self.suspended:
+            self._stop()
+            self.microphone.shutdown()
+            self.speech.shutdown()
+        self.suspend_button.setText("Resume" if self.suspended else "Suspend")
+        self._set_busy(self._worker is not None)
+        self.suspended_changed.emit(self.suspended)
+
+    @Slot()
+    def request_quit(self) -> None:
+        self._quitting = True
+        self.close()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self.tray_enabled and self.close_to_tray.isChecked() and not self._quitting:
+            self.hide_to_tray()
+            event.ignore()
+            return
         if self._worker is None and self._active_turn and not self._save_active_turn():
             if QMessageBox.question(self, "Reply not saved", "The latest reply could not be saved. Close anyway? The last successful checkpoint will remain in History.") != QMessageBox.StandardButton.Yes:
                 self._closing = False
+                self._quitting = False
+                self.centralWidget().setEnabled(True)
+                self.show_companion()
                 event.ignore()
                 return
         self._closing = True
+        self._dismiss_dialogs()
         self._pending_transcription = ""
         self.microphone.shutdown()
         self._interrupt_speech()
@@ -503,9 +654,12 @@ class CompanionWindow(QMainWindow):
             if self._owns_store:
                 self.store.close()
             event.accept()
+            self.closed.emit()
 
     @Slot()
     def _preview_voice(self) -> None:
+        if self.suspended or self._closing:
+            return
         self._interrupt_speech()
         self.speech.speak(
             f"Hi, I'm {self.settings.name}. Let's think it through, one step at a time.",
@@ -514,7 +668,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _read_last_reply(self) -> None:
-        if self._last_reply:
+        if self._last_reply and not self.suspended and not self._closing:
             self._interrupt_speech()
             if self._voice_message is not None and self._voice_note:
                 self._voice_message["content"] = self._voice_message["content"].removesuffix("\n" + self._voice_note)
@@ -582,14 +736,17 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _begin_recording(self) -> None:
-        if self.microphone.busy or self._closing:
+        if self.microphone.busy or self._closing or self.suspended:
             return
         self._mic_draft = self.input.toPlainText()
         self._pending_transcription = ""
         self._interrupt_speech()
         if self._worker:
             self._worker.stop()
-        self.microphone.start(self.mic_device.currentData(), self.settings.stt_model)
+        device = self.mic_device.currentData()
+        if isinstance(device, str) and device.isdecimal():
+            device = int(device)
+        self.microphone.start(device, self.stt_model.currentText())
 
     @Slot()
     def _finish_recording(self) -> None:
@@ -597,7 +754,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _toggle_recording(self) -> None:
-        if self._closing:
+        if self._closing or self.suspended:
             return
         if self.microphone.state in {"opening", "recording"}:
             self._finish_recording()
@@ -622,10 +779,12 @@ class CompanionWindow(QMainWindow):
             self.status.setText("Listening…" if state in {"opening", "recording"} else "Transcribing…")
         elif not self._worker:
             self.status.setText("Ready")
+        if self.suspended:
+            self.status.setText("Suspended")
 
     @Slot(str)
     def _on_transcribed(self, text: str) -> None:
-        if self._closing:
+        if self._closing or self.suspended:
             return
         text = text.strip()
         if not text:
@@ -667,6 +826,12 @@ class CompanionWindow(QMainWindow):
         for device in devices:
             self.mic_device.addItem(device["name"], device["id"])
         index = self.mic_device.findData(selected)
+        if index < 0:
+            index = next((i for i in range(self.mic_device.count())
+                          if str(self.mic_device.itemData(i)) == str(selected)), -1)
+        if index < 0 and selected is not None:
+            self.mic_device.addItem(str(selected) + " (saved device)", selected)
+            index = self.mic_device.count() - 1
         self.mic_device.setCurrentIndex(max(0, index))
         self.mic_status.setText(f"Found {len(devices)} microphone inputs" if devices else "No microphone inputs found")
 
@@ -699,7 +864,7 @@ class CompanionWindow(QMainWindow):
                 self._last_reply_id = row["id"]
         self.replay.setEnabled(bool(self._last_reply))
         self._update_conversation_title()
-        self.privacy.setText("Saved locally · Relevant memories accompany online replies")
+        self.privacy.setText(self._privacy_text())
         self._scroll_timer.start(0)
 
     @Slot()
@@ -722,7 +887,7 @@ class CompanionWindow(QMainWindow):
             return False
         if self._reply_status != "pending":
             self._active_turn = None
-        self.privacy.setText("Saved locally · Relevant memories accompany online replies")
+        self.privacy.setText(self._privacy_text())
         return True
 
     def _save_voice_context(self) -> None:
@@ -742,6 +907,9 @@ class CompanionWindow(QMainWindow):
         try:
             dialog = HistoryDialog(self.store, self)
             accepted = dialog.exec()
+            if self._closing:
+                dialog.deleteLater()
+                return
             selected = dialog.selected_id if accepted else self._conversation_id
             if not self.store.conversation(selected):
                 conversations = self.store.conversations()

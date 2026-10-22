@@ -22,12 +22,14 @@ class Settings:
     stt_model: str = "base.en"
     stt_auto_send: bool = True
     stt_microphone: str = ""
+    memory_enabled: bool = True
+    close_to_tray: bool = True
 
     def validate_connection(self) -> None:
         if not self.api_key or self.api_key == "your_key_here":
             raise ValueError(
                 "Add your OpenRouter key to OPENROUTER_API_KEY in .env, "
-                "then click Reload settings."
+                "then open Settings and click Reload .env + character."
             )
         if not self.model or "#" in self.model or "/" not in self.model:
             raise ValueError(

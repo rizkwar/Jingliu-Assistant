@@ -469,3 +469,93 @@ class WindowTests(unittest.TestCase):
         self.assertIn("Saved memory #", self.window.transcript.toPlainText())
         self.assertIn("Memory changed", self.window.privacy.text())
 
+    def test_close_to_tray_cancels_recording_and_preserves_draft(self):
+        _, mic = self.use_fake_microphone()
+        self.window.tray_enabled = True
+        self.window.show()
+        self.window.input.setPlainText("Unsent draft")
+        self.window._begin_recording()
+        self.window._pending_transcription = "Pending words"
+        self.window.close()
+        self.assertFalse(self.window.isVisible())
+        self.assertFalse(self.window._closing)
+        self.assertFalse(mic.busy)
+        self.assertEqual(self.window._pending_transcription, "")
+        self.assertEqual(self.window.input.toPlainText(), "Unsent draft")
+        self.window.show_companion()
+        self.assertTrue(self.window.isVisible())
+        self.window.tray_enabled = False
+
+    def test_quit_from_hidden_tray_waits_for_stream_and_saves_partial_reply(self):
+        speech, _, gate, client = self.start_streaming_reply()
+        self.window.tray_enabled = True
+        closed = []
+        self.window.closed.connect(lambda: closed.append(True))
+        with client:
+            self.send()
+            self.wait_until(lambda: len(speech.calls) == 1)
+            self.window.hide_to_tray()
+            self.window.request_quit()
+            self.wait_until(lambda: self.window._worker is None and bool(closed))
+        self.assertTrue(self.window._closing)
+        self.assertFalse(speech.busy)
+        self.assertFalse(self.window.isVisible())
+        self.window.tray_enabled = False
+
+    def test_suspend_cancels_stream_and_ignores_shortcut_and_late_transcript(self):
+        speech, mic, gate, client = self.start_streaming_reply()
+        with client:
+            self.send()
+            self.wait_until(lambda: len(speech.calls) == 1)
+            self.window.toggle_suspended()
+            self.wait_until(lambda: self.window._worker is None)
+        self.window._toggle_recording()
+        mic.deliver("Late transcript")
+        self.window._preview_voice()
+        self.send("Blocked while suspended")
+        self.assertFalse(mic.busy)
+        self.assertFalse(speech.busy)
+        self.assertIsNone(self.window._worker)
+        self.assertEqual(self.window.status.text(), "Suspended")
+        self.assertFalse(self.window.send_button.isEnabled())
+        self.window.toggle_suspended()
+        self.assertTrue(self.window.send_button.isEnabled())
+        self.assertEqual(self.window.input.toPlainText(), "Blocked while suspended")
+        self.assertEqual(self.window.status.text(), "Ready")
+
+    def test_disabling_saved_memory_retrieval_keeps_local_memories(self):
+        self.window.store.save_memory("A private preference")
+        self.window.use_memories.setChecked(False)
+        payloads = []
+        def handler(request):
+            payloads.append(json.loads(request.content))
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler):
+            self.send()
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertNotIn("A private preference", json.dumps(payloads))
+        self.assertEqual(len(self.window.store.memories()), 1)
+        self.assertIn("retrieval is off", self.window.privacy.text())
+
+    def test_settings_save_preserves_device_zero_and_reload_keeps_saved_preferences(self):
+        self.window.volume.setValue(15)
+        self.window.mic_device.addItem("Microphone zero", 0)
+        self.window.mic_device.setCurrentIndex(1)
+        self.window.use_memories.setChecked(False)
+        self.window._save_preferences()
+        self.assertEqual(self.window.settings.stt_microphone, "0")
+        with patch("companion.ui.load_settings", return_value=replace(SETTINGS, name="Luna")):
+            self.window._reload_settings()
+        self.assertEqual(self.window.volume.value(), 15)
+        self.assertFalse(self.window.use_memories.isChecked())
+        self.assertEqual(self.window.title.text(), "Luna")
+        self.window._mic_devices([{"id": 0, "name": "Microphone zero"}])
+        self.assertEqual(self.window.mic_device.currentData(), 0)
+
+    def test_failed_preference_save_is_reported_without_changing_saved_settings(self):
+        self.window.volume.setValue(12)
+        with patch.object(self.window.preferences, "save", side_effect=OSError("disk full")):
+            self.window._save_preferences()
+        self.assertIn("Could not save defaults", self.window.preference_status.text())
+        self.assertEqual(self.window.settings.tts_volume, SETTINGS.tts_volume)
+
