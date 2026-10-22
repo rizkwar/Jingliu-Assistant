@@ -59,6 +59,49 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(context[0]["content"], "Question 8")
         self.assertEqual(len(self.store.messages(self.conversation)), 40)
 
+    def test_many_local_commands_do_not_hide_older_answered_turns(self):
+        self.exchange("Actual question", "Actual answer")
+        for _ in range(60):
+            self.store.local_exchange(self.conversation, "/remember Fact", "Saved")
+        self.assertEqual(self.store.context(self.conversation)[0]["content"], "Actual question")
+        self.assertEqual(len(self.store.context_turns(self.conversation)), 1)
+
+    def test_summary_is_bounded_scoped_and_deleted_with_its_conversation(self):
+        turn = self.exchange()
+        self.store.save_summary(self.conversation, " Useful notes ", turn[1])
+        other = self.store.create_conversation()
+        self.assertIsNone(self.store.summary(other))
+        self.assertEqual(self.store.summary(self.conversation)["content"], "Useful notes")
+        for content, cursor in [("", 0), ("x" * 6001, 0), ("Notes", turn[0]), ("Notes", -1)]:
+            with self.subTest(content=content[:12], cursor=cursor), self.assertRaises(ValueError):
+                self.store.save_summary(self.conversation, content, cursor)
+        with self.assertRaises(ValueError):
+            self.store.save_summary(other, "Wrong conversation", turn[1])
+        self.store.clear_summary(self.conversation)
+        self.assertIsNone(self.store.summary(self.conversation))
+        self.assertEqual(len(self.store.messages(self.conversation)), 2)
+        self.store.save_summary(self.conversation, "Notes")
+        self.store.delete_conversation(self.conversation)
+        self.assertEqual(self.store.connection.execute("SELECT COUNT(*) FROM conversation_summaries").fetchone()[0], 0)
+
+    def test_version_one_database_migrates_without_losing_history_or_memories(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "companion.sqlite3"
+            old = Store(path)
+            conversation = old.create_conversation()
+            turn = old.start_turn(conversation, "Keep the original question")
+            old.save_turn(turn, "Keep the answer", "Keep the answer", "complete")
+            old.save_memory("Keep this memory")
+            old.connection.executescript("DROP TABLE conversation_summaries; PRAGMA user_version=1;")
+            old.close()
+            with closing(Store(path)) as migrated:
+                self.assertEqual(migrated.context(conversation)[0]["content"], "Keep the original question")
+                self.assertEqual(migrated.memories()[0]["content"], "Keep this memory")
+                self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 2)
+                migrated.save_summary(conversation, "Reviewed notes", turn[1])
+            with closing(Store(path)) as reopened:
+                self.assertEqual(reopened.summary(conversation)["through_id"], turn[1])
+
     def test_deleting_one_conversation_cascades_only_its_messages(self):
         self.exchange()
         other = self.store.create_conversation()

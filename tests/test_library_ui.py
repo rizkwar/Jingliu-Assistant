@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from companion.library_ui import HistoryDialog, MemoryDialog
 from companion.storage import Store
+from companion.summary_ui import SummaryDialog
 
 
 class LibraryTests(unittest.TestCase):
@@ -55,3 +57,46 @@ class LibraryTests(unittest.TestCase):
         self.assertIsNone(self.store.conversation(second))
         self.assertIsNotNone(self.store.conversation(first))
         self.assertEqual(len(self.store.memories()), 1)
+
+    def test_summary_can_be_written_edited_and_cleared_without_network(self):
+        conversation = self.store.create_conversation()
+        self.dialog = SummaryDialog(self.store, conversation)
+        self.assertFalse(self.dialog.generate.isEnabled())
+        self.dialog.editor.setPlainText("We are building a desktop companion.")
+        self.dialog._save()
+        self.assertEqual(self.store.summary(conversation)["content"], "We are building a desktop companion.")
+        self.dialog.editor.setPlainText("Use Python and local voice.")
+        self.dialog._save()
+        self.assertEqual(self.store.summary(conversation)["content"], "Use Python and local voice.")
+        self.dialog._clear()
+        self.assertIsNone(self.store.summary(conversation))
+        self.assertEqual(self.dialog.through_id, 0)
+
+    def test_invalid_summary_disables_save_and_generation_until_shortened(self):
+        conversation = self.store.create_conversation()
+        for _ in range(13):
+            turn = self.store.start_turn(conversation, "Question")
+            self.store.save_turn(turn, "Answer", "Answer", "complete")
+        self.dialog = SummaryDialog(self.store, conversation)
+        self.assertTrue(self.dialog.generate.isEnabled())
+        self.dialog.editor.setPlainText("x" * 6001)
+        self.assertFalse(self.dialog.save.isEnabled())
+        self.assertFalse(self.dialog.generate.isEnabled())
+        self.dialog.editor.setPlainText("Shorter notes")
+        self.assertTrue(self.dialog.save.isEnabled())
+        self.assertTrue(self.dialog.generate.isEnabled())
+
+    def test_failed_summary_save_or_clear_keeps_previously_saved_notes(self):
+        conversation = self.store.create_conversation()
+        self.store.save_summary(conversation, "Original notes")
+        self.dialog = SummaryDialog(self.store, conversation)
+        self.dialog.editor.setPlainText("New draft")
+        with patch.object(self.store, "save_summary", side_effect=sqlite3.OperationalError("disk full")):
+            self.dialog._save()
+        self.assertIn("Could not save", self.dialog.status.text())
+        self.assertEqual(self.store.summary(conversation)["content"], "Original notes")
+        self.assertEqual(self.dialog.editor.toPlainText(), "New draft")
+        with patch.object(self.store, "clear_summary", side_effect=sqlite3.OperationalError("database locked")):
+            self.dialog._clear()
+        self.assertEqual(self.store.summary(conversation)["content"], "Original notes")
+        self.assertEqual(self.dialog.editor.toPlainText(), "New draft")

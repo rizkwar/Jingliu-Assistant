@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 6: system tray and saved preferences
+## Step 7: inspectable conversation summaries
 
 Implemented:
 
@@ -34,10 +34,13 @@ Implemented:
 - A compact conversation window with a separate Settings window.
 - Saved audio, microphone, memory retrieval, and close-to-tray preferences.
 - Single-instance protection so launching again does not create another hidden companion.
+- Conversation-specific continuity notes: write, generate, inspect, edit, save, or clear.
+- Incremental summary drafts from older exchanges using the configured OpenRouter model.
+- Saved summaries accompany future replies while recent exchanges remain full messages.
 
 The latest opened conversation resumes when you launch the app. **New** starts
-another conversation and keeps the previous one in **History**. Automatic
-conversation summaries are a future step.
+another conversation and keeps the previous one in **History**. Summaries are
+generated on request and saved explicitly after review.
 
 ## Run on Windows
 
@@ -206,15 +209,18 @@ replaces it with valid settings.
 
 ## Saved conversations and memory
 
-Messages and memories are stored in `data/companion.sqlite3`. The database is
+Messages, memories, and conversation summaries are stored in `data/companion.sqlite3`. The database is
 local SQLite storage, is not encrypted, and is excluded from Git. The app does
 not put your API key or microphone recordings into this database.
 
 Use **History** to reopen or delete an earlier conversation. The full visible
-conversation is restored, but model requests still include only recent context
-(up to 12 answered exchanges within the existing 48,000-character budget).
+conversation is restored. Model requests include up to 12 recent answered exchanges
+and any summary you have saved for that conversation. Recent exchanges occupy at
+most 32,000 characters, reserving 16,000 for your next message within the existing
+48,000-character budget. Character instructions, memories, and the summary are
+additional system context. Large exchanges can reduce the number of recent pairs.
 The assistant cannot independently search the archive; reopen a conversation
-to discuss its recent messages. Merely reopening it does not make an API call
+to discuss its context. Merely reopening it does not make an API call
 or play its audio again.
 
 Streaming replies are checkpointed about every half-second and finalized at the
@@ -264,11 +270,55 @@ For a backup, **Quit** through the tray and copy the `data` folder. Keep it sepa
 source-code commits. Quitting first ensures pending writes and SQLite's temporary
 transaction files have settled.
 
+## Keep older conversation context
+
+Open **Context** to inspect or write continuity notes for the selected conversation.
+Notes can hold earlier decisions, constraints, or unfinished tasks after their
+original messages fall outside recent context. They apply only to this conversation;
+**Memories** remains the separate place for preferences shared across conversations.
+
+1. For a quick check in a short chat, open **Context**, write “We chose Python and
+   local voice for this project,” and click **Save**. Ask what you chose earlier.
+   Writing, editing, and clearing notes work without an API key.
+2. In a longer chat, watch the context hint above the toolbar. When older exchanges
+   fall outside recent context, **Generate draft** becomes available. It makes one
+   online request using your configured model and key. It sends the current notes
+   plus a batch of older answered exchanges; it does not send independent saved
+   memories, local memory commands, or unanswered failed turns.
+3. Review and edit the generated notes, then click **Save**. Generation alone does
+   not change the saved summary. Drafts are not spoken or inserted into the chat
+   transcript. Closing Context discards unsaved draft changes.
+4. If older exchanges remain, generate another draft. Each batch merges the current
+   notes with the next unsummarized exchanges. You can review several batches before
+   saving; the saved summary remains unchanged until you click Save.
+5. Use **Clear saved** to remove the summary. Original messages and explicit memories
+   remain. Start **New** to confirm the summary does not follow you into another chat.
+
+Summaries are limited to 6,000 characters. Each source batch contains at most 24,000
+characters of serialized older exchanges, plus the previous notes. An oversized
+exchange uses marked beginning/end excerpts, reported in the Context window; some
+details will be omitted. Generated notes can also contain mistakes, so keep exact
+details that matter by editing the draft. Later corrections and recent messages take
+precedence in the model instructions.
+
+**Cancel**, **Stop**, **Suspend**, starting a recording, or closing a generating
+Context window cancels the summary request. API failures and oversized output keep
+your saved notes, draft edits, and coverage unchanged. Quitting waits for cancellation.
+There are no automatic summary requests during normal chat.
+
+Saved summaries accompany online replies even when saved memory retrieval is off;
+that toggle controls the separate Memories collection. Clear the summary to stop
+including those notes. This does not retract data already sent to a provider.
+Summaries survive restarts, and deleting a conversation from History deletes its
+summary too. Existing databases upgrade automatically while preserving chats and memories.
+
 ## Data and provider behavior
 
 Typed or submitted transcribed messages, character instructions, and recent context are sent to
-OpenRouter and the selected model provider. Selected saved memories are included
-with those requests too. The free Nemotron endpoint's provider notice says requests
+OpenRouter and the selected model provider. Selected saved memories and the current
+conversation's saved summary are included with those requests too. Generating a
+summary sends its source exchanges and current notes to that same provider.
+The free Nemotron endpoint's provider notice says requests
 are logged for security and product improvement, and asks users not to send
 confidential or personal data. See the
 [model page](https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free).
@@ -286,8 +336,8 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Long conversation continuity** — inspectable summaries of older exchanges.
-2. **Natural interaction** — speech detection, echo handling, and optional avatar.
+1. **Natural interaction** — speech detection and echo handling.
+2. **Character presence** — an optional desktop avatar and activity states.
 
 ## Verification
 
@@ -309,5 +359,5 @@ Local recognition follows [Faster-Whisper](https://github.com/SYSTRAN/faster-whi
 Suggested commit for this step:
 
 ```text
-feat: add system tray controls and saved companion preferences
+feat: add reviewable conversation summaries and bounded continuity
 ```

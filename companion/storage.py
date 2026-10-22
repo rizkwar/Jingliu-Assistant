@@ -8,6 +8,7 @@ import sqlite3
 from uuid import uuid4
 
 from .config import PROJECT_ROOT
+from .continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
@@ -33,7 +34,7 @@ class Store:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(str(path), timeout=0.5)
         self.connection.row_factory = sqlite3.Row
-        if self.connection.execute("PRAGMA user_version").fetchone()[0] > 1:
+        if self.connection.execute("PRAGMA user_version").fetchone()[0] > 2:
             self.close()
             raise sqlite3.DatabaseError("This database was created by a newer version of the companion.")
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -57,7 +58,12 @@ class Store:
                 fingerprint TEXT NOT NULL UNIQUE, pinned INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             );
-            PRAGMA user_version = 1;
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+                conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 6000),
+                through_id INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+            );
+            PRAGMA user_version = 2;
         """)
 
     def close(self):
@@ -97,23 +103,57 @@ class Store:
         )]
 
     def context(self, conversation_id):
+        return [message for turn in self.context_turns(conversation_id)[-12:] for message in (
+            {"role": "user", "content": turn["user"]},
+            {"role": "assistant", "content": turn["assistant"]},
+        )]
+
+    def context_turns(self, conversation_id):
         # Include only exchanges with a visible answer. Failed unanswered turns remain in the archive.
         rows = self.connection.execute(
-            "SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 100) ORDER BY id",
+            "SELECT id,role,context,status,display FROM messages WHERE conversation_id=? ORDER BY id",
             (conversation_id,),
         )
         result, user = [], None
         for row in rows:
             if row["role"] == "user":
-                user = row["context"]
+                user = (row["id"], row["context"]) if row["context"] else None
             elif user and row["status"] != "local":
                 text = row["context"]
                 if row["status"] == "pending" and row["display"]:
                     text = (text or row["display"]) + "\n[The app closed during this reply; only this text was shown.]"
                 if text:
-                    result.extend([{"role": "user", "content": user}, {"role": "assistant", "content": text}])
+                    result.append({"user_id": user[0], "assistant_id": row["id"], "user": user[1], "assistant": text})
                 user = None
-        return result[-24:]
+        return result
+
+    def summary(self, conversation_id):
+        row = self.connection.execute("SELECT * FROM conversation_summaries WHERE conversation_id=?", (conversation_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_summary(self, conversation_id, content, through_id=0):
+        content = content.strip()
+        if not content or len(content) > MAX_SUMMARY_CHARS:
+            raise ValueError("A summary must contain 1 to 6,000 characters.")
+        if type(through_id) is not int or through_id < 0:
+            raise ValueError("Invalid summary coverage.")
+        if through_id:
+            row = self.connection.execute(
+                "SELECT role,context,status FROM messages WHERE id=? AND conversation_id=?",
+                (through_id, conversation_id),
+            ).fetchone()
+            if not row or row["role"] != "assistant" or not row["context"] or row["status"] == "local":
+                raise ValueError("Summary coverage does not belong to an answered turn in this conversation.")
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO conversation_summaries VALUES (?,?,?,?) ON CONFLICT(conversation_id) "
+                "DO UPDATE SET content=excluded.content,through_id=excluded.through_id,updated_at=excluded.updated_at",
+                (conversation_id, content, through_id, now()),
+            )
+
+    def clear_summary(self, conversation_id):
+        with self.connection:
+            self.connection.execute("DELETE FROM conversation_summaries WHERE conversation_id=?", (conversation_id,))
 
     def start_turn(self, conversation_id, text):
         timestamp = now()

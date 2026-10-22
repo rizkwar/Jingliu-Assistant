@@ -12,13 +12,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import httpx
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QEvent, QObject, Signal
+from PySide6.QtCore import QEvent, QObject, QTimer, Signal
 
 from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
 from companion.worker import ReplyWorker
 from companion.speech_text import SpeechSegmenter
 from companion.storage import Store
+from companion.summary_ui import SummaryDialog
 
 
 SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.", tts_enabled=False)
@@ -558,4 +559,177 @@ class WindowTests(unittest.TestCase):
             self.window._save_preferences()
         self.assertIn("Could not save defaults", self.window.preference_status.text())
         self.assertEqual(self.window.settings.tts_volume, SETTINGS.tts_volume)
+
+    def prepare_summary(self):
+        speech, microphone = self.use_fake_microphone()
+        for index in range(15):
+            turn = self.window.store.start_turn(self.window._conversation_id, f"Earlier question {index}")
+            self.window.store.save_turn(turn, f"Earlier answer {index}", f"Earlier answer {index}", "complete")
+        self.window._restore_conversation(self.window._conversation_id)
+        dialog = SummaryDialog(self.window.store, self.window._conversation_id, self.window)
+        dialog.cancel_requested.connect(self.window._stop)
+        dialog.saved.connect(self.window._refresh_continuity)
+        self.window._summary_dialog = dialog
+        return dialog, speech, microphone
+
+    def test_summary_generation_is_reviewed_before_saving_and_never_spoken_or_archived(self):
+        dialog, speech, _ = self.prepare_summary()
+        self.window.auto_speak.setChecked(True)
+        self.window.store.save_memory("Unrelated personal memory")
+        before = self.window.transcript.toPlainText()
+        archived = len(self.window.store.messages(self.window._conversation_id))
+        payloads = []
+        def handler(request):
+            payloads.append(json.loads(request.content))
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"We chose Python and local voice."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler):
+            self.window._generate_summary()
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertEqual(dialog.editor.toPlainText(), "We chose Python and local voice.")
+        self.assertIsNone(self.window.store.summary(self.window._conversation_id))
+        self.assertEqual(self.window.transcript.toPlainText(), before)
+        self.assertEqual(len(self.window.store.messages(self.window._conversation_id)), archived)
+        self.assertEqual(speech.calls, [])
+        self.assertNotIn("Unrelated personal memory", json.dumps(payloads))
+        source = json.loads(payloads[0]["messages"][1]["content"])
+        self.assertEqual(len(source["older_exchanges"]), 3)
+        self.assertEqual(source["older_exchanges"][-1]["user"], "Earlier question 2")
+        dialog._save()
+        summary = self.window.store.summary(self.window._conversation_id)
+        self.assertEqual(summary["content"], "We chose Python and local voice.")
+        self.assertEqual(summary["through_id"], 6)
+        self.assertIn("Saved summary", self.window.context_hint.text())
+
+    def test_saved_summary_is_sent_only_for_its_conversation_and_without_extra_requests(self):
+        dialog, _, _ = self.prepare_summary()
+        dialog.editor.setPlainText("A unique older decision: build in Python.")
+        dialog._save()
+        self.window.use_memories.setChecked(False)
+        payloads = []
+        def handler(request):
+            payloads.append(json.loads(request.content))
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"A reply"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler):
+            self.send("Continue our project")
+            self.wait_until(lambda: self.window._worker is None)
+            self.window._new_conversation()
+            self.send("A separate conversation")
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertEqual(len(payloads), 2)
+        self.assertIn("A unique older decision", payloads[0]["messages"][0]["content"])
+        self.assertNotIn("A unique older decision", json.dumps(payloads[1]))
+        self.assertEqual(payloads[0]["messages"][1]["content"], "Earlier question 3")
+        self.assertEqual(len(payloads[0]["messages"]), 26)
+
+    def test_failed_summary_generation_preserves_saved_notes_and_draft_edits(self):
+        dialog, _, _ = self.prepare_summary()
+        self.window.store.save_summary(self.window._conversation_id, "Saved notes")
+        dialog.editor.setPlainText("Unsaved corrections")
+        with self.mock_client(lambda request: httpx.Response(429, json={"error": {"message": "rate limit"}})):
+            self.window._generate_summary()
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertIn("rate limit", dialog.status.text())
+        self.assertEqual(dialog.editor.toPlainText(), "Unsaved corrections")
+        self.assertEqual(self.window.store.summary(self.window._conversation_id)["content"], "Saved notes")
+        self.assertEqual(dialog.through_id, 0)
+
+    def test_oversized_model_summary_is_discarded_without_advancing_coverage(self):
+        dialog, _, _ = self.prepare_summary()
+        dialog.editor.setPlainText("Keep these notes")
+        content = json.dumps({"choices": [{"delta": {"content": "x" * 6001}, "finish_reason": "stop"}]})
+        with self.mock_client(lambda request: httpx.Response(200, text=f"data: {content}\n\ndata: [DONE]\n\n")):
+            self.window._generate_summary()
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertIn("exceeded", dialog.status.text())
+        self.assertEqual(dialog.editor.toPlainText(), "Keep these notes")
+        self.assertEqual(dialog.through_id, 0)
+        self.assertIsNone(self.window.store.summary(self.window._conversation_id))
+
+    def test_suspending_summary_cancels_partial_draft_and_keeps_existing_notes(self):
+        dialog, speech, _ = self.prepare_summary()
+        dialog.editor.setPlainText("Keep these notes")
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"Partial new notes"}}]}\n\n'
+                await asyncio.sleep(10)
+        with self.mock_client(lambda request: httpx.Response(200, stream=Stream())):
+            self.window._generate_summary()
+            self.wait_until(lambda: bool(self.window._summary_text))
+            self.window.toggle_suspended()
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertEqual(dialog.editor.toPlainText(), "Keep these notes")
+        self.assertEqual(dialog.through_id, 0)
+        self.assertIn("cancelled", dialog.status.text())
+        self.assertEqual(self.window.status.text(), "Suspended")
+        self.assertFalse(speech.busy)
+
+    def test_quit_during_summary_waits_for_worker_and_does_not_save_partial_draft(self):
+        dialog, _, _ = self.prepare_summary()
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"Partial notes"}}]}\n\n'
+                await asyncio.sleep(10)
+        with self.mock_client(lambda request: httpx.Response(200, stream=Stream())):
+            self.window._generate_summary()
+            self.wait_until(lambda: bool(self.window._summary_text))
+            self.window.request_quit()
+            self.wait_until(lambda: self.window._worker is None and not self.window.isVisible())
+        self.assertTrue(self.window._closing)
+        self.assertEqual(dialog.editor.toPlainText(), "")
+
+    def test_pending_transcript_after_summary_interruption_is_sent_once(self):
+        dialog, _, mic = self.prepare_summary()
+        payloads = []
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"Partial notes"}}]}\n\n'
+                await asyncio.sleep(10)
+        def handler(request):
+            payloads.append(json.loads(request.content))
+            if len(payloads) == 1:
+                return httpx.Response(200, stream=Stream())
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"Heard you"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler):
+            self.window._generate_summary()
+            self.wait_until(lambda: bool(self.window._summary_text))
+            self.window._begin_recording()
+            mic.deliver("A spoken interruption")
+            self.wait_until(lambda: len(payloads) == 2 and self.window._worker is None)
+        self.assertEqual(payloads[1]["messages"][-1]["content"], "A spoken interruption")
+        self.assertEqual(dialog.editor.toPlainText(), "")
+
+    def test_closing_real_context_dialog_cancels_generation_before_dialog_is_deleted(self):
+        dialog, _, _ = self.prepare_summary()
+        self.window._summary_dialog = None
+        dialog.deleteLater()
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"Partial notes"}}]}\n\n'
+                await asyncio.sleep(10)
+        timer = QTimer(self.window)
+        timer.setInterval(5)
+        state = []
+        def advance():
+            active = self.window._summary_dialog
+            if active is not None and not state:
+                state.append("started")
+                active.generate.click()
+            elif active is not None and self.window._summary_text:
+                state.append("closed")
+                timer.stop()
+                active.reject()
+        timer.timeout.connect(advance)
+        timeout = QTimer(self.window)
+        timeout.setSingleShot(True)
+        timeout.timeout.connect(self.window.request_quit)
+        with self.mock_client(lambda request: httpx.Response(200, stream=Stream())):
+            timer.start()
+            timeout.start(3000)
+            self.window._open_summary()
+            timeout.stop()
+        self.assertEqual(state, ["started", "closed"])
+        self.assertIsNone(self.window._worker)
+        self.assertIsNone(self.window._summary_dialog)
+        self.assertIsNone(self.window.store.summary(self.window._conversation_id))
+        self.assertTrue(self.window.send_button.isEnabled())
 
