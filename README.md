@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 8: optional hands-free conversation
+## Step 9: desktop avatar and activity states
 
 Implemented:
 
@@ -40,6 +40,9 @@ Implemented:
 - An opt-in Hands-free button with local speech detection and pause-based turn endings.
 - Turn-based listening: microphone closed during replies and playback, with a quiet delay before listening resumes.
 - Adjustable pause duration, bounded audio buffers, and automatic idle timeout.
+- An optional floating desktop mascot with local animation and visible activity states.
+- Click to reopen chat, drag to reposition, and a context menu for existing app controls.
+- Saved avatar visibility, animation, and monitor position, with a reset control.
 
 The latest opened conversation resumes when you launch the app. **New** starts
 another conversation and keeps the previous one in **History**. Summaries are
@@ -252,6 +255,41 @@ defaults, quit the app, delete `data/preferences.json`, and relaunch. A damaged
 preferences file produces a warning and falls back to `.env`; Save defaults
 replaces it with valid settings.
 
+## Desktop avatar
+
+Open **Settings**, check **Show desktop avatar**, and click **Save defaults** if
+you want it to appear after restarting. The avatar is off by default. Its graphics
+are drawn locally in Qt; enabling it works without an API key, does not load audio
+models, and does not start recording.
+
+- **Click** the mascot to open the existing chat window. Your draft and conversation
+  stay intact, and clicking it does not start listening.
+- **Drag** it to move it around the desktop. Use **Settings → Save defaults** after
+  dragging to keep the position across restarts. Unsaved movement lasts for the session.
+- **Right-click** for Open chat, Settings, Stop, Suspend/Resume, Reset position,
+  Hide avatar, and Quit. Stop and Suspend use the same controls as the chat window.
+- **Show desktop avatar** in the tray menu also toggles visibility. Closing the
+  avatar itself hides it; choose **Quit** to exit the whole app.
+
+The badge distinguishes Ready, Opening mic, Listening, Transcribing, Thinking,
+Writing, Summarizing, Loading voice, Speaking, Suspended, Needs attention, and Closing.
+The mouth animates only during reported speech playback, rather than while voice
+preparation is running. Colors and text distinguish activity; detailed errors remain
+in the chat window. The avatar uses your configured companion name in its tooltip.
+
+Uncheck **Animate avatar** for a static mascot. The animation timer also stops while
+the avatar is hidden, suspended, closing, or showing an error. Save defaults retains
+your animation choice. The avatar stays available when chat is hidden in the tray;
+the existing rule that hiding chat ends hands-free listening still applies.
+
+Saved coordinates are kept inside an available monitor if displays change. **Reset
+position**, in Settings or the avatar menu, returns it to the lower-right corner of
+the chat window's monitor. Quit removes the floating window and its animation timer.
+
+**Quick check without an API key:** enable the avatar, drag it, and save defaults.
+Close chat into the tray, click the avatar to reopen it, then try Suspend and Resume.
+Quit and relaunch to check that its position and animation preference return.
+
 ## Saved conversations and memory
 
 Messages, memories, and conversation summaries are stored in `data/companion.sqlite3`. The database is
@@ -382,8 +420,8 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Character presence** — an optional desktop avatar and activity states.
-2. **Voice interruption** — acoustic echo cancellation for speaking during playback.
+1. **Voice interruption** — acoustic echo cancellation for speaking during playback.
+2. **Distribution** — a Windows launcher and packaged setup.
 
 ## Verification
 
@@ -406,5 +444,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: add opt-in hands-free turns with local speech detection
+feat: add optional desktop avatar with activity states
 ```

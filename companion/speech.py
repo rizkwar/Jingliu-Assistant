@@ -19,6 +19,7 @@ class SpeechController(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.state = "idle"
         self._active_id = ""
         self._pending = None
         self._stopping = False
@@ -58,14 +59,18 @@ class SpeechController(QObject):
     def busy(self):
         return bool(self._active_id or self._queue or self._stream_open)
 
+    def _report(self, text, state):
+        self.state = state
+        self.changed.emit(text)
+
     def speak(self, text, voice, volume):
         self.stop()
         if volume <= 0:
-            self.changed.emit("Voice muted")
+            self._report("Voice muted", "idle")
             return
         text = spoken_text(text)
         if not text:
-            self.changed.emit("No spoken text")
+            self._report("No spoken text", "idle")
             return
         self._voice, self._volume = voice, volume
         self._session_active = True
@@ -76,7 +81,7 @@ class SpeechController(QObject):
         """Warm the voice while the language model thinks; enqueue phrases as they arrive."""
         self.stop()
         if volume <= 0:
-            self.changed.emit("Voice muted")
+            self._report("Voice muted", "idle")
             return
         self._voice, self._volume = voice, volume
         self._segmenter = SpeechSegmenter()
@@ -103,10 +108,10 @@ class SpeechController(QObject):
             return
         if not self._queue:
             if self._stream_open:
-                self.changed.emit("Waiting for next phrase…")
+                self._report("Waiting for next phrase…", "waiting")
             elif self._session_active:
                 self._session_active = False
-                self.changed.emit("Voice ready")
+                self._report("Voice ready", "idle")
             return
         action, text = self._queue.popleft()
         self._current_text = text
@@ -115,7 +120,8 @@ class SpeechController(QObject):
             "id": self._active_id, "action": action, "text": text,
             "voice": self._voice, "volume": self._volume,
         }
-        self.changed.emit("Loading voice…" if action == "prepare" else "Preparing speech…")
+        self._report("Loading voice…" if action == "prepare" else "Preparing speech…",
+                     "loading" if action == "prepare" else "preparing")
         self.deadline.start()
         if self._stopping:
             return  # The newest pending job starts after the old process exits.
@@ -136,6 +142,7 @@ class SpeechController(QObject):
 
     def stop(self):
         was_busy = self.busy
+        self.state = "idle"
         self.deadline.stop()
         self._active_id = ""
         self._pending = None
@@ -148,7 +155,7 @@ class SpeechController(QObject):
             self._stopping = True
             self.process.kill()
         if was_busy:
-            self.changed.emit("Voice stopped")
+            self._report("Voice stopped", "idle")
 
     def shutdown(self):
         self.stop()
@@ -173,7 +180,8 @@ class SpeechController(QObject):
             kind = event.get("type")
             if kind == "status":
                 labels = {"loading": "Loading voice…", "preparing": "Preparing speech…", "speaking": "Speaking…"}
-                self.changed.emit(labels.get(event.get("state"), "Preparing speech…"))
+                state = event.get("state")
+                self._report(labels.get(state, "Preparing speech…"), state if state in labels else "preparing")
             elif kind == "done":
                 self.deadline.stop()
                 self._active_id = ""
@@ -205,7 +213,7 @@ class SpeechController(QObject):
 
     def _fail(self, message):
         self.stop()
-        self.changed.emit("Voice unavailable")
+        self._report("Voice unavailable", "error")
         self.failed.emit(message)
 
     @Slot()

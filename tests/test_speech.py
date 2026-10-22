@@ -176,6 +176,14 @@ class SpeechControllerTests(unittest.TestCase):
         self.assertFalse(self.speech.busy)
         self.assertEqual(self.errors, [])
 
+    def test_activity_state_distinguishes_preparation_from_actual_playback(self):
+        self.speech.speak("wait", "alba", 70)
+        self.assertEqual(self.speech.state, "preparing")
+        self.wait_until(lambda: self.speech.state == "speaking")
+        self.speech.stop()
+        self.assertEqual(self.speech.state, "idle")
+        self.assertFalse(self.speech.busy)
+
     def test_muting_does_not_start_a_process(self):
         self.speech.speak("Hi", "alba", 0)
         self.assertFalse(self.speech.busy)

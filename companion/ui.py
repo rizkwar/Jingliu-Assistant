@@ -18,6 +18,7 @@ from .library_ui import HistoryDialog, MemoryDialog
 from .preferences import Preferences
 from .continuity import MAX_SUMMARY_CHARS, SUMMARY_PROMPT, recent_messages, split_turns
 from .summary_ui import SummaryDialog
+from .avatar import AvatarController, activity_state
 
 
 STYLE = """
@@ -61,10 +62,13 @@ class MessageInput(QPlainTextEdit):
 class CompanionWindow(QMainWindow):
     closed = Signal()
     suspended_changed = Signal(bool)
+    activity_changed = Signal(str)
 
     def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None):
         super().__init__()
         self.settings = settings
+        self.activity = "ready"
+        self._activity_error = False
         self._worker: ReplyWorker | None = None
         self._worker_kind = "reply"
         self._summary_dialog = None
@@ -261,6 +265,17 @@ class CompanionWindow(QMainWindow):
         self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
         self.close_to_tray.setChecked(settings.close_to_tray)
         settings_layout.addWidget(self.close_to_tray)
+        avatar_row = QHBoxLayout()
+        self.show_avatar = QCheckBox("Show desktop avatar")
+        self.show_avatar.setChecked(settings.avatar_enabled)
+        avatar_row.addWidget(self.show_avatar)
+        avatar_row.addStretch()
+        self.reset_avatar = QPushButton("Reset position")
+        avatar_row.addWidget(self.reset_avatar)
+        settings_layout.addLayout(avatar_row)
+        self.animate_avatar = QCheckBox("Animate avatar")
+        self.animate_avatar.setChecked(settings.avatar_animated)
+        settings_layout.addWidget(self.animate_avatar)
         self.preference_status = QLabel("API key and character stay in .env and character.md.")
         self.preference_status.setObjectName("hint")
         self.preference_status.setWordWrap(True)
@@ -340,6 +355,7 @@ class CompanionWindow(QMainWindow):
         self.privacy.setWordWrap(True)
         layout.addWidget(self.privacy)
         self._restore_conversation(self._conversation_id)
+        self.avatar = AvatarController(self)
         self.input.setFocus()
 
     def _write(self, text: str, color: str = "#e9eaf0", bold: bool = False) -> QTextCursor:
@@ -375,11 +391,14 @@ class CompanionWindow(QMainWindow):
         try:
             self.settings.validate_connection()
         except ValueError as exc:
+            self._activity_error = True
+            self._refresh_activity()
             QMessageBox.information(self, "Connection settings", str(exc))
             return
         if len(text) > 16000:
             QMessageBox.information(self, "Message too long", "Please keep a message under 16,000 characters.")
             return
+        self._activity_error = False
         self._interrupt_speech()
         if self._active_turn and not self._save_active_turn():
             return
@@ -461,6 +480,18 @@ class CompanionWindow(QMainWindow):
         self.speech_pause.setEnabled(not busy)
         self.hands_free.setEnabled(not self._closing and not self.suspended and (self.hands_free.isChecked() or not self.microphone.busy))
         self.record_button.setEnabled(not self.suspended and self.microphone.state not in {"loading", "transcribing"})
+        self._refresh_activity()
+
+    def _refresh_activity(self) -> None:
+        state = activity_state(
+            closing=self._closing, suspended=self.suspended, microphone=self.microphone.state,
+            speech=getattr(self.speech, "state", "idle"), speech_busy=self.speech.busy,
+            working=self._worker is not None, summary=self._worker_kind == "summary",
+            has_reply=bool(self._reply), error=self._activity_error,
+        )
+        if state != self.activity:
+            self.activity = state
+            self.activity_changed.emit(state)
 
     @Slot(str, str)
     def _on_chunk(self, turn_id: str, text: str) -> None:
@@ -476,6 +507,7 @@ class CompanionWindow(QMainWindow):
             return
         self.status.setText("Replying…")
         self._reply += text
+        self._refresh_activity()
         self._write(text)
         if not self._save_timer.isActive():
             self._save_timer.start()
@@ -524,6 +556,7 @@ class CompanionWindow(QMainWindow):
         self._worker = None
         worker.deleteLater()
         if worker.error:
+            self._activity_error = True
             self._end_handsfree()
         self._set_busy(False)
         self._refresh_continuity()
@@ -537,6 +570,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _stop(self) -> None:
+        self._activity_error = False
         self._end_handsfree()
         self._pending_transcription = ""
         if self.microphone.busy:
@@ -547,6 +581,7 @@ class CompanionWindow(QMainWindow):
             self._worker.stop()
             self.stop_button.setEnabled(False)
             self.status.setText("Stopping…")
+        self._refresh_activity()
 
     @Slot()
     def _new_conversation(self) -> None:
@@ -564,6 +599,7 @@ class CompanionWindow(QMainWindow):
         self._restore_conversation(conversation_id)
 
     def _reset_conversation_view(self) -> None:
+        self._activity_error = False
         self.speech.stop()
         self._streaming_voice = False
         self._voice_for_reply = False
@@ -602,6 +638,8 @@ class CompanionWindow(QMainWindow):
         self.speech_pause.setCurrentIndex(self.speech_pause.findData(settings.stt_pause_ms))
         self.use_memories.setChecked(settings.memory_enabled)
         self.close_to_tray.setChecked(settings.close_to_tray)
+        self.show_avatar.setChecked(settings.avatar_enabled)
+        self.animate_avatar.setChecked(settings.avatar_animated)
         self.mic_device.clear()
         self.mic_device.addItem("Windows default microphone", None)
         if settings.stt_microphone:
@@ -612,6 +650,9 @@ class CompanionWindow(QMainWindow):
         self.status.setText("Ready" if settings.api_key else "Add API key")
         self._write("\nSettings reloaded.\n", "#a4adbf")
         self.preference_status.setText("Reloaded .env and character.md, with saved app preferences.")
+        self._activity_error = False
+        self._refresh_activity()
+        self.avatar.refresh()
 
     @Slot()
     def open_settings(self) -> None:
@@ -632,6 +673,8 @@ class CompanionWindow(QMainWindow):
             stt_pause_ms=self.speech_pause.currentData(),
             stt_microphone="" if self.mic_device.currentData() is None else str(self.mic_device.currentData()),
             memory_enabled=self.use_memories.isChecked(), close_to_tray=self.close_to_tray.isChecked(),
+            avatar_enabled=self.show_avatar.isChecked(), avatar_animated=self.animate_avatar.isChecked(),
+            avatar_x=self.avatar.position()[0], avatar_y=self.avatar.position()[1],
         )
         try:
             self.preferences.save(settings)
@@ -705,10 +748,12 @@ class CompanionWindow(QMainWindow):
                 self._closing = False
                 self._quitting = False
                 self.centralWidget().setEnabled(True)
+                self._refresh_controls()
                 self.show_companion()
                 event.ignore()
                 return
         self._closing = True
+        self._refresh_activity()
         self._dismiss_dialogs()
         self._pending_transcription = ""
         self.microphone.shutdown()
@@ -732,6 +777,7 @@ class CompanionWindow(QMainWindow):
     def _preview_voice(self) -> None:
         if self.suspended or self._closing:
             return
+        self._activity_error = False
         self._end_handsfree()
         self._interrupt_speech()
         self.speech.speak(
@@ -742,6 +788,7 @@ class CompanionWindow(QMainWindow):
     @Slot()
     def _read_last_reply(self) -> None:
         if self._last_reply and not self.suspended and not self._closing:
+            self._activity_error = False
             self._end_handsfree()
             self._interrupt_speech()
             if self._voice_message is not None and self._voice_note:
@@ -763,12 +810,14 @@ class CompanionWindow(QMainWindow):
 
     @Slot(str)
     def _voice_failed(self, message: str) -> None:
+        self._activity_error = True
         self._end_handsfree()
         if self._voice_for_reply:
             self._record_voice_interruption()
         self._streaming_voice = False
         self._voice_for_reply = False
         self.voice_status.setText(message)
+        self._refresh_activity()
 
     @Slot(bool)
     def _speech_toggled(self, enabled: bool) -> None:
@@ -872,6 +921,7 @@ class CompanionWindow(QMainWindow):
         self._mic_draft = ""
         self._pending_transcription = ""
         self._handsfree_capture = True
+        self._activity_error = False
         self.microphone.start(self.mic_device.currentData(), self.stt_model.currentText(),
                               hands_free=True, pause_ms=self.speech_pause.currentData())
 
@@ -885,6 +935,7 @@ class CompanionWindow(QMainWindow):
         self._end_handsfree()
         if self.microphone.busy or self._closing or self.suspended:
             return
+        self._activity_error = False
         if self._summary_dialog is not None:
             self._summary_dialog.reject()
         self._mic_draft = self.input.toPlainText()
@@ -979,6 +1030,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot(str)
     def _mic_failed(self, message: str) -> None:
+        self._activity_error = True
         self._end_handsfree()
         self.mic_status.setText(message)
         self._refresh_controls()
@@ -1031,6 +1083,7 @@ class CompanionWindow(QMainWindow):
         self._update_conversation_title()
         self._refresh_continuity()
         self.privacy.setText(self._privacy_text())
+        self._refresh_activity()
         self._scroll_timer.start(0)
 
     @Slot()
@@ -1094,6 +1147,7 @@ class CompanionWindow(QMainWindow):
             return
         self._interrupt_speech()
         self._summary_text, self._summary_error = "", ""
+        self._activity_error = False
         self._summary_through = batch.through_id
         self._worker_kind = "summary"
         worker = ReplyWorker(replace(self.settings, system_prompt=SUMMARY_PROMPT),
@@ -1109,6 +1163,8 @@ class CompanionWindow(QMainWindow):
     def _finish_summary(self, worker) -> None:
         dialog = self._summary_dialog
         error = self._summary_error or worker.error
+        if error:
+            self._activity_error = True
         stopped = worker.stop_requested.is_set()
         text = self._summary_text.strip()
         self._worker = None

@@ -14,6 +14,8 @@ FIELDS = {
     "stt_model": str, "stt_auto_send": bool, "stt_microphone": str,
     "memory_enabled": bool, "close_to_tray": bool,
     "stt_pause_ms": int,
+    "avatar_enabled": bool, "avatar_animated": bool,
+    "avatar_x": (int, type(None)), "avatar_y": (int, type(None)),
 }
 
 
@@ -21,7 +23,8 @@ def validate(values):
     if not isinstance(values, dict):
         raise ValueError("Saved preferences must be an object.")
     clean = {key: value for key, value in values.items() if key in FIELDS}
-    if any(type(value) is not FIELDS[key] for key, value in clean.items()):
+    if any(type(value) not in (FIELDS[key] if isinstance(FIELDS[key], tuple) else (FIELDS[key],))
+           for key, value in clean.items()):
         raise ValueError("Saved preferences contain an invalid value type.")
     if "tts_voice" in clean and clean["tts_voice"] not in VOICES:
         raise ValueError("Saved voice is not available.")
@@ -31,6 +34,9 @@ def validate(values):
         raise ValueError("Saved transcription model is not available.")
     if "stt_pause_ms" in clean and not 600 <= clean["stt_pause_ms"] <= 2500:
         raise ValueError("Speech pause must be from 600 to 2,500 milliseconds.")
+    x, y = clean.get("avatar_x"), clean.get("avatar_y")
+    if (x is None) != (y is None) or any(value is not None and abs(value) > 1000000 for value in (x, y)):
+        raise ValueError("Saved avatar position is invalid.")
     return clean
 
 

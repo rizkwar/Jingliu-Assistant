@@ -36,11 +36,13 @@ class FakeSpeech(QObject):
         self.busy = False
         self.calls = []
         self.segmenter = None
+        self.state = "idle"
 
     def begin_reply(self, voice, volume):
         self.voice, self.volume = voice, volume
         self.segmenter = SpeechSegmenter()
         self.busy = True
+        self.state = "loading"
         self.changed.emit("Waiting for next phrase…")
 
     def feed_reply(self, text):
@@ -57,11 +59,13 @@ class FakeSpeech(QObject):
     def speak(self, text, voice, volume):
         self.calls.append((text, voice, volume))
         self.busy = True
+        self.state = "speaking"
         self.changed.emit("Speaking…")
 
     def stop(self):
         self.busy = False
         self.segmenter = None
+        self.state = "idle"
         self.changed.emit("Voice stopped")
 
     def shutdown(self):
@@ -880,4 +884,26 @@ class WindowTests(unittest.TestCase):
             self.window._reload_settings()
         self.assertEqual(self.window.speech_pause.currentData(), 1800)
         self.assertFalse(self.window.hands_free.isChecked())
+
+    def test_avatar_follows_recording_transcription_playback_and_errors(self):
+        speech, mic = self.use_fake_microphone()
+        self.window.show_avatar.setChecked(True)
+        avatar = self.window.avatar.widget
+        self.window._begin_recording()
+        self.assertEqual(avatar.state, "listening")
+        self.window._finish_recording()
+        self.assertEqual(avatar.state, "transcribing")
+        self.window.auto_send.setChecked(False)
+        mic.deliver("Review this transcript")
+        self.assertEqual(avatar.state, "ready")
+        speech.speak("A synthetic test reply", "alba", 50)
+        self.assertEqual(avatar.state, "speaking")
+        speech.stop()
+        self.assertEqual(avatar.state, "ready")
+        mic.failed.emit("A simulated microphone failure")
+        self.assertEqual(avatar.state, "error")
+        self.window.toggle_suspended()
+        self.assertEqual(avatar.state, "suspended")
+        self.window.toggle_suspended()
+        self.assertEqual(avatar.state, "ready")
 

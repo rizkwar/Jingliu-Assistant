@@ -42,7 +42,10 @@ class PreferenceTests(unittest.TestCase):
                      '{"version":1,"settings":{"tts_voice":"missing"}}',
                      '{"version":1,"settings":{"stt_model":"missing"}}',
                      '{"version":1,"settings":{"stt_pause_ms":true}}',
-                     '{"version":1,"settings":{"stt_pause_ms":2501}}']:
+                     '{"version":1,"settings":{"stt_pause_ms":2501}}',
+                     '{"version":1,"settings":{"avatar_x":true,"avatar_y":0}}',
+                     '{"version":1,"settings":{"avatar_x":20}}',
+                     '{"version":1,"settings":{"avatar_x":1000001,"avatar_y":0}}']:
             with self.subTest(data=data):
                 self.path.write_text(data, encoding="utf-8")
                 with self.assertRaises(ValueError):
@@ -62,3 +65,11 @@ class PreferenceTests(unittest.TestCase):
                 self.preferences.save(replace(DEFAULTS, tts_volume=20))
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(list(self.path.parent.glob("*.tmp")), [])
+
+    def test_avatar_preferences_round_trip_with_a_negative_monitor_position(self):
+        self.preferences.save(replace(DEFAULTS, avatar_enabled=True, avatar_animated=False,
+                                      avatar_x=-1100, avatar_y=200))
+        loaded = Preferences(self.path).load(DEFAULTS)
+        self.assertTrue(loaded.avatar_enabled)
+        self.assertFalse(loaded.avatar_animated)
+        self.assertEqual((loaded.avatar_x, loaded.avatar_y), (-1100, 200))

@@ -1,0 +1,164 @@
+import os
+import unittest
+from dataclasses import replace
+from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QApplication, QMenu
+
+from companion.avatar import activity_state, visible_position
+from companion.config import DEFAULT_MODEL, Settings
+from companion.ui import CompanionWindow
+
+
+SETTINGS = Settings("", DEFAULT_MODEL, "Mira", "Hi", tts_enabled=False)
+
+
+class ActivityTests(unittest.TestCase):
+    def test_activity_precedence_tracks_real_audio_instead_of_queued_speech(self):
+        cases = [
+            ({}, "ready"),
+            ({"working": True}, "thinking"),
+            ({"working": True, "has_reply": True}, "replying"),
+            ({"working": True, "summary": True}, "summarizing"),
+            ({"speech_busy": True, "speech": "loading"}, "preparing_voice"),
+            ({"speech_busy": True, "speech": "speaking", "working": True}, "speaking"),
+            ({"speech_busy": False, "speech": "speaking"}, "ready"),
+            ({"microphone": "listening", "speech_busy": True, "speech": "speaking"}, "listening"),
+            ({"microphone": "opening"}, "opening_mic"),
+            ({"microphone": "loading"}, "transcribing"),
+            ({"error": True}, "error"),
+            ({"suspended": True, "microphone": "recording", "error": True}, "suspended"),
+            ({"closing": True, "suspended": True}, "closing"),
+        ]
+        for values, expected in cases:
+            with self.subTest(values=values):
+                self.assertEqual(activity_state(**values), expected)
+
+    def test_positions_remain_reachable_on_negative_and_disconnected_monitors(self):
+        size = QSize(168, 174)
+        primary, secondary = QRect(0, 0, 1920, 1040), QRect(-1280, 0, 1280, 984)
+        saved = QPoint(-1000, 600)
+        self.assertEqual(visible_position(saved, size, [primary, secondary]), saved)
+        self.assertEqual(visible_position(saved, size, [primary]), QPoint(0, 600))
+        bottom = visible_position(QPoint(99999, 99999), size, [primary])
+        self.assertTrue(primary.contains(QRect(bottom, size)))
+
+
+class AvatarWindowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        self.window = CompanionWindow(SETTINGS)
+        self.window.show()
+        self.app.processEvents()
+
+    def tearDown(self):
+        self.window.request_quit()
+        self.window.deleteLater()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+
+    def enable(self):
+        self.window.show_avatar.setChecked(True)
+        self.app.processEvents()
+        return self.window.avatar.widget
+
+    def test_avatar_is_lazy_and_showing_it_does_not_start_audio(self):
+        self.assertIsNone(self.window.avatar.widget)
+        widget = self.enable()
+        self.assertTrue(widget.isVisible())
+        self.assertFalse(widget.testAttribute(Qt.WidgetAttribute.WA_QuitOnClose))
+        self.assertFalse(self.window.microphone.busy)
+        self.assertFalse(self.window.speech.busy)
+        self.assertFalse(self.window.hands_free.isChecked())
+
+    def test_hidden_suspended_and_reduced_motion_avatar_do_not_run_timer(self):
+        widget = self.enable()
+        self.assertTrue(widget.timer.isActive())
+        self.window.animate_avatar.setChecked(False)
+        self.assertFalse(widget.timer.isActive())
+        self.window.animate_avatar.setChecked(True)
+        self.window.toggle_suspended()
+        self.assertEqual(widget.state, "suspended")
+        self.assertFalse(widget.timer.isActive())
+        self.window.toggle_suspended()
+        self.assertTrue(widget.timer.isActive())
+        self.window.show_avatar.setChecked(False)
+        self.assertFalse(widget.timer.isActive())
+        self.assertFalse(widget.isVisible())
+
+    def test_avatar_stays_visible_in_tray_and_click_reopens_chat(self):
+        widget = self.enable()
+        self.window.tray_enabled = True
+        self.window.close()
+        self.assertFalse(self.window.isVisible())
+        self.assertTrue(widget.isVisible())
+        widget.open_requested.emit()
+        self.assertTrue(self.window.isVisible())
+        self.assertFalse(self.window.microphone.busy)
+
+    def test_drag_moves_avatar_without_opening_chat(self):
+        widget = self.enable()
+        self.window.tray_enabled = True
+        self.window.hide_to_tray()
+        widget.move(250, 250)
+        start = QPointF(310, 310)
+        widget.mousePressEvent(QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(60, 60), start,
+                                           Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+        widget.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, QPointF(80, 90), start + QPointF(20, 30),
+                                          Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+        widget.mouseReleaseEvent(QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(80, 90), start + QPointF(20, 30),
+                                             Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+        self.assertEqual(widget.pos(), QPoint(270, 280))
+        self.assertFalse(self.window.isVisible())
+
+    def test_closing_avatar_hides_it_without_quitting_or_closing_chat(self):
+        widget = self.enable()
+        widget.close()
+        self.assertFalse(self.window.show_avatar.isChecked())
+        self.assertFalse(widget.isVisible())
+        self.assertFalse(self.window._closing)
+        self.assertTrue(self.window.isVisible())
+
+    def test_avatar_preferences_restore_position_motion_and_name(self):
+        widget = self.enable()
+        widget.move(120, 130)
+        self.window.animate_avatar.setChecked(False)
+        self.window._save_preferences()
+        self.window.show_avatar.setChecked(False)
+        self.window.animate_avatar.setChecked(True)
+        with patch("companion.ui.load_settings", return_value=replace(SETTINGS, name="Luna")):
+            self.window._reload_settings()
+        self.assertTrue(widget.isVisible())
+        self.assertEqual(widget.pos(), QPoint(120, 130))
+        self.assertFalse(widget.timer.isActive())
+        self.assertIn("Luna", widget.toolTip())
+
+    def test_context_menu_stop_and_suspend_use_existing_controls(self):
+        widget = self.enable()
+        self.window.avatar.show_menu(widget.pos())
+        menu = widget.findChild(QMenu)
+        actions = {action.text(): action for action in menu.actions()}
+        self.assertNotIn("Record", actions)
+        actions["Suspend"].trigger()
+        self.assertTrue(self.window.suspended)
+        menu.hide()
+        self.window.avatar.show_menu(widget.pos())
+        menu = widget.findChildren(QMenu)[-1]
+        actions = {action.text(): action for action in menu.actions()}
+        actions["Resume"].trigger()
+        self.assertFalse(self.window.suspended)
+        menu.hide()
+
+    def test_quit_deletes_independent_avatar_and_stops_animation(self):
+        widget = self.enable()
+        self.window.request_quit()
+        self.assertFalse(widget.isVisible())
+        self.assertFalse(widget.timer.isActive())
+        self.assertIsNone(self.window.avatar.widget)

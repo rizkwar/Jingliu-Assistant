@@ -65,3 +65,11 @@ class TrayTests(unittest.TestCase):
         QTimer.singleShot(0, self.window.request_quit)
         self.window._open_history()
         self.assertTrue(self.window._closing)
+
+    def test_tray_avatar_action_and_settings_toggle_stay_in_sync(self):
+        self.tray.avatar_action.setChecked(True)
+        self.assertTrue(self.window.show_avatar.isChecked())
+        self.assertTrue(self.window.avatar.widget.isVisible())
+        self.window.avatar.hide_avatar()
+        self.assertFalse(self.tray.avatar_action.isChecked())
+        self.assertFalse(self.window.avatar.widget.isVisible())

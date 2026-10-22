@@ -53,6 +53,7 @@ def main() -> int:
         return app.exec()
     finally:
         tray.shutdown()
+        window.avatar.shutdown()
         hotkey.unregister()
         if window._worker:
             window._worker.stop()
