@@ -40,7 +40,9 @@ class PreferenceTests(unittest.TestCase):
                      '{"version":1,"settings":{"tts_volume":true}}',
                      '{"version":1,"settings":{"tts_volume":101}}',
                      '{"version":1,"settings":{"tts_voice":"missing"}}',
-                     '{"version":1,"settings":{"stt_model":"missing"}}']:
+                     '{"version":1,"settings":{"stt_model":"missing"}}',
+                     '{"version":1,"settings":{"stt_pause_ms":true}}',
+                     '{"version":1,"settings":{"stt_pause_ms":2501}}']:
             with self.subTest(data=data):
                 self.path.write_text(data, encoding="utf-8")
                 with self.assertRaises(ValueError):

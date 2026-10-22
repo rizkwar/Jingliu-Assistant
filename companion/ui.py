@@ -2,10 +2,10 @@ from dataclasses import replace
 import json
 import sqlite3
 
-from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
+    QApplication, QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QSlider, QTextBrowser, QVBoxLayout, QWidget,
 )
 
@@ -37,6 +37,7 @@ QProgressBar { background: #292e3c; border: none; border-radius: 3px; max-height
 QProgressBar::chunk { background: #8fc7b2; border-radius: 3px; }
 QPushButton { background: #292e3c; border: 1px solid #3c4357; border-radius: 8px; padding: 8px 14px; }
 QPushButton:hover { background: #363d50; }
+QPushButton:checked { background: #454055; border-color: #b7a9ff; color: #dfd6ff; }
 QPushButton:disabled { color: #636d80; border-color: #303646; }
 QPushButton#send { background: #b7a9ff; color: #191627; border: none; font-weight: 600; }
 QPushButton#send:hover { background: #cbbfff; }
@@ -81,6 +82,10 @@ class CompanionWindow(QMainWindow):
         self.speech = speech if speech is not None else SpeechController(self)
         self.microphone = microphone if microphone is not None else MicrophoneController(self)
         self._mic_draft = ""
+        self._handsfree_capture = False
+        self._handsfree_timer = QTimer(self)
+        self._handsfree_timer.setSingleShot(True)
+        self._handsfree_timer.timeout.connect(self._arm_handsfree)
         self._pending_transcription = ""
         self._streaming_voice = False
         self._voice_for_reply = False
@@ -234,6 +239,17 @@ class CompanionWindow(QMainWindow):
         self.auto_send = QCheckBox("Send transcription automatically")
         self.auto_send.setChecked(settings.stt_auto_send)
         settings_layout.addWidget(self.auto_send)
+        pause_row = QHBoxLayout()
+        pause_row.addWidget(QLabel("Hands-free: finish after a pause"))
+        pause_row.addStretch()
+        self.speech_pause = QComboBox()
+        for label, milliseconds in (("0.8 seconds", 800), ("1.2 seconds", 1200), ("1.8 seconds", 1800)):
+            self.speech_pause.addItem(label, milliseconds)
+        if self.speech_pause.findData(settings.stt_pause_ms) < 0:
+            self.speech_pause.addItem(f"{settings.stt_pause_ms / 1000:g} seconds", settings.stt_pause_ms)
+        self.speech_pause.setCurrentIndex(self.speech_pause.findData(settings.stt_pause_ms))
+        pause_row.addWidget(self.speech_pause)
+        settings_layout.addLayout(pause_row)
         self.use_memories = QCheckBox("Include relevant saved memories in online replies")
         self.use_memories.setChecked(settings.memory_enabled)
         self.use_memories.toggled.connect(self._memory_toggled)
@@ -266,6 +282,11 @@ class CompanionWindow(QMainWindow):
         self.record_button.pressed.connect(self._begin_recording)
         self.record_button.released.connect(self._finish_recording)
         talk_row.addWidget(self.record_button)
+        self.hands_free = QPushButton("Hands-free")
+        self.hands_free.setCheckable(True)
+        self.hands_free.setToolTip("Listen for a turn, pause while Mira replies, then listen again. Starts off each session.")
+        self.hands_free.toggled.connect(self._handsfree_toggled)
+        talk_row.addWidget(self.hands_free)
         self.mic_level = QProgressBar()
         self.mic_level.setRange(0, 100)
         self.mic_level.setValue(0)
@@ -280,6 +301,7 @@ class CompanionWindow(QMainWindow):
         self.mic_hint = QLabel("Hold to talk · Ctrl+Alt+Space toggles recording · 60-second limit")
         self.mic_hint.setObjectName("hint")
         self.mic_hint.setWordWrap(True)
+        self._manual_mic_hint = self.mic_hint.text()
         layout.addWidget(self.mic_hint)
         self.mic_status = QLabel("Microphone off")
         self.mic_status.setObjectName("hint")
@@ -417,7 +439,7 @@ class CompanionWindow(QMainWindow):
         self._refresh_controls()
         self.status.setText("Thinking…" if busy else "Ready")
         if self.microphone.busy:
-            self.status.setText("Listening…" if self.microphone.state in {"opening", "recording"} else "Transcribing…")
+            self.status.setText("Listening…" if self.microphone.state in {"opening", "listening", "recording"} else "Transcribing…")
         if self.suspended:
             self.status.setText("Suspended")
 
@@ -425,7 +447,7 @@ class CompanionWindow(QMainWindow):
         busy = self._worker is not None or self.microphone.busy or self.suspended
         self.send_button.setEnabled(not busy)
         self.input.setEnabled(not self.microphone.busy)
-        self.stop_button.setEnabled(self._worker is not None or self.microphone.busy or self.speech.busy)
+        self.stop_button.setEnabled(self._worker is not None or self.microphone.busy or self.speech.busy or self.hands_free.isChecked())
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
         self.history_button.setEnabled(not busy)
@@ -436,6 +458,8 @@ class CompanionWindow(QMainWindow):
         self.mic_device.setEnabled(not busy)
         self.refresh_mics.setEnabled(not busy)
         self.stt_model.setEnabled(not busy)
+        self.speech_pause.setEnabled(not busy)
+        self.hands_free.setEnabled(not self._closing and not self.suspended and (self.hands_free.isChecked() or not self.microphone.busy))
         self.record_button.setEnabled(not self.suspended and self.microphone.state not in {"loading", "transcribing"})
 
     @Slot(str, str)
@@ -499,6 +523,8 @@ class CompanionWindow(QMainWindow):
             self._write("\n")
         self._worker = None
         worker.deleteLater()
+        if worker.error:
+            self._end_handsfree()
         self._set_busy(False)
         self._refresh_continuity()
         if self._closing:
@@ -507,9 +533,11 @@ class CompanionWindow(QMainWindow):
             if self._pending_transcription:
                 QTimer.singleShot(0, self._send_pending_transcription)
             self.input.setFocus()
+            self._schedule_handsfree()
 
     @Slot()
     def _stop(self) -> None:
+        self._end_handsfree()
         self._pending_transcription = ""
         if self.microphone.busy:
             self.microphone.cancel()
@@ -522,6 +550,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _new_conversation(self) -> None:
+        self._end_handsfree()
         if self._worker or self.microphone.busy:
             return
         self._interrupt_speech()
@@ -553,6 +582,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _reload_settings(self) -> None:
+        self._end_handsfree()
         if self._worker or self.microphone.busy:
             return
         try:
@@ -567,6 +597,9 @@ class CompanionWindow(QMainWindow):
         self.volume.setValue(settings.tts_volume)
         self.auto_send.setChecked(settings.stt_auto_send)
         self.stt_model.setCurrentText(settings.stt_model)
+        if self.speech_pause.findData(settings.stt_pause_ms) < 0:
+            self.speech_pause.addItem(f"{settings.stt_pause_ms / 1000:g} seconds", settings.stt_pause_ms)
+        self.speech_pause.setCurrentIndex(self.speech_pause.findData(settings.stt_pause_ms))
         self.use_memories.setChecked(settings.memory_enabled)
         self.close_to_tray.setChecked(settings.close_to_tray)
         self.mic_device.clear()
@@ -582,6 +615,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def open_settings(self) -> None:
+        self._end_handsfree()
         if self._closing:
             return
         self.show_companion()
@@ -595,6 +629,7 @@ class CompanionWindow(QMainWindow):
             self.settings, tts_enabled=self.auto_speak.isChecked(), tts_voice=self.voice.currentText(),
             tts_volume=self.volume.value(), stt_auto_send=self.auto_send.isChecked(),
             stt_model=self.stt_model.currentText(),
+            stt_pause_ms=self.speech_pause.currentData(),
             stt_microphone="" if self.mic_device.currentData() is None else str(self.mic_device.currentData()),
             memory_enabled=self.use_memories.isChecked(), close_to_tray=self.close_to_tray.isChecked(),
         )
@@ -626,6 +661,7 @@ class CompanionWindow(QMainWindow):
     def hide_to_tray(self) -> None:
         if not self.tray_enabled or self._closing:
             return
+        self._end_handsfree()
         # Never leave an invisible recording or pending automatic send behind.
         self._pending_transcription = ""
         if self.microphone.busy:
@@ -663,6 +699,7 @@ class CompanionWindow(QMainWindow):
             self.hide_to_tray()
             event.ignore()
             return
+        self._end_handsfree()
         if self._worker is None and self._active_turn and not self._save_active_turn():
             if QMessageBox.question(self, "Reply not saved", "The latest reply could not be saved. Close anyway? The last successful checkpoint will remain in History.") != QMessageBox.StandardButton.Yes:
                 self._closing = False
@@ -695,6 +732,7 @@ class CompanionWindow(QMainWindow):
     def _preview_voice(self) -> None:
         if self.suspended or self._closing:
             return
+        self._end_handsfree()
         self._interrupt_speech()
         self.speech.speak(
             f"Hi, I'm {self.settings.name}. Let's think it through, one step at a time.",
@@ -704,6 +742,7 @@ class CompanionWindow(QMainWindow):
     @Slot()
     def _read_last_reply(self) -> None:
         if self._last_reply and not self.suspended and not self._closing:
+            self._end_handsfree()
             self._interrupt_speech()
             if self._voice_message is not None and self._voice_note:
                 self._voice_message["content"] = self._voice_message["content"].removesuffix("\n" + self._voice_note)
@@ -719,9 +758,12 @@ class CompanionWindow(QMainWindow):
     def _voice_changed(self, state: str) -> None:
         self.voice_status.setText(state)
         self._refresh_controls()
+        if not self.speech.busy:
+            self._schedule_handsfree()
 
     @Slot(str)
     def _voice_failed(self, message: str) -> None:
+        self._end_handsfree()
         if self._voice_for_reply:
             self._record_voice_interruption()
         self._streaming_voice = False
@@ -769,8 +811,78 @@ class CompanionWindow(QMainWindow):
         self._streaming_voice = False
         self.speech.stop()
 
+    @Slot(bool)
+    def _handsfree_toggled(self, enabled: bool) -> None:
+        self._handsfree_timer.stop()
+        self.hands_free.setText("End hands-free" if enabled else "Hands-free")
+        if not enabled:
+            self.mic_hint.setText(self._manual_mic_hint)
+            was_capturing = self._handsfree_capture
+            self._handsfree_capture = False
+            if was_capturing:
+                self._pending_transcription = ""
+                self.microphone.cancel()
+            self.mic_status.setText("Hands-free off")
+            self._refresh_controls()
+            return
+        self._manual_mic_hint = self.mic_hint.text()
+        self.mic_hint.setText("Hands-free · Pause to finish a turn · 30-second turn limit")
+        if self._closing or self.suspended or self.microphone.busy:
+            self._end_handsfree()
+            return
+        if self.input.toPlainText().strip():
+            self._end_handsfree()
+            self.mic_status.setText("Send or clear your draft before starting hands-free mode.")
+            return
+        if self.auto_send.isChecked():
+            try:
+                self.settings.validate_connection()
+            except ValueError:
+                self._end_handsfree()
+                self.mic_status.setText("Set up your API connection, or uncheck automatic sending in Settings to review transcripts offline.")
+                return
+        self.mic_status.setText("Hands-free waiting for Mira to finish… Microphone off.")
+        self._schedule_handsfree(0)
+        self._refresh_controls()
+
+    def _end_handsfree(self) -> None:
+        self._handsfree_timer.stop()
+        if self.hands_free.isChecked():
+            self.hands_free.setChecked(False)
+
+    def _schedule_handsfree(self, delay=800) -> None:
+        if self.hands_free.isChecked() and not self._closing and not self.suspended:
+            if not self._worker and not self.speech.busy and not self.microphone.busy:
+                self.mic_status.setText("Hands-free: microphone off. Listening resumes shortly…")
+                self._handsfree_timer.start(delay)
+
+    @Slot()
+    def _arm_handsfree(self) -> None:
+        if not self.hands_free.isChecked() or self._closing or self.suspended:
+            return
+        if not self.isVisible() or self.isMinimized() or QApplication.activeModalWidget() is not None:
+            self._end_handsfree()
+            return
+        if self._worker or self.speech.busy or self.microphone.busy:
+            return
+        if self.input.toPlainText().strip():
+            self._end_handsfree()
+            self.mic_status.setText("Hands-free paused for your draft. Send or clear it before restarting.")
+            return
+        self._mic_draft = ""
+        self._pending_transcription = ""
+        self._handsfree_capture = True
+        self.microphone.start(self.mic_device.currentData(), self.stt_model.currentText(),
+                              hands_free=True, pause_ms=self.speech_pause.currentData())
+
+    def changeEvent(self, event) -> None:
+        if event.type() == QEvent.Type.WindowStateChange and self.isMinimized() and hasattr(self, "hands_free"):
+            self._end_handsfree()
+        super().changeEvent(event)
+
     @Slot()
     def _begin_recording(self) -> None:
+        self._end_handsfree()
         if self.microphone.busy or self._closing or self.suspended:
             return
         if self._summary_dialog is not None:
@@ -793,6 +905,7 @@ class CompanionWindow(QMainWindow):
     def _toggle_recording(self) -> None:
         if self._closing or self.suspended:
             return
+        self._end_handsfree()
         if self.microphone.state in {"opening", "recording"}:
             self._finish_recording()
         elif not self.microphone.busy:
@@ -806,14 +919,17 @@ class CompanionWindow(QMainWindow):
         labels = {
             "idle": "Microphone off", "opening": "Opening microphone… Wait for Listening before speaking.",
             "recording": "Listening… Release the button or press Ctrl+Alt+Space to finish.",
+            "listening": "Hands-free listening… Speak normally. No speech for 30 seconds turns this mode off.",
             "loading": "Loading transcription model… First use downloads the model.",
             "transcribing": "Transcribing locally…",
         }
         self.mic_status.setText(labels.get(state, "Microphone off"))
-        self.record_button.setText("Finish recording" if state in {"opening", "recording"} else "Hold to talk")
+        if self._handsfree_capture and state == "recording":
+            self.mic_status.setText(f"Speech detected… A {self.speech_pause.currentData() / 1000:g}-second pause finishes this turn.")
+        self.record_button.setText("Finish recording" if not self._handsfree_capture and state in {"opening", "recording"} else "Hold to talk")
         self._refresh_controls()
         if state != "idle":
-            self.status.setText("Listening…" if state in {"opening", "recording"} else "Transcribing…")
+            self.status.setText("Listening…" if state in {"opening", "listening", "recording"} else "Transcribing…")
         elif not self._worker:
             self.status.setText("Ready")
         if self.suspended:
@@ -821,10 +937,14 @@ class CompanionWindow(QMainWindow):
 
     @Slot(str)
     def _on_transcribed(self, text: str) -> None:
+        was_handsfree = self._handsfree_capture
+        self._handsfree_capture = False
         if self._closing or self.suspended:
             return
         text = text.strip()
         if not text:
+            if was_handsfree:
+                self._end_handsfree()
             self.mic_status.setText("No clear speech detected. Try again a little closer to the microphone.")
             self.input.setFocus()
             return
@@ -838,8 +958,15 @@ class CompanionWindow(QMainWindow):
                 self._pending_transcription = text
             else:
                 self._send()
-                self.mic_status.setText("Transcript sent" if self._worker else "Transcript ready. Press Send.")
+                self.mic_status.setText(
+                    "Hands-free: microphone off while Mira replies." if was_handsfree and self._worker
+                    else "Transcript sent" if self._worker else "Transcript ready. Press Send."
+                )
+                if was_handsfree and not self._worker:
+                    self._end_handsfree()
         else:
+            if was_handsfree:
+                self._end_handsfree()
             self.mic_status.setText("Transcript ready. Edit it if needed, then press Send.")
 
     def _send_pending_transcription(self) -> None:
@@ -852,6 +979,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot(str)
     def _mic_failed(self, message: str) -> None:
+        self._end_handsfree()
         self.mic_status.setText(message)
         self._refresh_controls()
 
@@ -928,6 +1056,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _open_summary(self) -> None:
+        self._end_handsfree()
         if self._closing or self._worker or self.microphone.busy or self.suspended:
             return
         self._interrupt_speech()
@@ -1030,6 +1159,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _open_history(self) -> None:
+        self._end_handsfree()
         if self._worker or self.microphone.busy:
             return
         self._interrupt_speech()
@@ -1052,6 +1182,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _open_memories(self) -> None:
+        self._end_handsfree()
         if self._worker or self.microphone.busy:
             return
         try:

@@ -24,6 +24,7 @@ class Settings:
     stt_microphone: str = ""
     memory_enabled: bool = True
     close_to_tray: bool = True
+    stt_pause_ms: int = 1200
 
     def validate_connection(self) -> None:
         if not self.api_key or self.api_key == "your_key_here":

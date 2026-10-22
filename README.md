@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 7: inspectable conversation summaries
+## Step 8: optional hands-free conversation
 
 Implemented:
 
@@ -37,6 +37,9 @@ Implemented:
 - Conversation-specific continuity notes: write, generate, inspect, edit, save, or clear.
 - Incremental summary drafts from older exchanges using the configured OpenRouter model.
 - Saved summaries accompany future replies while recent exchanges remain full messages.
+- An opt-in Hands-free button with local speech detection and pause-based turn endings.
+- Turn-based listening: microphone closed during replies and playback, with a quiet delay before listening resumes.
+- Adjustable pause duration, bounded audio buffers, and automatic idle timeout.
 
 The latest opened conversation resumes when you launch the app. **New** starts
 another conversation and keeps the previous one in **History**. Summaries are
@@ -170,10 +173,51 @@ or set it to an input device index or a name accepted by sounddevice. Device
 indices can change after reconnecting hardware. Existing `.env` files continue
 working without these settings. Use **Save defaults** to retain your current selections.
 
-Audio stays in memory, is limited to one minute, and is never written to a recording
+Audio stays in memory, is limited to one minute for manual recording, and is never written to a recording
 file or uploaded. Only the resulting text is sent to the language model when
 you send a message. Cancelling transcription terminates its process; the next
 turn reloads the model from the disk cache. Normal turns keep it ready in RAM.
+
+## Hands-free turns
+
+Click **Hands-free** beside **Hold to talk** to start an explicit listening session.
+Wait for **Hands-free listening** before speaking. Speech detection runs locally
+using the Silero VAD model bundled with Faster-Whisper; it needs no extra download.
+The level meter and status text show when the microphone is active and when speech
+has been detected.
+
+1. Say one sentence, then pause. By default, a pause of about **1.2 seconds** finishes
+   the turn. In **Settings**, choose **0.8**, **1.2**, or **1.8 seconds** and click
+   **Save defaults** to retain the setting. A little leading audio is kept in memory
+   to preserve the beginning of speech.
+2. The microphone closes before local transcription starts. With **Send transcription
+   automatically** checked, the recognized text follows the normal chat flow.
+3. The microphone stays closed while Mira generates or speaks. After the reply and
+   playback both finish, the app waits another **0.8 seconds** before listening again.
+   This avoids recording Mira's own reply; it does not implement acoustic echo cancellation.
+4. Click **End hands-free** to end the listening session. An existing reply can finish.
+   Click **Stop** to end the session and cancel current recording, transcription,
+   generation, or playback too. Stop also cancels a queued return to listening.
+
+For an offline check, uncheck automatic sending in Settings first. Hands-free will
+capture one turn and leave the transcript editable, then turn itself off. This
+review mode needs no API key once the recognition model is cached. An existing draft
+must be sent or cleared before starting hands-free. A new typed draft while waiting
+for a reply also prevents automatic listening from resuming.
+
+Hands-free is **off on launch** and never starts automatically from saved preferences.
+Hiding or minimizing the main window, opening Settings or a conversation manager,
+Suspend, and Quit turn it off. Resume does not restart it. Microphone, transcription,
+voice, or API failures also turn it off without retrying. No speech for **30 seconds**
+ends the session; a detected utterance is limited to **30 seconds**. Empty recognition
+does not send a message. The audio callback queue is bounded; capture overruns fail
+the turn rather than sending incomplete audio.
+
+Use a quiet room: nearby people, a TV, or other apps' audio can trigger speech
+detection. It has no wake word or speaker identification. You cannot interrupt Mira
+by speaking while the microphone is closed. **Hold to talk** or **Ctrl+Alt+Space**
+exits hands-free, starts a manual recording, and interrupts the current reply.
+Voice activity detection is local; only submitted transcript text goes to OpenRouter.
 
 ## Running in the background
 
@@ -184,7 +228,8 @@ Click the icon to reopen the conversation, or right-click for **Show companion**
 
 Hiding the window cancels recording or transcription and clears any pending
 automatic send. An existing text reply and its speech can continue in the
-background. The global recording shortcut brings the window forward again.
+background. Hands-free is turned off and must be started again explicitly. The
+global recording shortcut brings the window forward for manual recording again.
 
 **Suspend** stops generation, recording, transcription, and playback, and releases
 the local audio model processes. While suspended, sending, previews, and the
@@ -326,8 +371,9 @@ confidential or personal data. See the
 Speech synthesis and playback happen locally. Initial model and voice downloads
 need internet access; generated reply text is not sent to a speech service.
 Model caches are excluded from Git. Speech uses a CPU model; the app never
-initializes CUDA for speech. Recording only occurs after you press the talk
-button or use the recording shortcut; there is no always-on listening.
+initializes CUDA for speech. Recording occurs after you press the talk button,
+use the recording shortcut, or explicitly start a Hands-free session. Hands-free
+listens between turns while the window is visible; it starts off each launch.
 
 Free endpoints can be rate limited or temporarily unavailable. The app uses
 only the configured model and does not switch to a paid model. Stop cancels the
@@ -336,8 +382,8 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Natural interaction** — speech detection and echo handling.
-2. **Character presence** — an optional desktop avatar and activity states.
+1. **Character presence** — an optional desktop avatar and activity states.
+2. **Voice interruption** — acoustic echo cancellation for speaking during playback.
 
 ## Verification
 
@@ -355,9 +401,10 @@ API integration follows OpenRouter's
 
 Speech follows the [Pocket TTS Python API](https://kyutai-labs.github.io/pocket-tts/API%20Reference/python-api/).
 Local recognition follows [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper).
+Voice activity detection uses its [bundled Silero VAD implementation](https://github.com/SYSTRAN/faster-whisper/blob/v1.2.1/faster_whisper/vad.py).
 
 Suggested commit for this step:
 
 ```text
-feat: add reviewable conversation summaries and bounded continuity
+feat: add opt-in hands-free turns with local speech detection
 ```

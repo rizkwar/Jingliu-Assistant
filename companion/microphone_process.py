@@ -7,6 +7,7 @@ import sys
 import threading
 
 from .transcription import Transcriber
+from .voice_activity import AutomaticCapture
 
 
 MAX_SECONDS = 60
@@ -70,7 +71,8 @@ def input_devices():
     ]
 
 
-def run(input_stream=None, output_stream=None, capture_factory=Capture, transcriber=None):
+def run(input_stream=None, output_stream=None, capture_factory=Capture, transcriber=None,
+        automatic_factory=AutomaticCapture):
     input_stream = input_stream or sys.stdin
     output_stream = output_stream or sys.stdout
     transcriber = transcriber or Transcriber()
@@ -85,6 +87,8 @@ def run(input_stream=None, output_stream=None, capture_factory=Capture, transcri
     capture = None
     job_id = ""
     model_name = "base.en"
+    automatic = False
+    speaking = False
 
     def emit(kind, **values):
         output_stream.write(json.dumps({"id": job_id, "type": kind, **values}) + "\n")
@@ -121,12 +125,22 @@ def run(input_stream=None, output_stream=None, capture_factory=Capture, transcri
                 line = commands.get(timeout=0.1)
             except queue.Empty:
                 if capture is not None:
-                    emit("level", value=capture.level())
-                    if capture.full:
-                        try:
+                    try:
+                        if automatic:
+                            capture.poll()
+                            if capture.speaking and not speaking:
+                                speaking = True
+                                emit("status", state="recording")
+                        emit("level", value=capture.level())
+                        if capture.full:
+                            if automatic and capture.timed_out:
+                                capture.close()
+                                capture = None
+                                emit("error", message="Hands-free stopped after 30 seconds without speech. Start it again when ready.")
+                                continue
                             finish()
-                        except Exception:
-                            fail()
+                    except Exception:
+                        fail()
                 continue
             if line is None:
                 break
@@ -148,10 +162,13 @@ def run(input_stream=None, output_stream=None, capture_factory=Capture, transcri
                     job_id = command["id"]
                     model_name = command["model"]
                     device = command.get("device")
-                    device = int(device) if isinstance(device, str) and device.isdecimal() else device or None
+                    device = int(device) if isinstance(device, str) and device.isdecimal() else device
+                    automatic = bool(command.get("hands_free", False))
+                    speaking = False
                     with redirect_stdout(sys.stderr):
-                        capture = capture_factory(device)
-                    emit("status", state="recording")
+                        capture = (automatic_factory(device, command.get("pause_ms", 1200))
+                                   if automatic else capture_factory(device))
+                    emit("status", state="listening" if automatic else "recording")
                 elif action == "finish" and command["id"] == job_id and capture is not None:
                     finish()
             except Exception:

@@ -13,6 +13,7 @@ FIELDS = {
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
     "stt_model": str, "stt_auto_send": bool, "stt_microphone": str,
     "memory_enabled": bool, "close_to_tray": bool,
+    "stt_pause_ms": int,
 }
 
 
@@ -28,6 +29,8 @@ def validate(values):
         raise ValueError("Saved volume must be from 0 to 100.")
     if "stt_model" in clean and clean["stt_model"] not in {"tiny.en", "base.en", "small.en"}:
         raise ValueError("Saved transcription model is not available.")
+    if "stt_pause_ms" in clean and not 600 <= clean["stt_pause_ms"] <= 2500:
+        raise ValueError("Speech pause must be from 600 to 2,500 milliseconds.")
     return clean
 
 

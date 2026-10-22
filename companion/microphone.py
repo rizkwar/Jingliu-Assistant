@@ -78,16 +78,17 @@ class MicrophoneController(QObject):
             self._device_id = uuid4().hex
             self._send({"id": self._device_id, "action": "devices"})
 
-    def start(self, device=None, model="base.en"):
+    def start(self, device=None, model="base.en", *, hands_free=False, pause_ms=1200):
         if self.busy:
             return
         self._active_id = uuid4().hex
         self._set_state("opening")
         self.deadline.start(15_000)
-        self._send({"id": self._active_id, "action": "start", "device": device, "model": model})
+        self._send({"id": self._active_id, "action": "start", "device": device, "model": model,
+                    "hands_free": hands_free, "pause_ms": pause_ms})
 
     def finish(self):
-        if self.state not in {"opening", "recording"}:
+        if self.state not in {"opening", "listening", "recording"}:
             return
         self._set_state("transcribing")
         self.deadline.start(600_000)
@@ -132,10 +133,10 @@ class MicrophoneController(QObject):
             kind = event.get("type")
             if kind == "status":
                 state = event.get("state")
-                if state == "recording":
-                    if self.state == "opening":
-                        self._set_state("recording")
-                        self.deadline.start(65_000)
+                if state in {"recording", "listening"}:
+                    if self.state in {"opening", "listening"}:
+                        self._set_state(state)
+                        self.deadline.start(35_000 if state == "listening" else 65_000)
                 elif state in {"transcribing", "loading"}:
                     self._set_state(state)
                     self.deadline.start(600_000)

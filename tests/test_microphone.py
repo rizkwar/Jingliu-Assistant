@@ -2,6 +2,7 @@ import io
 import json
 import os
 import time
+import threading
 from types import SimpleNamespace
 import unittest
 
@@ -45,6 +46,61 @@ class TranscriptionTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
+    def automatic_events(self, timed_out=False):
+        finished = threading.Event()
+        instances = []
+        class Input:
+            def __iter__(self):
+                yield json.dumps({"id": "auto", "action": "start", "device": 0, "model": "base.en", "hands_free": True, "pause_ms": 800})
+                finished.wait(3)
+        class Output(io.StringIO):
+            def write(self, value):
+                super().write(value)
+                if json.loads(value)["type"] in {"transcript", "error"}:
+                    finished.set()
+        class Automatic:
+            full = False
+            speaking = False
+            overflowed = False
+            def __init__(self, device, pause):
+                self.device, self.pause = device, pause
+                self.timed_out = timed_out
+                self.closed = False
+                instances.append(self)
+            def poll(self):
+                self.full = True
+                self.speaking = not self.timed_out
+            def level(self):
+                return 0
+            def close(self):
+                self.closed = True
+            def finish(self):
+                self.close()
+                return np.ones(16000), 16000
+        class Transcriber:
+            def transcribe(self, *args):
+                if timed_out or not instances[0].closed:
+                    raise AssertionError("Invalid transcription while idle or microphone still open")
+                return "A hands-free turn"
+        output = Output()
+        run(Input(), output, transcriber=Transcriber(), automatic_factory=Automatic)
+        self.assertEqual(instances[0].device, 0)
+        self.assertEqual(instances[0].pause, 800)
+        self.assertTrue(instances[0].closed)
+        return [json.loads(line) for line in output.getvalue().splitlines()]
+
+    def test_automatic_turn_closes_microphone_before_transcription(self):
+        events = self.automatic_events()
+        states = [event["state"] for event in events if event["type"] == "status"]
+        self.assertEqual(states, ["listening", "recording", "transcribing"])
+        self.assertEqual(events[-1]["text"], "A hands-free turn")
+
+    def test_automatic_idle_timeout_does_not_transcribe_or_send_silence(self):
+        events = self.automatic_events(timed_out=True)
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertIn("30 seconds", events[-1]["message"])
+        self.assertFalse(any(event["type"] == "transcript" for event in events))
+
     def test_microphone_closes_before_transcription_and_can_be_reused(self):
         instances = []
         class Capture:
@@ -181,3 +237,21 @@ class ControllerTests(unittest.TestCase):
         self.mic.finish()
         self.wait_until(lambda: bool(self.texts))
         self.assertEqual(self.errors, [])
+
+    def test_listening_state_transitions_to_recording_and_cancel_ignores_old_job(self):
+        self.mic.process.setArguments(["-u", "-c", '''
+import json,sys,time
+c=json.loads(sys.stdin.readline())
+for state in ['listening','recording']:
+    print(json.dumps({'id':c['id'],'type':'status','state':state}),flush=True)
+    time.sleep(.1)
+time.sleep(10)
+'''])
+        self.mic.start(hands_free=True, pause_ms=1800)
+        self.wait_until(lambda: self.mic.state == "listening")
+        self.assertTrue(self.mic.busy)
+        self.assertEqual(self.mic.deadline.interval(), 35000)
+        self.wait_until(lambda: self.mic.state == "recording")
+        self.mic.cancel()
+        self.wait_until(lambda: self.mic.process.state() == QProcess.ProcessState.NotRunning)
+        self.assertEqual(self.texts, [])

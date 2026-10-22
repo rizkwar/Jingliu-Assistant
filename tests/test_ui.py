@@ -78,13 +78,15 @@ class FakeMicrophone(QObject):
     def __init__(self):
         super().__init__()
         self.state = "idle"
+        self.starts = []
 
     @property
     def busy(self):
         return self.state != "idle"
 
-    def start(self, *args):
-        self.state = "recording"
+    def start(self, *args, **options):
+        self.starts.append((args, options))
+        self.state = "listening" if options.get("hands_free") else "recording"
         self.changed.emit(self.state)
 
     def finish(self):
@@ -732,4 +734,150 @@ class WindowTests(unittest.TestCase):
         self.assertIsNone(self.window._summary_dialog)
         self.assertIsNone(self.window.store.summary(self.window._conversation_id))
         self.assertTrue(self.window.send_button.isEnabled())
+
+    def start_handsfree(self):
+        speech, mic = self.use_fake_microphone()
+        self.window.show()
+        self.window.hands_free.click()
+        self.wait_until(lambda: mic.state == "listening")
+        return speech, mic
+
+    def test_handsfree_closes_microphone_until_both_reply_and_playback_finish(self):
+        speech, mic = self.start_handsfree()
+        self.window.auto_speak.setChecked(True)
+        def handler(request):
+            return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"Hello there."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        with self.mock_client(handler):
+            mic.deliver("Hello Mira")
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertTrue(speech.busy)
+        self.assertEqual(mic.state, "idle")
+        self.assertTrue(self.window.hands_free.isChecked())
+        self.window._arm_handsfree()
+        self.assertEqual(len(mic.starts), 1)
+        speech.busy = False
+        speech.changed.emit("Voice ready")
+        self.assertTrue(self.window._handsfree_timer.isActive())
+        self.assertEqual(self.window._handsfree_timer.interval(), 800)
+        self.assertTrue(self.window.stop_button.isEnabled())
+        self.assertEqual(mic.state, "idle")
+        self.window._handsfree_timer.stop()
+        self.window._arm_handsfree()
+        self.assertEqual(mic.state, "listening")
+        self.assertEqual(len(mic.starts), 2)
+
+    def test_handsfree_review_mode_leaves_text_editable_and_stops_listening(self):
+        _, mic = self.start_handsfree()
+        self.window.auto_send.setChecked(False)
+        mic.deliver("Please review this turn")
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.assertEqual(self.window.input.toPlainText(), "Please review this turn")
+        self.assertIsNone(self.window._worker)
+        self.assertTrue(self.window.input.isEnabled())
+        self.window._arm_handsfree()
+        self.assertEqual(len(mic.starts), 1)
+
+    def test_handsfree_review_works_without_an_api_key(self):
+        _, mic = self.use_fake_microphone()
+        self.window.show()
+        self.window.settings = replace(SETTINGS, api_key="")
+        self.window.hands_free.click()
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.assertIn("API connection", self.window.mic_status.text())
+        self.window.auto_send.setChecked(False)
+        self.window.hands_free.click()
+        self.wait_until(lambda: mic.state == "listening")
+        mic.deliver("Offline transcript to review")
+        self.assertIsNone(self.window._worker)
+        self.assertEqual(self.window.input.toPlainText(), "Offline transcript to review")
+
+    def test_handsfree_stop_cancels_capture_and_pending_rearm(self):
+        _, mic = self.start_handsfree()
+        self.window._stop()
+        self.assertFalse(mic.busy)
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.assertFalse(self.window._handsfree_timer.isActive())
+        self.window._arm_handsfree()
+        self.assertEqual(len(mic.starts), 1)
+        self.window.hands_free.click()
+        self.window._stop()  # Also cancels the initial zero-delay arm before it runs.
+        self.app.processEvents()
+        self.assertEqual(len(mic.starts), 1)
+
+    def test_hiding_minimizing_settings_and_suspend_disarm_handsfree(self):
+        for action in ("hide", "minimize", "settings", "suspend"):
+            with self.subTest(action=action):
+                _, mic = self.start_handsfree()
+                if action == "hide":
+                    self.window.tray_enabled = True
+                    self.window.hide_to_tray()
+                    self.window.tray_enabled = False
+                elif action == "minimize":
+                    self.window.showMinimized()
+                elif action == "settings":
+                    self.window.open_settings()
+                else:
+                    self.window.toggle_suspended()
+                self.assertFalse(mic.busy)
+                self.assertFalse(self.window.hands_free.isChecked())
+                self.window._arm_handsfree()
+                self.assertEqual(len(mic.starts), 1)
+
+    def test_handsfree_does_not_send_an_existing_draft_or_arm_with_a_new_draft(self):
+        _, mic = self.use_fake_microphone()
+        self.window.show()
+        self.window.input.setPlainText("Keep my draft")
+        self.window.hands_free.click()
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.assertEqual(mic.starts, [])
+        self.assertEqual(self.window.input.toPlainText(), "Keep my draft")
+        self.window.input.clear()
+        self.window.hands_free.click()
+        self.window.input.setPlainText("A new draft before listening resumes")
+        self.window._handsfree_timer.stop()
+        self.window._arm_handsfree()
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.assertEqual(mic.starts, [])
+
+    def test_reply_failure_disarms_handsfree_without_retrying(self):
+        _, mic = self.start_handsfree()
+        requests = []
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(429, json={"error": {"message": "rate limit"}})
+        with self.mock_client(handler):
+            mic.deliver("A question")
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.window._arm_handsfree()
+        self.assertEqual(len(mic.starts), 1)
+        self.assertEqual(len(requests), 1)
+
+    def test_microphone_failure_or_empty_recognition_disarms_handsfree(self):
+        _, mic = self.start_handsfree()
+        mic.deliver("")
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.window.hands_free.click()
+        self.wait_until(lambda: mic.state == "listening")
+        mic.cancel()
+        mic.failed.emit("Hands-free stopped after 30 seconds without speech.")
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.assertIn("30 seconds", self.window.mic_status.text())
+
+    def test_shortcut_exits_handsfree_and_starts_manual_recording(self):
+        _, mic = self.start_handsfree()
+        self.window._toggle_recording()
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.assertEqual(mic.state, "recording")
+        self.assertEqual(len(mic.starts), 2)
+        self.assertEqual(mic.starts[-1][1], {})
+
+    def test_handsfree_starts_off_and_only_pause_preference_is_saved(self):
+        self.assertFalse(self.window.hands_free.isChecked())
+        self.window.speech_pause.setCurrentIndex(self.window.speech_pause.findData(1800))
+        self.window._save_preferences()
+        with patch("companion.ui.load_settings", return_value=SETTINGS):
+            self.window._reload_settings()
+        self.assertEqual(self.window.speech_pause.currentData(), 1800)
+        self.assertFalse(self.window.hands_free.isChecked())
 
