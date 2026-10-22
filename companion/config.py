@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
+from .character import load_character
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
@@ -29,6 +31,8 @@ class Settings:
     avatar_animated: bool = True
     avatar_x: int | None = None
     avatar_y: int | None = None
+    character_path: str = ""
+    voice_preview: str = ""
 
     def validate_connection(self) -> None:
         if not self.api_key or self.api_key == "your_key_here":
@@ -49,7 +53,7 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
     # Read afresh so Reload settings works; do not overwrite process environment.
     values = {**dotenv_values(root / ".env", encoding="utf-8"), **os.environ}
     name = (values.get("COMPANION_NAME") or "Mira").strip() or "Mira"
-    template = (root / "character.md").read_text(encoding="utf-8")
+    character = load_character(root, (values.get("CHARACTER_PROFILE") or "").strip(), name)
     voice = (values.get("TTS_VOICE") or "alba").strip().lower()
     if voice not in VOICES:
         raise ValueError("TTS_VOICE must be one of: " + ", ".join(VOICES))
@@ -71,13 +75,15 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
     return Settings(
         api_key=(values.get("OPENROUTER_API_KEY") or "").strip(),
         model=(values.get("OPENROUTER_MODEL") or DEFAULT_MODEL).strip(),
-        name=name,
-        system_prompt=template.replace("{name}", name),
+        name=character.name,
+        system_prompt=character.prompt,
         tts_voice=voice,
         tts_enabled=enabled in {"true", "1", "yes"},
         tts_volume=volume,
         stt_model=stt_model,
         stt_auto_send=stt_auto_send in {"true", "1", "yes"},
         stt_microphone=(values.get("STT_MICROPHONE") or "").strip(),
+        character_path=str(character.path),
+        voice_preview=character.preview,
     )
 

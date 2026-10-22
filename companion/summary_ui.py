@@ -34,7 +34,9 @@ class SummaryDialog(QDialog):
         explanation = QLabel(
             "Recent exchanges stay in context. Save notes here to carry older details into future replies "
             "in this conversation. Generate draft sends older exchanges and these notes to your configured model. "
-            "Review the result before saving; summaries can miss details. Your full transcript stays in History."
+            "Review the result before saving; summaries can miss details. Keep real developments and preferences "
+            "separate from fictional scenes. The character profile is supplied separately with every reply. "
+            "Your full transcript stays in History."
         )
         explanation.setWordWrap(True)
         layout.addWidget(explanation)

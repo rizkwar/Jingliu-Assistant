@@ -3,13 +3,14 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 9: desktop avatar and activity states
+## Step 11: character profiles and spoken personality
 
 Implemented:
 
 - A desktop chat window with streaming OpenRouter responses.
 - Nemotron 3 Ultra (free) as the default model.
-- An editable character in [character.md](character.md), provisionally named Mira.
+- An editable [Jingliu character profile](character.toml), with restrained warmth,
+  dry humor, and a gradual romantic interest in the user.
 - Recent conversation context (up to 12 exchanges, bounded to 48,000 characters).
 - Stop, new conversation, and reload settings controls.
 - Background API work so the window stays responsive, including during cancellation.
@@ -43,6 +44,11 @@ Implemented:
 - An optional floating desktop mascot with local animation and visible activity states.
 - Click to reopen chat, drag to reposition, and a context menu for existing app controls.
 - Saved avatar visibility, animation, and monitor position, with a reset control.
+- Double-click launch, setup, diagnostic, and desktop shortcut scripts for Windows.
+- Offline startup checks and minimal error logs that omit credentials and conversations.
+- Structured personality, reactions, relationship preferences, and original dialogue examples.
+- Stable character instructions alongside memories and summaries, with explicit fictional/real continuity rules.
+- Suppression of common marked action cues during streaming speech and replay.
 
 The latest opened conversation resumes when you launch the app. **New** starts
 another conversation and keeps the previous one in **History**. Summaries are
@@ -50,10 +56,35 @@ generated on request and saved explicitly after review.
 
 ## Run on Windows
 
-Use Python 3.11 or 3.12. From PowerShell in this folder:
+**Already installed?** Double-click **Start Mira.cmd**. It uses this project's
+`.venv` without activating Python. Your existing `.env`, settings, and history
+continue to work.
+
+For a new installation:
+
+1. Install **64-bit Python 3.11 or 3.12** from [python.org](https://www.python.org/downloads/windows/).
+2. Double-click **Setup Mira.cmd**. It creates `.venv`, installs CPU PyTorch and
+   the required packages, and checks native engine imports. Internet is needed
+   for installation; voice and recognition models download when first used.
+3. Add your OpenRouter key to `.env` locally, then double-click **Start Mira.cmd**.
+   Setup copies `.env.example` only when `.env` is missing. It preserves an
+   existing `.env`, your `data` folder, preferences, and model caches.
+4. Optionally double-click **Create Desktop Shortcut.cmd**. The shortcut opens
+   the companion directly without a console window. Start Mira.cmd may briefly show one.
+
+Quit the companion before rerunning setup to repair or update dependencies. Setup refuses
+to delete a broken or incomplete `.venv`; rename that folder and rerun setup.
+These scripts run from the source folder; this is not yet a standalone executable.
+Keep the folder in its final location. If you move it, recreate the virtual
+environment ([Python's guidance](https://docs.python.org/3/library/venv.html)),
+then remove or rename the old desktop shortcut before creating a new one. The
+shortcut creator refuses to overwrite a shortcut pointing somewhere else.
+
+For manual installation, use PowerShell in this folder:
 
 ```powershell
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
@@ -62,7 +93,7 @@ Open `.env` in your editor and fill in your key locally:
 ```dotenv
 OPENROUTER_API_KEY=your_key_here
 OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
-COMPANION_NAME=Mira
+CHARACTER_PROFILE=character.toml
 TTS_VOICE=alba
 TTS_ENABLED=true
 TTS_VOLUME=70
@@ -82,7 +113,7 @@ Then launch:
 ```
 
 Type a message and press **Enter**. Use **Shift+Enter** for a new line. You can
-edit `.env` or `character.md` while the app is open and choose **Settings →
+edit `.env` or `character.toml` while the app is open and choose **Settings →
 Reload .env + character**.
 Use **New** when testing a changed personality from a clean conversation.
 Saved memories can still apply to new conversations; manage them in **Memories**.
@@ -90,10 +121,60 @@ Saved memories can still apply to new conversations; manage them in **Memories**
 The API model ID includes the `nvidia/` prefix. `#providers` is part of the model
 webpage URL and must not be included in the API request.
 
+### Check setup or troubleshoot startup
+
+Double-click **Check Setup.cmd** to inspect Python, pinned packages, configuration,
+saved preferences, storage access, database schema compatibility, and native engine
+imports. The report never prints your API key or conversation contents. Checks
+run offline without model downloads, microphone access, or API requests. A configured
+key still needs a real chat request to verify its validity and provider availability.
+
+Warnings allow launch, including offline use without a key. Errors must be fixed
+before the windowed launcher proceeds. Normal launches run the quick checks;
+Check Setup.cmd adds isolated native engine imports. Equivalent terminal commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m companion.doctor
+.\.venv\Scripts\python.exe -m companion.doctor --engines --json
+```
+
+Unexpected launcher failures produce a message box and a minimal record in
+`data/startup-error.log`: timestamp, stage, and exception class only. It omits
+exception messages, tracebacks, keys, and chat text. Logs rotate after about
+64 KiB, retaining one previous file. For terminal output, use the existing
+`.\.venv\Scripts\python.exe -m companion` command.
+
 **Try it:** say “Explain recursion using a tiny example,” then “Make that simpler.”
 The second reply should refer to the first. Try **Stop** during a reply as well.
 Only the visible portion of an interrupted answer is used in later context.
 Failed turns with no answer stay visible but are excluded from later context.
+
+## Talk with Jingliu
+
+The active [character.toml](character.toml) contains her identity, fictional
+background, traits, interests, likes/dislikes, opinions, speaking style, reactions,
+affection, boundaries, and fourteen original conversation examples. Her reserved
+manner draws on the [official trailer](https://www.youtube.com/watch?v=fMiYAEj46Rc)
+and [game dialogue](https://honkai-star-rail.fandom.com/wiki/Jingliu/Voice-Overs).
+Her warmer romantic interest in you is an editable companion adaptation.
+
+Open **Settings > Edit character profile**, save your edits, then **Reload .env +
+character**. A TOML profile's name takes precedence over the old `COMPANION_NAME`
+entry, so an existing `.env` naming Mira needs no changes. The existing launcher
+filenames also continue to work. Choose and preview a voice in Settings, then
+**Save defaults**; personality does not override your voice choice.
+
+Every reply receives the profile separately from conversation notes and relevant
+memories. A restart keeps the current conversation; **New** starts with the same
+character and selected memories, without the previous chat's notes. Save real
+preferences or developments in **Memories** or with `/remember`; automatic
+personal-memory extraction has not been added. She is instructed to acknowledge
+missing context and distinguish fictional lore from actual shared conversations.
+
+The [editing guide](docs/character-guide.md) covers every profile field, selection,
+legacy Markdown support, and memory behavior. The [sample conversations and manual
+checks](docs/character-samples.md) cover excitement, frustration, teasing, affection,
+disagreement, summaries, and restarts. Exact phrasing is generated by the model.
 
 ## Try her voice
 
@@ -151,8 +232,8 @@ available. Check your Windows default output device if you hear nothing.
 1. Hold **Hold to talk**. Wait for **Listening** before you speak, then release
    the button to finish. You can also press **Ctrl+Alt+Space** once to start
    recording and again to finish, even while using another app. This brings
-   Mira's window forward so you can see the recording status.
-2. Recording stops after 60 seconds. Starting a recording stops Mira's current
+   the companion's window forward so you can see the recording status.
+2. Recording stops after 60 seconds. Starting a recording stops the companion's current
    voice and interrupts any response she is still generating.
 3. The microphone closes before local transcription starts. The first spoken
    turn downloads the English model into `.cache/whisper/`; later turns reuse it.
@@ -195,9 +276,9 @@ has been detected.
    to preserve the beginning of speech.
 2. The microphone closes before local transcription starts. With **Send transcription
    automatically** checked, the recognized text follows the normal chat flow.
-3. The microphone stays closed while Mira generates or speaks. After the reply and
+3. The microphone stays closed while the companion generates or speaks. After the reply and
    playback both finish, the app waits another **0.8 seconds** before listening again.
-   This avoids recording Mira's own reply; it does not implement acoustic echo cancellation.
+   This avoids recording the companion's own reply; it does not implement acoustic echo cancellation.
 4. Click **End hands-free** to end the listening session. An existing reply can finish.
    Click **Stop** to end the session and cancel current recording, transcription,
    generation, or playback too. Stop also cancels a queued return to listening.
@@ -217,14 +298,14 @@ does not send a message. The audio callback queue is bounded; capture overruns f
 the turn rather than sending incomplete audio.
 
 Use a quiet room: nearby people, a TV, or other apps' audio can trigger speech
-detection. It has no wake word or speaker identification. You cannot interrupt Mira
+detection. It has no wake word or speaker identification. You cannot interrupt the companion
 by speaking while the microphone is closed. **Hold to talk** or **Ctrl+Alt+Space**
 exits hands-free, starts a manual recording, and interrupts the current reply.
 Voice activity detection is local; only submitted transcript text goes to OpenRouter.
 
 ## Running in the background
 
-Closing the main window keeps Mira running in the Windows notification area by
+Closing the main window keeps the companion running in the Windows notification area by
 default. Look for the purple face icon, including under the hidden-icons arrow.
 Click the icon to reopen the conversation, or right-click for **Show companion**,
 **Hide to tray**, **Settings**, **Suspend/Resume**, and **Quit**.
@@ -314,7 +395,7 @@ context. A save failure is reported in the window; a failed final save can be
 retried before the next message or when closing.
 
 Use **Memories** to add, inspect, edit, pin, and delete individual facts or
-preferences. Save is explicit: Mira does not silently extract a profile from
+preferences. Save is explicit: the companion does not silently extract a profile from
 ordinary conversation. A memory is limited to 1,000 characters. Pinned memories
 are preferred across topics; unpinned memories are selected by word overlap with
 your current message and recent user messages. Retrieval is deliberately simple
@@ -421,7 +502,7 @@ provider. The app does not display or retain separate reasoning fields.
 ## Next steps
 
 1. **Voice interruption** — acoustic echo cancellation for speaking during playback.
-2. **Distribution** — a Windows launcher and packaged setup.
+2. **Distribution** — a standalone Windows build without a separate Python installation.
 
 ## Verification
 
@@ -432,6 +513,9 @@ models, or play audio. Storage tests use isolated in-memory or temporary databas
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
+
+Windows launcher tests use temporary project folders and shortcut files inside
+`artifacts`; they do not create a shortcut on your Desktop or install packages.
 
 API integration follows OpenRouter's
 [quickstart](https://openrouter.ai/docs/quickstart) and
@@ -444,5 +528,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: add optional desktop avatar with activity states
+feat: add configurable Jingliu personality and character continuity
 ```

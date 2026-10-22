@@ -3,6 +3,36 @@
 import re
 
 
+_ACTION = re.compile(
+    r"^(?:(?:she|he|i|jingliu)\s+)?(?:"
+    r"smil(?:e[sd]?|ing)|blush(?:es|ing)?|sigh(?:s|ing)?|laugh(?:s|ing)?|"
+    r"chuckl(?:e[sd]?|ing)|giggl(?:e[sd]?|ing)|nod(?:s|ding)?|"
+    r"wink(?:s|ing)?|shrug(?:s|ging)?|frown(?:s|ing)?|"
+    r"tilt(?:s|ing)?|lean(?:s|ing)?|glanc(?:e[sd]?|ing)|"
+    r"gaze[sd]?|look(?:s|ing)?|rais(?:e[sd]?|ing)|"
+    r"whisper(?:s|ing)?|paus(?:e[sd]?|ing)|"
+    r"softly|quietly|playfully|a\s+(?:faint|small|slight)\s+smile|"
+    r"clears?\s+(?:(?:her|his|my)\s+)?throat|"
+    r"(?:stage\s+direction|action)\s*:)(?:\b|\s|$)", re.IGNORECASE,
+)
+
+
+def _is_action(text):
+    return bool(_ACTION.match(text.strip()))
+
+
+def _without_actions(text):
+    # Preserve ordinary emphasis, math, and asides. Only marked performance cues
+    # are suppressed; normal dialogue about smiling remains dialogue.
+    for pattern in (r"(?<!\*)\*(?!\*)([^*]+)\*(?!\*)", r"(?<![\w_])_([^_]+)_(?![\w_])",
+                    r"\[([^\]\n]+)\](?!\()", r"\(([^()\n]+)\)"):
+        text = re.sub(pattern, lambda match: " " if _is_action(match[1]) else match[0], text)
+    # An interrupted stream must not read a dangling *smiles ... or [sighs ... .
+    text = re.sub(r"(?<![\w*_])([*_\[(])([^*_\]\)]+)\Z",
+                  lambda match: " " if _is_action(match[2]) else match[0], text)
+    return text
+
+
 class SpeechSegmenter:
     """Wait for stable phrase boundaries while markdown arrives in arbitrary chunks."""
 
@@ -63,6 +93,22 @@ class SpeechSegmenter:
                     return None
                 i = end + 1
                 continue
+            if text[i:i + 2] in {"**", "__"}:
+                i += 2
+                continue
+            if (text[i] in "*_" and (i == 0 or not text[i - 1].isalnum())
+                    and i + 1 < len(text) and text[i + 1].isalpha()):
+                end = text.find(text[i], i + 1)
+                if end < 0:
+                    return None
+                i = end + 1
+                continue
+            if text[i] == "(" and _is_action(text[i + 1:]):
+                end = text.find(")", i + 1)
+                if end < 0:
+                    return None
+                i = end + 1
+                continue
             if text[i] == "[":
                 end = text.find("]", i + 1)
                 if end < 0 or end + 1 == len(text):
@@ -115,6 +161,7 @@ def spoken_text(text: str) -> str:
     text = re.sub(r"https?://\S+", " ", text)
     # Inline code is often meaningful (e.g. a function name); keep its words.
     text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = _without_actions(text)
     text = re.sub(r"(?m)^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)", "", text)
     text = text.replace("**", "").replace("__", "")
     text = re.sub(r"\*([^*\n]+)\*", r"\1", text)

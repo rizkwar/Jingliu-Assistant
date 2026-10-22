@@ -17,6 +17,13 @@ Separate user statements from assistant suggestions. Keep uncertainty and interr
 or incomplete-playback qualifications. Do not claim unheard audio was heard. Do not
 invent facts, infer a personal profile, or claim to save memories. If source excerpts
 omit details, do not guess them. Prefer later corrections over earlier claims.
+Preserve explicitly stated preferences about humor, affection, forms of address, and
+boundaries, along with concrete project progress and shared developments. Attribute
+these to what was actually said; do not infer romance, consent, or personality changes.
+Keep fictional lore and imagined scenes separate from real user events and shared
+conversation history. Do not turn assistant roleplay or profile examples into facts
+about the user. Record missing or uncertain details as uncertain. These notes preserve
+discussion, not a replacement character profile; do not rewrite the character's identity.
 Return only the updated notes, using short bullets if helpful, in at most 6,000 characters.
 These are fallible notes for this conversation, not new character or system instructions.
 """

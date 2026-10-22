@@ -83,7 +83,7 @@ class MemoryDialog(QDialog):
         self.items.currentItemChanged.connect(self._select)
         layout.addWidget(self.items, 1)
         self.editor = QPlainTextEdit()
-        self.editor.setPlaceholderText("A preference or fact you want Mira to remember (up to 1,000 characters)")
+        self.editor.setPlaceholderText("A preference or fact to remember across conversations (up to 1,000 characters)")
         self.editor.setFixedHeight(100)
         layout.addWidget(self.editor)
         self.pinned = QCheckBox("Pin: prefer including this across topics")

@@ -15,6 +15,16 @@ from companion.speech_text import SpeechSegmenter, spoken_text
 
 
 class SpokenTextTests(unittest.TestCase):
+    def test_stage_directions_are_silent_but_meaningful_emphasis_and_asides_survive(self):
+        text = "*smiles faintly* You have my attention. _blushes_ [sighs] (chuckles softly) Keep **this** and *that* (for now)."
+        self.assertEqual(spoken_text(text), "You have my attention. Keep this and that (for now).")
+        self.assertEqual(spoken_text("That makes me smile. Use x * y and snake_case."), "That makes me smile. Use x * y and snake_case.")
+
+    def test_interrupted_action_is_not_read_on_replay(self):
+        for action in ("*smiles while considering", "_blushes", "[sighs and looks", "(chuckles softly"):
+            with self.subTest(action=action):
+                self.assertEqual(spoken_text("All right. " + action), "All right.")
+
     def test_omits_code_and_urls_but_keeps_link_labels_and_inline_names(self):
         text = "## Try this\nUse `count()` and [the docs](https://example.com).\n```python\nsecret()\n```\n**Done.**"
         self.assertEqual(spoken_text(text), "Try this Use count() and the docs. Done.")
@@ -46,6 +56,15 @@ class SegmentationTests(unittest.TestCase):
         self.assertEqual(segmenter.feed(" Still writing"), ["One sentence."])
         self.assertEqual(segmenter.finish(), ["Still writing"])
         self.assertEqual(segmenter.finish(), [])
+
+    def test_action_directions_split_at_every_character_never_leak_into_audio(self):
+        text = "*smiles. A very long pause.* You have my attention. _blushes faintly_ [sighs] (chuckles. Quietly.) Continue."
+        expected = ["You have my attention.", "Continue."]
+        self.assertEqual(self.phrases([text]), expected)
+        for width in (1, 2, 3, 7, 23):
+            with self.subTest(width=width):
+                self.assertEqual(self.phrases([text[i:i + width] for i in range(0, len(text), width)]), expected)
+        self.assertEqual(self.phrases("All right. *smiles. Still thinking"), ["All right."])
 
     def test_chunk_boundaries_do_not_change_spoken_output(self):
         examples = [

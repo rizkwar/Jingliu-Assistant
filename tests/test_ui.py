@@ -237,6 +237,40 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.window.voice_status.text(), "No speaker available")
         self.assertTrue(self.window.send_button.isEnabled())
 
+    def test_character_reload_updates_identity_editor_target_and_voice_preview_without_losing_draft(self):
+        from pathlib import Path
+        from companion.character import read_profile
+        character = read_profile(Path(__file__).resolve().parent.parent / "character.toml")
+        settings = replace(SETTINGS, name=character.name, system_prompt=character.prompt,
+                           character_path=str(character.path), voice_preview=character.preview)
+        speech = FakeSpeech()
+        self.window.close()
+        self.window = CompanionWindow(SETTINGS, speech=speech)
+        self.window.input.setPlainText("Keep this draft")
+        conversation = self.window._conversation_id
+        with patch("companion.ui.load_settings", return_value=settings):
+            self.window._reload_settings()
+        self.assertEqual(self.window.title.text(), "Jingliu")
+        self.assertIn("character.toml", self.window.character_label.text())
+        self.assertEqual(self.window.input.toPlainText(), "Keep this draft")
+        self.assertEqual(self.window._conversation_id, conversation)
+        with patch("companion.ui.QDesktopServices.openUrl", return_value=True) as open_file:
+            self.window.edit_character.click()
+        self.assertEqual(Path(open_file.call_args.args[0].toLocalFile()), character.path)
+        self.window.voice.setCurrentText("vera")
+        self.window._preview_voice()
+        self.assertEqual(speech.calls[-1], (character.preview, "vera", 70))
+
+    def test_invalid_character_reload_keeps_current_profile_and_draft(self):
+        self.window.input.setPlainText("An unsent thought")
+        previous = self.window.settings
+        with patch("companion.ui.load_settings", side_effect=ValueError("Character profile has invalid TOML.")), \
+             patch("companion.ui.QMessageBox.warning") as warning:
+            self.window._reload_settings()
+        warning.assert_called_once()
+        self.assertIs(self.window.settings, previous)
+        self.assertEqual(self.window.input.toPlainText(), "An unsent thought")
+
     def use_fake_microphone(self):
         self.window.close()
         self.window.deleteLater()
