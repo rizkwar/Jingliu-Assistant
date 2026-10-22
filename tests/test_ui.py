@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import threading
 import unittest
 from dataclasses import replace
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from PySide6.QtCore import QEvent, QObject, Signal
 from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
 from companion.worker import ReplyWorker
+from companion.speech_text import SpeechSegmenter
 
 
 SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.", tts_enabled=False)
@@ -23,11 +25,30 @@ REAL_CLIENT = httpx.AsyncClient
 class FakeSpeech(QObject):
     changed = Signal(str)
     failed = Signal(str)
+    spoken = Signal(str)
 
     def __init__(self):
         super().__init__()
         self.busy = False
         self.calls = []
+        self.segmenter = None
+
+    def begin_reply(self, voice, volume):
+        self.voice, self.volume = voice, volume
+        self.segmenter = SpeechSegmenter()
+        self.busy = True
+        self.changed.emit("Waiting for next phrase…")
+
+    def feed_reply(self, text):
+        if self.segmenter is not None:
+            for phrase in self.segmenter.feed(text):
+                self.speak(phrase, self.voice, self.volume)
+
+    def finish_reply(self):
+        if self.segmenter is not None:
+            for phrase in self.segmenter.finish():
+                self.speak(phrase, self.voice, self.volume)
+            self.segmenter = None
 
     def speak(self, text, voice, volume):
         self.calls.append((text, voice, volume))
@@ -36,6 +57,7 @@ class FakeSpeech(QObject):
 
     def stop(self):
         self.busy = False
+        self.segmenter = None
         self.changed.emit("Voice stopped")
 
     def shutdown(self):
@@ -171,7 +193,7 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(worker.wait(1000))
         self.assertFalse(worker.error)
 
-    def test_completed_reply_speaks_and_next_message_stops_playback(self):
+    def test_completed_reply_speaks_and_next_message_replaces_voice_session(self):
         self.window.close()
         speech = FakeSpeech()
         self.window = CompanionWindow(replace(SETTINGS, tts_enabled=True), speech=speech)
@@ -186,7 +208,8 @@ class WindowTests(unittest.TestCase):
             self.assertEqual(speech.calls, [("Hello", "alba", 70)])
             self.assertTrue(self.window.stop_button.isEnabled())
             self.send("Next question")
-            self.assertFalse(speech.busy)
+            self.assertTrue(self.window._streaming_voice)
+            self.assertEqual(speech.calls, [("Hello", "alba", 70)])
             self.wait_until(lambda: self.window._worker is None)
         self.window._new_conversation()
         self.assertFalse(speech.busy)
@@ -272,4 +295,76 @@ class WindowTests(unittest.TestCase):
         self.window.close()
         self.window._send_pending_transcription()
         self.assertIsNone(self.window._worker)
+
+    def start_streaming_reply(self):
+        speech, mic = self.use_fake_microphone()
+        self.window.auto_speak.setChecked(True)
+        gate = threading.Event()
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"First sentence. "}}]}\n\n'
+                while not gate.is_set():
+                    await asyncio.sleep(0.005)
+                yield b'data: {"choices":[{"delta":{"content":"Final sentence."},"finish_reason":"stop"}]}\n\n'
+                yield b'data: [DONE]\n\n'
+        return speech, mic, gate, self.mock_client(lambda request: httpx.Response(200, stream=Stream()))
+
+    def test_first_sentence_speaks_before_api_stream_finishes_without_final_replay(self):
+        speech, _, gate, client = self.start_streaming_reply()
+        with client:
+            try:
+                self.send()
+                self.wait_until(lambda: len(speech.calls) == 1)
+                self.assertIsNotNone(self.window._worker)
+                self.assertEqual(speech.calls[0][0], "First sentence.")
+                gate.set()
+                self.wait_until(lambda: self.window._worker is None)
+            finally:
+                gate.set()
+        self.assertEqual([c[0] for c in speech.calls], ["First sentence.", "Final sentence."])
+
+    def test_microphone_interrupts_stream_and_context_tracks_completed_audio(self):
+        speech, mic, gate, client = self.start_streaming_reply()
+        with client:
+            try:
+                self.send()
+                self.wait_until(lambda: len(speech.calls) == 1)
+                speech.spoken.emit("First sentence.")
+                self.window._begin_recording()
+                gate.set()
+                self.wait_until(lambda: self.window._worker is None)
+            finally:
+                gate.set()
+        self.assertTrue(mic.busy)
+        self.assertFalse(speech.busy)
+        self.assertEqual([c[0] for c in speech.calls], ["First sentence."])
+        self.assertIn("Completed spoken phrases: First sentence.", self.window._messages[-1]["content"])
+
+    def test_voice_failure_does_not_stop_text_stream_or_retry_speech(self):
+        speech, _, gate, client = self.start_streaming_reply()
+        with client:
+            try:
+                self.send()
+                self.wait_until(lambda: len(speech.calls) == 1)
+                speech.stop()
+                speech.failed.emit("Test voice failure")
+                gate.set()
+                self.wait_until(lambda: self.window._worker is None)
+            finally:
+                gate.set()
+        self.assertIn("Final sentence.", self.window.transcript.toPlainText())
+        self.assertEqual(len(speech.calls), 1)
+        self.assertEqual(self.window.voice_status.text(), "Test voice failure")
+
+    def test_replay_replaces_the_previous_interruption_note(self):
+        speech, _ = self.use_fake_microphone()
+        note = "[Voice playback was interrupted.]"
+        message = {"role": "assistant", "content": "Hello\n" + note}
+        self.window._messages = [message]
+        self.window._voice_message = message
+        self.window._voice_note = note
+        self.window._last_reply = "Hello"
+        self.window._read_last_reply()
+        self.assertEqual(message["content"], "Hello")
+        self.assertEqual(speech.calls[0][0], "Hello")
 

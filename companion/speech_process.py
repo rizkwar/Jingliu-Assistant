@@ -15,9 +15,7 @@ class PocketSpeaker:
         self.model = None
         self.voices = {}
 
-    def speak(self, text, voice, volume, report):
-        import numpy as np
-        import sounddevice as sd
+    def prepare(self, voice, report):
         import torch
         from pocket_tts import TTSModel
 
@@ -28,6 +26,12 @@ class PocketSpeaker:
         if voice not in self.voices:
             report("loading")
             self.voices[voice] = self.model.get_state_for_audio_prompt(voice)
+
+    def speak(self, text, voice, volume, report):
+        import numpy as np
+        import sounddevice as sd
+
+        self.prepare(voice, report)
         report("preparing")
         first = True
         with sd.OutputStream(samplerate=self.model.sample_rate, channels=1, dtype="float32") as output:
@@ -58,13 +62,13 @@ def run(input_stream=None, output_stream=None, speaker=None):
         try:
             command = json.loads(line)
             job_id = command["id"]
-            emit(job_id, "status", state="loading")
             # Third-party progress output must never corrupt the JSON protocol.
             with redirect_stdout(sys.stderr):
-                speaker.speak(
-                    command["text"], command["voice"], command["volume"],
-                    lambda state: emit(job_id, "status", state=state),
-                )
+                report = lambda state: emit(job_id, "status", state=state)
+                if command.get("action") == "prepare":
+                    speaker.prepare(command["voice"], report)
+                else:
+                    speaker.speak(command["text"], command["voice"], command["volume"], report)
             emit(job_id, "done")
         except ImportError:
             emit(job_id, "error", message="Voice dependencies are missing. Run pip install -r requirements.txt.")

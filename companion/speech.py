@@ -1,6 +1,7 @@
 """Qt controller for a lazy, reusable local speech process."""
 
 import json
+from collections import deque
 from pathlib import Path
 import sys
 from uuid import uuid4
@@ -8,12 +9,13 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal, Slot
 
 from .config import PROJECT_ROOT
-from .speech_text import spoken_text
+from .speech_text import SpeechSegmenter, spoken_text
 
 
 class SpeechController(QObject):
     changed = Signal(str)
     failed = Signal(str)
+    spoken = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -21,6 +23,13 @@ class SpeechController(QObject):
         self._pending = None
         self._stopping = False
         self._buffer = bytearray()
+        self._queue = deque()
+        self._segmenter = None
+        self._stream_open = False
+        self._session_active = False
+        self._current_text = ""
+        self._voice = "alba"
+        self._volume = 70
         self.process = QProcess(self)
         self.process.setWorkingDirectory(str(PROJECT_ROOT))
         # pythonw has no console streams; use the same venv's console executable for pipes.
@@ -47,7 +56,7 @@ class SpeechController(QObject):
 
     @property
     def busy(self):
-        return bool(self._active_id)
+        return bool(self._active_id or self._queue or self._stream_open)
 
     def speak(self, text, voice, volume):
         self.stop()
@@ -58,9 +67,55 @@ class SpeechController(QObject):
         if not text:
             self.changed.emit("No spoken text")
             return
+        self._voice, self._volume = voice, volume
+        self._session_active = True
+        self._queue.append(("speak", text))
+        self._advance()
+
+    def begin_reply(self, voice, volume):
+        """Warm the voice while the language model thinks; enqueue phrases as they arrive."""
+        self.stop()
+        if volume <= 0:
+            self.changed.emit("Voice muted")
+            return
+        self._voice, self._volume = voice, volume
+        self._segmenter = SpeechSegmenter()
+        self._stream_open = True
+        self._session_active = True
+        self._queue.append(("prepare", ""))
+        self._advance()
+
+    def feed_reply(self, text):
+        if self._segmenter is not None:
+            self._queue.extend(("speak", phrase) for phrase in self._segmenter.feed(text))
+            self._advance()
+
+    def finish_reply(self):
+        if self._segmenter is None:
+            return
+        self._queue.extend(("speak", phrase) for phrase in self._segmenter.finish())
+        self._segmenter = None
+        self._stream_open = False
+        self._advance()
+
+    def _advance(self):
+        if self._active_id:
+            return
+        if not self._queue:
+            if self._stream_open:
+                self.changed.emit("Waiting for next phrase…")
+            elif self._session_active:
+                self._session_active = False
+                self.changed.emit("Voice ready")
+            return
+        action, text = self._queue.popleft()
+        self._current_text = text
         self._active_id = uuid4().hex
-        self._pending = {"id": self._active_id, "text": text, "voice": voice, "volume": volume}
-        self.changed.emit("Loading voice…")
+        self._pending = {
+            "id": self._active_id, "action": action, "text": text,
+            "voice": self._voice, "volume": self._volume,
+        }
+        self.changed.emit("Loading voice…" if action == "prepare" else "Preparing speech…")
         self.deadline.start()
         if self._stopping:
             return  # The newest pending job starts after the old process exits.
@@ -84,6 +139,11 @@ class SpeechController(QObject):
         self.deadline.stop()
         self._active_id = ""
         self._pending = None
+        self._queue.clear()
+        self._segmenter = None
+        self._stream_open = False
+        self._session_active = False
+        self._current_text = ""
         if was_busy and self.process.state() != QProcess.ProcessState.NotRunning:
             self._stopping = True
             self.process.kill()
@@ -114,12 +174,15 @@ class SpeechController(QObject):
             if kind == "status":
                 labels = {"loading": "Loading voice…", "preparing": "Preparing speech…", "speaking": "Speaking…"}
                 self.changed.emit(labels.get(event.get("state"), "Preparing speech…"))
-            elif kind in {"done", "error"}:
+            elif kind == "done":
                 self.deadline.stop()
                 self._active_id = ""
-                self.changed.emit("Voice ready" if kind == "done" else "Voice unavailable")
-                if kind == "error":
-                    self.failed.emit(event.get("message", "Voice playback failed. Text chat still works."))
+                text, self._current_text = self._current_text, ""
+                if text:
+                    self.spoken.emit(text)
+                self._advance()
+            elif kind == "error":
+                self._fail(event.get("message", "Voice playback failed. Text chat still works."))
 
     @Slot()
     def _drain_errors(self):
@@ -133,23 +196,18 @@ class SpeechController(QObject):
         if expected and self._pending:
             self._start_or_dispatch()
         elif not expected and self.busy:
-            self._active_id = ""
-            self._pending = None
-            self.deadline.stop()
-            self.changed.emit("Voice unavailable")
-            self.failed.emit("The voice engine stopped unexpectedly. Try Preview again. Text chat still works.")
+            self._fail("The voice engine stopped unexpectedly. Try Preview again. Text chat still works.")
 
     @Slot(QProcess.ProcessError)
     def _process_error(self, error):
         if error == QProcess.ProcessError.FailedToStart:
-            self._active_id = ""
-            self._pending = None
-            self.deadline.stop()
-            self.changed.emit("Voice unavailable")
-            self.failed.emit("Could not start the voice engine. Check your Python environment.")
+            self._fail("Could not start the voice engine. Check your Python environment.")
+
+    def _fail(self, message):
+        self.stop()
+        self.changed.emit("Voice unavailable")
+        self.failed.emit(message)
 
     @Slot()
     def _timed_out(self):
-        self.stop()
-        self.changed.emit("Voice unavailable")
-        self.failed.emit("Voice setup or playback took too long. Check your connection and try Preview again.")
+        self._fail("Voice setup or playback took too long. Check your connection and try Preview again.")

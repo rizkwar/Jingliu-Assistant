@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from companion.speech import SpeechController
 from companion.speech_process import run
-from companion.speech_text import spoken_text
+from companion.speech_text import SpeechSegmenter, spoken_text
 
 
 class SpokenTextTests(unittest.TestCase):
@@ -29,6 +29,58 @@ class SpokenTextTests(unittest.TestCase):
         text = spoken_text("A long explanation. " * 200)
         self.assertLess(len(text), 2400)
         self.assertTrue(text.endswith("You can read the rest in the conversation."))
+
+
+class SegmentationTests(unittest.TestCase):
+    def phrases(self, chunks):
+        segmenter = SpeechSegmenter()
+        phrases = []
+        for chunk in chunks:
+            phrases.extend(segmenter.feed(chunk))
+        phrases.extend(segmenter.finish())
+        return phrases
+
+    def test_first_sentence_is_ready_before_end_of_response(self):
+        segmenter = SpeechSegmenter()
+        self.assertEqual(segmenter.feed("One sentence."), [])
+        self.assertEqual(segmenter.feed(" Still writing"), ["One sentence."])
+        self.assertEqual(segmenter.finish(), ["Still writing"])
+        self.assertEqual(segmenter.finish(), [])
+
+    def test_chunk_boundaries_do_not_change_spoken_output(self):
+        examples = [
+            "Dr. Mira measured 3.14 units. That worked!",
+            "First sentence. ```python\nprint('Do not read. ')\n``` Next sentence. Final words",
+            "See [this example](https://example.com/a.b) now. Then continue.",
+            "Use `call(1.2)` before continuing. Yes.",
+            'She said, "Hello." Then she left.',
+            "**Hello there.** More words to explain this. That's all.",
+            "A long explanation " * 40,
+        ]
+        for text in examples:
+            with self.subTest(text=text[:40]):
+                expected = self.phrases([text])
+                self.assertEqual(self.phrases(text), expected)
+                self.assertEqual(self.phrases([text[i:i + 7] for i in range(0, len(text), 7)]), expected)
+
+    def test_code_and_unclosed_code_are_omitted(self):
+        phrases = self.phrases("Start here. ```python\nsecret = 'Never speak this. '")
+        self.assertEqual(phrases, ["Start here."])
+
+    def test_abbreviations_decimals_and_urls_are_not_read_in_pieces(self):
+        phrases = self.phrases("Dr. Mira used 3.14 units. Visit https://example.com/a.b for details. Done.")
+        self.assertEqual(phrases, ["Dr. Mira used 3.14 units.", "Visit for details.", "Done."])
+
+    def test_total_spoken_preview_is_bounded_across_many_sentences(self):
+        phrases = self.phrases("Another complete sentence with useful words. " * 200)
+        self.assertLess(len(" ".join(phrases)), 2400)
+        self.assertEqual(phrases.count("You can read the rest in the conversation."), 1)
+
+    def test_unclosed_huge_code_block_does_not_grow_without_limit(self):
+        segmenter = SpeechSegmenter()
+        segmenter.feed("```\n" + "x" * 66000)
+        self.assertTrue(segmenter.capped)
+        self.assertEqual(segmenter.buffer, "")
 
 
 class SpeechProtocolTests(unittest.TestCase):
@@ -65,7 +117,7 @@ import json, sys, time
 for line in sys.stdin:
     command = json.loads(line)
     print(json.dumps({"id": command["id"], "type": "status", "state": "speaking"}), flush=True)
-    if command["text"] == "wait":
+    if command["text"].startswith("wait"):
         time.sleep(30)
     print(json.dumps({"id": command["id"], "type": "done"}), flush=True)
 '''
@@ -129,3 +181,48 @@ class SpeechControllerTests(unittest.TestCase):
         self.assertFalse(self.speech.busy)
         self.assertEqual(self.speech.process.state(), QProcess.ProcessState.NotRunning)
         self.assertEqual(self.states[-1], "Voice muted")
+
+    def test_streamed_phrases_play_in_order_without_repeating_at_finish(self):
+        played = []
+        self.speech.spoken.connect(played.append)
+        self.speech.begin_reply("alba", 70)
+        self.speech.feed_reply("First sentence. Second sentence. ")
+        self.wait_until(lambda: len(played) == 2)
+        self.assertTrue(self.speech.busy)  # More model text may still arrive.
+        pid = self.speech.process.processId()
+        self.speech.feed_reply("Final words")
+        self.speech.finish_reply()
+        self.wait_until(lambda: not self.speech.busy)
+        self.assertEqual(played, ["First sentence.", "Second sentence.", "Final words"])
+        self.assertEqual(self.speech.process.processId(), pid)
+
+    def test_stop_discards_the_queue_and_late_text_from_the_old_stream(self):
+        played = []
+        self.speech.spoken.connect(played.append)
+        self.speech.begin_reply("alba", 70)
+        self.speech.feed_reply("wait. Old queued sentence. ")
+        self.wait_until(lambda: self.speech._current_text == "wait." and self.states[-1] == "Speaking…")
+        self.speech.stop()
+        self.speech.feed_reply("Late old text. ")
+        self.speech.finish_reply()
+        self.speech.begin_reply("anna", 40)
+        self.speech.feed_reply("Fresh reply. ")
+        self.speech.finish_reply()
+        self.wait_until(lambda: not self.speech.busy)
+        self.assertEqual(played, ["Fresh reply."])
+        self.assertEqual(self.errors, [])
+
+    def test_voice_failure_clears_all_queued_and_future_stream_text(self):
+        self.speech.process.setArguments(["-u", "-c", '''
+import json, sys
+for line in sys.stdin:
+    c = json.loads(line)
+    print(json.dumps({'id': c['id'], 'type': 'error', 'message': 'Test voice failure'}), flush=True)
+'''])
+        self.speech.begin_reply("alba", 70)
+        self.speech.feed_reply("Should never play. More queued text. ")
+        self.wait_until(lambda: bool(self.errors))
+        self.speech.feed_reply("Late text. ")
+        self.speech.finish_reply()
+        self.assertFalse(self.speech.busy)
+        self.assertEqual(self.errors, ["Test voice failure"])

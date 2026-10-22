@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 3: push-to-talk conversations
+## Step 4: streamed spoken replies
 
 Implemented:
 
@@ -14,7 +14,8 @@ Implemented:
 - Stop, new conversation, and reload settings controls.
 - Background API work so the window stays responsive, including during cancellation.
 - Clear messages for missing keys, rate limits, network failures, and interrupted streams.
-- Local Pocket TTS speech on CPU, starting after a complete text reply arrives.
+- Local Pocket TTS speech on CPU, with phrases queued while the text reply streams.
+- Voice preparation overlaps language-model generation; queued phrases play in order.
 - Eight built-in English voices, a preview button, automatic speech toggle,
   volume control, and **Read last reply**.
 - Streamed audio playback through your Windows default output device.
@@ -82,7 +83,7 @@ Failed turns with no answer stay visible but are excluded from later context.
    minutes. Subsequent previews reuse cached files.
 3. Choose a voice and preview it again. The available voices are `alba`, `anna`,
    `azelma`, `cosette`, `eponine`, `fantine`, `jane`, and `vera`.
-4. Leave **Speak replies** checked to hear completed answers. Use **Stop** at
+4. Leave **Speak replies** checked to hear answers as phrases become available. Use **Stop** at
    any time, or **Read last reply** to hear an answer again.
 
 The selected voice, toggle, and volume controls apply during the current app
@@ -90,11 +91,33 @@ session. To set startup defaults, edit the `TTS_*` values in `.env` and click
 **Reload settings**. Existing `.env` files do not need updating; defaults apply
 when these entries are absent. Volume changes stop current playback; the new
 volume applies to the next preview or reply. A volume of zero skips synthesis.
+Changing the voice, volume, or turning speech off stops the current reply's
+speech queue. Enabling speech again applies to the next response; use **Read
+last reply** after generation finishes to replay the current answer.
 
 Fenced code blocks and raw URLs are omitted from speech. Very long answers are
 spoken as a short preview of up to about 2,400 characters; the full text stays
-visible. Speech currently starts after the language model finishes. Speaking
-sentences while the language model is still writing belongs to the next step.
+visible. Complete sentences are queued as text arrives, and long paragraphs
+can break at a shorter phrase boundary. The final unfinished phrase is queued
+once the text stream finishes. Common abbreviations, decimals, inline code,
+links, and code fences are handled across text chunks.
+
+The voice begins preparing when you send a message. The first spoken phrase can
+play before the language model finishes writing; first-use downloads, loading,
+or a very short response can still make audio begin after all the text arrives.
+There is no promise of a fixed response time. One speech process keeps the voice
+loaded and plays each phrase once, in order.
+
+To check streaming, leave **Speak replies** on and ask for a detailed explanation
+in several sentences. Watch the text continue while earlier sentences play.
+Then start recording or click **Stop**: current playback and queued phrases
+should stop, and none of them should resume in the next turn. Speech errors
+leave the text stream running. **Read last reply** deliberately replays the answer.
+
+The app tracks fully played phrases. If speech is interrupted, recent context
+includes those completed phrases and a note that part of the current phrase
+may also have played; it does not claim you heard the complete answer. The full
+visible text remains available in the conversation.
 
 **Stop** terminates the speech process, so the next spoken request reloads the
 model into RAM from its disk cache. Normal completed requests keep the model
@@ -159,9 +182,8 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Faster spoken replies** — speak sentences as the language model streams them.
-2. **Persistent companion** — SQLite history, manageable memory, and tray support.
-3. **Natural interaction** — speech detection, echo handling, and optional avatar.
+1. **Persistent companion** — SQLite history, manageable memory, and tray support.
+2. **Natural interaction** — speech detection, echo handling, and optional avatar.
 
 ## Verification
 
@@ -183,5 +205,5 @@ Local recognition follows [Faster-Whisper](https://github.com/SYSTRAN/faster-whi
 Suggested commit for this step:
 
 ```text
-feat: add push-to-talk with local Whisper transcription
+feat: stream spoken replies with queued phrase playback
 ```

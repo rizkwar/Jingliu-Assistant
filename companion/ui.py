@@ -61,6 +61,11 @@ class CompanionWindow(QMainWindow):
         self.microphone = microphone if microphone is not None else MicrophoneController(self)
         self._mic_draft = ""
         self._pending_transcription = ""
+        self._streaming_voice = False
+        self._voice_for_reply = False
+        self._spoken_phrases = []
+        self._voice_note = ""
+        self._voice_message = None
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
         self.resize(740, 960)
         self.setMinimumSize(560, 740)
@@ -133,6 +138,7 @@ class CompanionWindow(QMainWindow):
         layout.addWidget(self.voice_status)
         self.speech.changed.connect(self._voice_changed)
         self.speech.failed.connect(self._voice_failed)
+        self.speech.spoken.connect(self._phrase_spoken)
         self.auto_speak.toggled.connect(self._speech_toggled)
         self.voice.currentTextChanged.connect(self._voice_selected)
         self.volume.valueChanged.connect(self._volume_changed)
@@ -246,7 +252,10 @@ class CompanionWindow(QMainWindow):
         if len(text) > 16000:
             QMessageBox.information(self, "Message too long", "Please keep a message under 16,000 characters.")
             return
-        self.speech.stop()
+        self._interrupt_speech()
+        self._spoken_phrases = []
+        self._voice_note = ""
+        self._voice_message = None
         self._pending_transcription = ""
         self._messages.append({"role": "user", "content": text})
         # Keep at most 12 previous exchanges; the full visible transcript remains.
@@ -263,6 +272,10 @@ class CompanionWindow(QMainWindow):
         worker.chunk.connect(self._on_chunk)
         worker.finished.connect(self._on_finished)
         self._set_busy(True)
+        self._streaming_voice = self.auto_speak.isChecked() and self.volume.value() > 0
+        self._voice_for_reply = self._streaming_voice
+        if self._streaming_voice:
+            self.speech.begin_reply(self.voice.currentText(), self.volume.value())
         worker.start()
 
     def _set_busy(self, busy: bool) -> None:
@@ -292,6 +305,8 @@ class CompanionWindow(QMainWindow):
         self.status.setText("Replying…")
         self._reply += text
         self._write(text)
+        if self._streaming_voice:
+            self.speech.feed_reply(text)
 
     @Slot()
     def _on_finished(self) -> None:
@@ -299,12 +314,21 @@ class CompanionWindow(QMainWindow):
         if worker is None:
             return
         interrupted = worker.stop_requested.is_set() or bool(worker.error)
+        if interrupted:
+            self._interrupt_speech()
+        elif self._streaming_voice:
+            self.speech.finish_reply()
+        self._streaming_voice = False
         if self._reply:
             self._last_reply = self._reply
             content = self._reply
             if interrupted:
                 content += "\n[This reply was interrupted; only the text above was shown.]"
-            self._messages.append({"role": "assistant", "content": content})
+            if self._voice_note:
+                content += "\n" + self._voice_note
+            message = {"role": "assistant", "content": content}
+            self._voice_message = message
+            self._messages.append(message)
             self._messages = self._messages[-24:]
         else:
             self._messages.pop()  # Do not carry an unanswered failed turn into the next request.
@@ -320,8 +344,6 @@ class CompanionWindow(QMainWindow):
         if self._closing:
             QTimer.singleShot(0, self.close)
         else:
-            if self._reply and not interrupted and self.auto_speak.isChecked() and not self.microphone.busy:
-                self._read_last_reply()
             if self._pending_transcription:
                 QTimer.singleShot(0, self._send_pending_transcription)
             self.input.setFocus()
@@ -332,7 +354,7 @@ class CompanionWindow(QMainWindow):
         if self.microphone.busy:
             self.microphone.cancel()
             self.mic_status.setText("Recording or transcription cancelled")
-        self.speech.stop()
+        self._interrupt_speech()
         if self._worker:
             self._worker.stop()
             self.stop_button.setEnabled(False)
@@ -343,6 +365,11 @@ class CompanionWindow(QMainWindow):
         if self._worker or self.microphone.busy:
             return
         self.speech.stop()
+        self._streaming_voice = False
+        self._voice_for_reply = False
+        self._voice_message = None
+        self._spoken_phrases = []
+        self._voice_note = ""
         self._last_reply = ""
         self._pending_transcription = ""
         self.replay.setEnabled(False)
@@ -361,7 +388,7 @@ class CompanionWindow(QMainWindow):
             QMessageBox.warning(self, "Could not reload settings", str(exc))
             return
         self.settings = settings
-        self.speech.stop()
+        self._interrupt_speech()
         self.auto_speak.setChecked(settings.tts_enabled)
         self.voice.setCurrentText(settings.tts_voice)
         self.volume.setValue(settings.tts_volume)
@@ -392,6 +419,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _preview_voice(self) -> None:
+        self._interrupt_speech()
         self.speech.speak(
             f"Hi, I'm {self.settings.name}. Let's think it through, one step at a time.",
             self.voice.currentText(), self.volume.value(),
@@ -400,6 +428,13 @@ class CompanionWindow(QMainWindow):
     @Slot()
     def _read_last_reply(self) -> None:
         if self._last_reply:
+            self._interrupt_speech()
+            if self._voice_message is not None and self._voice_note:
+                self._voice_message["content"] = self._voice_message["content"].removesuffix("\n" + self._voice_note)
+            self._spoken_phrases = []
+            self._voice_note = ""
+            self._voice_for_reply = True
+            self._voice_message = self._messages[-1] if self._messages and self._messages[-1]["role"] == "assistant" else None
             self.speech.speak(self._last_reply, self.voice.currentText(), self.volume.value())
 
     @Slot(str)
@@ -409,21 +444,50 @@ class CompanionWindow(QMainWindow):
 
     @Slot(str)
     def _voice_failed(self, message: str) -> None:
+        if self._voice_for_reply:
+            self._record_voice_interruption()
+        self._streaming_voice = False
+        self._voice_for_reply = False
         self.voice_status.setText(message)
 
     @Slot(bool)
     def _speech_toggled(self, enabled: bool) -> None:
         if not enabled:
-            self.speech.stop()
+            self._interrupt_speech()
 
     @Slot(int)
     def _volume_changed(self, volume: int) -> None:
         self.volume_label.setText(f"{volume}%")
         # The current process has a fixed gain; stop so mute takes effect immediately.
-        self.speech.stop()
+        self._interrupt_speech()
 
     @Slot(str)
     def _voice_selected(self, voice: str) -> None:
+        self._interrupt_speech()
+
+    @Slot(str)
+    def _phrase_spoken(self, text: str) -> None:
+        if self._voice_for_reply:
+            self._spoken_phrases.append(text)
+
+    def _record_voice_interruption(self) -> None:
+        completed = " ".join(self._spoken_phrases) or "none confirmed"
+        note = (
+            "[Voice playback was interrupted. Completed spoken phrases: " + completed
+            + ". Part of the current phrase may also have played; the reply text is visible on screen.]"
+        )
+        if self._voice_message is not None:
+            content = self._voice_message["content"]
+            if self._voice_note:
+                content = content.removesuffix("\n" + self._voice_note)
+            self._voice_message["content"] = content + "\n" + note
+        self._voice_note = note
+
+    def _interrupt_speech(self) -> None:
+        if self._voice_for_reply and self.speech.busy:
+            self._record_voice_interruption()
+        self._voice_for_reply = False
+        self._streaming_voice = False
         self.speech.stop()
 
     @Slot()
@@ -432,7 +496,7 @@ class CompanionWindow(QMainWindow):
             return
         self._mic_draft = self.input.toPlainText()
         self._pending_transcription = ""
-        self.speech.stop()
+        self._interrupt_speech()
         if self._worker:
             self._worker.stop()
         self.microphone.start(self.mic_device.currentData(), self.settings.stt_model)
