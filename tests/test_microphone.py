@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication
 from companion.microphone import MicrophoneController
 from companion.microphone_process import run
 from companion.transcription import Transcriber
+from qt_test_support import application
 
 
 class TranscriptionTests(unittest.TestCase):
@@ -170,7 +171,7 @@ for line in sys.stdin:
 class ControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = application()
 
     def setUp(self):
         self.mic = MicrophoneController()

@@ -5,8 +5,8 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QSlider, QTextBrowser, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
+    QProgressBar, QPushButton, QScrollArea, QSlider, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from .config import Settings, VOICES, load_settings
@@ -20,6 +20,7 @@ from .continuity import MAX_SUMMARY_CHARS, SUMMARY_PROMPT, recent_messages, spli
 from .summary_ui import SummaryDialog
 from .avatar import AvatarController, activity_state
 from .prompts import reply_prompt
+from .reference_voice import inspect_reference, VoiceSetupError
 
 
 STYLE = """
@@ -85,6 +86,9 @@ class CompanionWindow(QMainWindow):
         self.preferences = preferences if preferences is not None else Preferences()
         self._last_reply = ""
         self.speech = speech if speech is not None else SpeechController(self)
+        if hasattr(self.speech, "set_hf_token"):
+            self.speech.set_hf_token(settings.hf_token)
+        self._reference_path = settings.tts_reference
         self.microphone = microphone if microphone is not None else MicrophoneController(self)
         self._mic_draft = ""
         self._handsfree_capture = False
@@ -171,8 +175,17 @@ class CompanionWindow(QMainWindow):
         self.settings_dialog = QDialog(self)
         self.settings_dialog.setWindowTitle("Companion settings")
         self.settings_dialog.setMinimumWidth(540)
-        settings_layout = QVBoxLayout(self.settings_dialog)
-        settings_layout.setContentsMargins(22, 22, 22, 22)
+        self.settings_dialog.resize(600, 780)
+        settings_outer = QVBoxLayout(self.settings_dialog)
+        settings_outer.setContentsMargins(22, 22, 22, 22)
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        settings_body = QWidget()
+        settings_layout = QVBoxLayout(settings_body)
+        settings_layout.setContentsMargins(0, 0, 10, 0)
+        settings_scroll.setWidget(settings_body)
+        settings_outer.addWidget(settings_scroll, 1)
         settings_layout.setSpacing(14)
         settings_hint = QLabel("Changes apply now. Save defaults to keep them after restarting.")
         settings_hint.setObjectName("hint")
@@ -194,13 +207,46 @@ class CompanionWindow(QMainWindow):
         voice_row.addStretch()
         voice_row.addWidget(QLabel("Voice"))
         self.voice = QComboBox()
-        self.voice.addItems(VOICES)
-        self.voice.setCurrentText(settings.tts_voice)
+        for voice in VOICES:
+            self.voice.addItem(voice, voice)
+        self.voice.addItem("Reference recording", "reference")
+        self.voice.setCurrentIndex(self.voice.findData(settings.tts_voice))
         voice_row.addWidget(self.voice)
         self.preview = QPushButton("Preview")
         self.preview.clicked.connect(self._preview_voice)
         voice_row.addWidget(self.preview)
         settings_layout.addLayout(voice_row)
+        reference_row = QHBoxLayout()
+        self.reference_label = QLabel()
+        self.reference_label.setObjectName("hint")
+        self.reference_label.setWordWrap(True)
+        reference_row.addWidget(self.reference_label, 1)
+        self.choose_reference = QPushButton("Choose reference WAV")
+        self.choose_reference.clicked.connect(self._choose_reference)
+        reference_row.addWidget(self.choose_reference)
+        self.clear_reference = QPushButton("Clear")
+        self.clear_reference.clicked.connect(self._clear_reference)
+        reference_row.addWidget(self.clear_reference)
+        settings_layout.addLayout(reference_row)
+        self._refresh_reference_label()
+        delivery_row = QHBoxLayout()
+        delivery_row.addWidget(QLabel("Delivery"))
+        self.delivery_rate = QSlider(Qt.Orientation.Horizontal)
+        self.delivery_rate.setRange(80, 115)
+        self.delivery_rate.setValue(settings.tts_rate)
+        self.delivery_rate.setMaximumWidth(130)
+        self.delivery_rate.setToolTip("Below 100% is slower and lower-pitched; above 100% is faster and higher-pitched.")
+        delivery_row.addWidget(self.delivery_rate)
+        self.delivery_label = QLabel(f"{settings.tts_rate}%")
+        self.delivery_label.setMinimumWidth(36)
+        delivery_row.addWidget(self.delivery_label)
+        delivery_row.addStretch()
+        self.character_voice_button = QPushButton("Use character voice")
+        self.character_voice_button.setEnabled(bool(settings.character_voice))
+        self.character_voice_button.setToolTip(settings.character_voice_description)
+        self.character_voice_button.clicked.connect(self._apply_character_voice)
+        delivery_row.addWidget(self.character_voice_button)
+        settings_layout.addLayout(delivery_row)
         audio_row = QHBoxLayout()
         audio_row.addWidget(QLabel("Volume"))
         self.volume = QSlider(Qt.Orientation.Horizontal)
@@ -227,6 +273,7 @@ class CompanionWindow(QMainWindow):
         self.auto_speak.toggled.connect(self._speech_toggled)
         self.voice.currentTextChanged.connect(self._voice_selected)
         self.volume.valueChanged.connect(self._volume_changed)
+        self.delivery_rate.valueChanged.connect(self._delivery_changed)
 
         mic_row = QHBoxLayout()
         self.mic_device = QComboBox()
@@ -299,7 +346,7 @@ class CompanionWindow(QMainWindow):
         done = QPushButton("Done")
         done.clicked.connect(self.settings_dialog.hide)
         settings_actions.addWidget(done)
-        settings_layout.addLayout(settings_actions)
+        settings_outer.addLayout(settings_actions)
 
         talk_row = QHBoxLayout()
         self.record_button = QPushButton("Hold to talk")
@@ -445,7 +492,7 @@ class CompanionWindow(QMainWindow):
         self._streaming_voice = self.auto_speak.isChecked() and self.volume.value() > 0
         self._voice_for_reply = self._streaming_voice
         if self._streaming_voice:
-            self.speech.begin_reply(self.voice.currentText(), self.volume.value())
+            self.speech.begin_reply(self._speech_voice(), self.volume.value(), self.delivery_rate.value())
         self._update_conversation_title()
         worker.start()
 
@@ -468,6 +515,9 @@ class CompanionWindow(QMainWindow):
         self.memory_button.setEnabled(not busy)
         self.context_button.setEnabled(not busy)
         self.preview.setEnabled(not busy and not self.speech.busy)
+        self.character_voice_button.setEnabled(bool(self.settings.character_voice) and not busy)
+        self.choose_reference.setEnabled(not busy)
+        self.clear_reference.setEnabled(bool(self._reference_path) and not busy)
         self.replay.setEnabled(not busy and bool(self._last_reply) and not self.speech.busy)
         self.mic_device.setEnabled(not busy)
         self.refresh_mics.setEnabled(not busy)
@@ -624,8 +674,16 @@ class CompanionWindow(QMainWindow):
         self.settings = settings
         self._refresh_character_label()
         self._interrupt_speech()
+        if hasattr(self.speech, "set_hf_token"):
+            self.speech.set_hf_token(settings.hf_token)
+        if settings.tts_voice == "reference":
+            self.speech.shutdown()  # Retry gated weights after CLI login/access changes.
+        self._reference_path = settings.tts_reference
         self.auto_speak.setChecked(settings.tts_enabled)
-        self.voice.setCurrentText(settings.tts_voice)
+        self.voice.setCurrentIndex(self.voice.findData(settings.tts_voice))
+        self._refresh_reference_label()
+        self.delivery_rate.setValue(settings.tts_rate)
+        self.character_voice_button.setToolTip(settings.character_voice_description)
         self.volume.setValue(settings.tts_volume)
         self.auto_send.setChecked(settings.stt_auto_send)
         self.stt_model.setCurrentText(settings.stt_model)
@@ -647,6 +705,7 @@ class CompanionWindow(QMainWindow):
         self._write("\nSettings reloaded.\n", "#a4adbf")
         self.preference_status.setText("Reloaded .env and the character profile, with saved app preferences.")
         self._activity_error = False
+        self._refresh_controls()
         self._refresh_activity()
         self.avatar.refresh()
 
@@ -674,8 +733,9 @@ class CompanionWindow(QMainWindow):
     @Slot()
     def _save_preferences(self) -> None:
         settings = replace(
-            self.settings, tts_enabled=self.auto_speak.isChecked(), tts_voice=self.voice.currentText(),
-            tts_volume=self.volume.value(), stt_auto_send=self.auto_send.isChecked(),
+            self.settings, tts_enabled=self.auto_speak.isChecked(), tts_voice=self.voice.currentData(),
+            tts_reference=self._reference_path,
+            tts_volume=self.volume.value(), tts_rate=self.delivery_rate.value(), stt_auto_send=self.auto_send.isChecked(),
             stt_model=self.stt_model.currentText(),
             stt_pause_ms=self.speech_pause.currentData(),
             stt_microphone="" if self.mic_device.currentData() is None else str(self.mic_device.currentData()),
@@ -789,7 +849,7 @@ class CompanionWindow(QMainWindow):
         self._interrupt_speech()
         self.speech.speak(
             self.settings.voice_preview or f"Hi, I'm {self.settings.name}. Let's think it through, one step at a time.",
-            self.voice.currentText(), self.volume.value(),
+            self._speech_voice(), self.volume.value(), self.delivery_rate.value(),
         )
 
     @Slot()
@@ -806,7 +866,7 @@ class CompanionWindow(QMainWindow):
             self._voice_for_reply = True
             self._voice_message = self._messages[-1] if self._messages and self._messages[-1]["role"] == "assistant" else None
             self._voice_message_id = self._last_reply_id
-            self.speech.speak(self._last_reply, self.voice.currentText(), self.volume.value())
+            self.speech.speak(self._last_reply, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
 
     @Slot(str)
     def _voice_changed(self, state: str) -> None:
@@ -840,6 +900,63 @@ class CompanionWindow(QMainWindow):
     @Slot(str)
     def _voice_selected(self, voice: str) -> None:
         self._interrupt_speech()
+        self._refresh_reference_label()
+
+    def _speech_voice(self) -> str:
+        if self.voice.currentData() == "reference":
+            return self._reference_path or "reference"
+        return self.voice.currentData()
+
+    def _refresh_reference_label(self) -> None:
+        if not self._reference_path:
+            self.reference_label.setText("No reference selected · Use a clean 3–30 second WAV of one speaker.")
+        else:
+            active = self.voice.currentData() == "reference"
+            self.reference_label.setText(("Reference: " if active else "Saved reference (inactive): ") + Path(self._reference_path).name)
+        self.reference_label.setToolTip(self._reference_path)
+        self.clear_reference.setEnabled(bool(self._reference_path))
+
+    @Slot()
+    def _choose_reference(self) -> None:
+        self._end_handsfree()
+        path, _ = QFileDialog.getOpenFileName(self.settings_dialog, "Choose a reference voice", self._reference_path, "PCM WAV audio (*.wav)")
+        if not path:
+            return
+        try:
+            reference = inspect_reference(path)
+        except VoiceSetupError as exc:
+            QMessageBox.warning(self, "Reference voice", str(exc))
+            return
+        self._interrupt_speech()
+        self._reference_path = str(reference.path)
+        self.voice.setCurrentIndex(self.voice.findData("reference"))
+        self.delivery_rate.setValue(100)
+        self._refresh_reference_label()
+        self.preference_status.setText(f"Reference selected: {reference.seconds:.1f}s. Preview to test model access and the voice; Save defaults to keep it.")
+
+    @Slot()
+    def _clear_reference(self) -> None:
+        self._interrupt_speech()
+        self._reference_path = ""
+        if self.voice.currentData() == "reference":
+            self.voice.setCurrentIndex(self.voice.findData(self.settings.character_voice or "alba"))
+            self.delivery_rate.setValue(100)
+        self._refresh_reference_label()
+
+    @Slot(int)
+    def _delivery_changed(self, rate: int) -> None:
+        self.delivery_label.setText(f"{rate}%")
+        self._interrupt_speech()
+
+    @Slot()
+    def _apply_character_voice(self) -> None:
+        if self._worker or self.microphone.busy or self.suspended or not self.settings.character_voice:
+            return
+        self._end_handsfree()
+        self._interrupt_speech()
+        self.voice.setCurrentText(self.settings.character_voice)
+        self.delivery_rate.setValue(self.settings.character_voice_rate)
+        self.preference_status.setText("Character voice applied. Preview to listen; Save defaults to keep it.")
 
     @Slot(str)
     def _phrase_spoken(self, text: str) -> None:
@@ -1095,7 +1212,9 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _scroll_to_latest(self) -> None:
-        self.transcript.ensureCursorVisible()
+        if not self._closing:
+            scrollbar = self.transcript.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
 
     @Slot()
     def _refresh_continuity(self) -> None:

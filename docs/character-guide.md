@@ -14,10 +14,13 @@ companion. All sample dialogue is newly written, rather than copied game lines.
 3. Edit the profile, save it, then click **Reload .env + character**. Restarting
    also loads it. A malformed file produces an error; a failed reload keeps your
    current profile and unsent draft intact.
-4. Choose a built-in **Voice**, click **Preview**, and use **Save defaults** to
-   keep it. The preview sentence comes from the profile. Voice selection is
-   independent of personality; this uses Pocket TTS's existing voices, not the
-   game's actor or a voice clone.
+4. Click **Use character voice**, then **Preview**, and **Save defaults** to
+   retain it. The Jingliu preset uses **Jane at 94% delivery**, aiming for a calm,
+   slightly lower English sound. You can still select any built-in **Voice** and
+   adjust **Delivery**. This is a stock voice approximation, not the game's actor
+   or a voice clone. The preview sentence comes from the profile.
+   To use a recording's vocal characteristics, select **Choose reference WAV**;
+   the [reference-voice guide](reference-voice.md) covers model access and setup.
 5. Use **New** to sample the character without old conversation messages shaping
    the exchange. Your selected saved memories can still accompany the new chat.
 
@@ -48,6 +51,7 @@ multiple lines. Lists use square brackets and quoted items. Keep the file under
 | `identity` | `name`, `identity`, `background` | Name, portrayal, and optional fictional history. |
 | `personality` | `traits`, `interests`, `likes`, `dislikes`, `opinions` | Stable temperament and judgments. |
 | `speech` | `style`, `vocabulary`, `humor`, `response_length`, `preview` | Spoken phrasing and a local voice audition. |
+| `voice` | `builtin`, `rate`, `description` | Optional local stock-voice preset, applied with Use character voice. |
 | `relationship` | `dynamic`, `affection`, `boundaries` | How she expresses interest and responds to your comfort. |
 | `reactions` | `excited`, `confused`, `frustrated`, `joking`, `disagreeing`, `vulnerable` | Situational reactions without changing her core identity. |
 | `continuity` | `shared_developments` | Relevant kinds of real discussion to acknowledge. |
@@ -58,6 +62,13 @@ multiple lines. Lists use square brackets and quoted items. Keep the file under
 `identity.name`, a nonempty `personality.traits` list, and `speech.style` are
 required. The other fields are optional. Unknown fields are rejected to expose
 typos rather than silently ignoring your edits.
+
+If present, `[voice]` needs a valid built-in `builtin` name. `rate` is a whole
+percentage from 80 to 115, defaulting to 100. Below 100%, playback becomes slower
+and lower-pitched together; above 100%, faster and higher-pitched. This changes
+acoustic delivery, rather than asking the language model to narrate a voice.
+The voice section is kept out of the dialogue prompt. Existing saved voices
+remain in effect until you apply a preset or choose another voice yourself.
 
 For a more romantic interpretation, edit `relationship.affection` and the flirting
 examples. For a more reserved one, reduce overt affection there. Keep practical

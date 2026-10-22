@@ -48,6 +48,17 @@ class DoctorTests(unittest.TestCase):
                     result = next(item for item in run_checks(self.root) if item.name == missing)
                 self.assertEqual(result.status, expected)
 
+    def test_invalid_saved_reference_warns_without_blocking_text_chat(self):
+        from companion.config import load_settings
+        from companion.preferences import Preferences
+        from dataclasses import replace
+        Preferences(self.root / "data" / "preferences.json").save(
+            replace(load_settings(self.root), tts_voice="reference", tts_reference="missing-private-reference.wav"))
+        checks = run_checks(self.root)
+        result = next(item for item in checks if item.name == "Reference audio")
+        self.assertEqual(result.status, "warning")
+        self.assertNotIn("missing-private-reference.wav", str(checks))
+
     def test_invalid_configuration_and_unwritable_data_are_errors_without_raw_exception_text(self):
         with patch("companion.config.load_settings", side_effect=ValueError("private-key-value")), \
              patch("companion.doctor.tempfile.TemporaryFile", side_effect=PermissionError("private-key-value")):

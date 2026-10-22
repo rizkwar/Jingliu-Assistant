@@ -89,11 +89,18 @@ def run_checks(root=ROOT, engines=False):
                                 "Key or model ID needs attention in .env. Offline features remain available."))
         try:
             from .preferences import Preferences
-            Preferences(root / "data" / "preferences.json").load(settings)
+            settings = Preferences(root / "data" / "preferences.json").load(settings)
             checks.append(Check("ok", "Saved preferences", "Readable, or defaults will be used."))
         except (OSError, ValueError):
             checks.append(Check("warning", "Saved preferences",
                                 "Invalid or unreadable. The app can use defaults; Settings > Save defaults repairs the file."))
+        if settings.tts_voice == "reference":
+            from .reference_voice import inspect_reference, VoiceSetupError
+            try:
+                inspect_reference(settings.tts_reference)
+                checks.append(Check("ok", "Reference audio", "Local WAV is valid. Preview checks full model access; similarity has not been evaluated."))
+            except VoiceSetupError:
+                checks.append(Check("warning", "Reference audio", "Choose a valid reference WAV in Settings. See docs/reference-voice.md."))
     except ImportError:
         checks.append(Check("error", "Configuration", "Configuration dependencies are missing. Run Setup Mira.cmd."))
     except (OSError, ValueError, UnicodeError):

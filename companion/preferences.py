@@ -7,10 +7,13 @@ from pathlib import Path
 import tempfile
 
 from .config import Settings, VOICES
+from .voice_settings import validate_rate
 
 
 FIELDS = {
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
+    "tts_rate": int,
+    "tts_reference": str,
     "stt_model": str, "stt_auto_send": bool, "stt_microphone": str,
     "memory_enabled": bool, "close_to_tray": bool,
     "stt_pause_ms": int,
@@ -26,10 +29,14 @@ def validate(values):
     if any(type(value) not in (FIELDS[key] if isinstance(FIELDS[key], tuple) else (FIELDS[key],))
            for key, value in clean.items()):
         raise ValueError("Saved preferences contain an invalid value type.")
-    if "tts_voice" in clean and clean["tts_voice"] not in VOICES:
+    if "tts_voice" in clean and clean["tts_voice"] not in (*VOICES, "reference"):
         raise ValueError("Saved voice is not available.")
     if "tts_volume" in clean and not 0 <= clean["tts_volume"] <= 100:
         raise ValueError("Saved volume must be from 0 to 100.")
+    if "tts_rate" in clean:
+        validate_rate(clean["tts_rate"])
+    if len(clean.get("tts_reference", "")) > 4096:
+        raise ValueError("Saved reference audio path is too long.")
     if "stt_model" in clean and clean["stt_model"] not in {"tiny.en", "base.en", "small.en"}:
         raise ValueError("Saved transcription model is not available.")
     if "stt_pause_ms" in clean and not 600 <= clean["stt_pause_ms"] <= 2500:

@@ -9,4 +9,5 @@ __pycache__/
 artifacts/
 .cache/
 data/
+voices/
 

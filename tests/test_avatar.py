@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QMenu
 from companion.avatar import activity_state, visible_position
 from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
+from qt_test_support import application
 
 
 SETTINGS = Settings("", DEFAULT_MODEL, "Mira", "Hi", tts_enabled=False)
@@ -51,7 +52,7 @@ class ActivityTests(unittest.TestCase):
 class AvatarWindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = application()
 
     def setUp(self):
         self.window = CompanionWindow(SETTINGS)

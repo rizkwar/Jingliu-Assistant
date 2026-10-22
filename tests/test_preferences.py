@@ -21,7 +21,7 @@ class PreferenceTests(unittest.TestCase):
 
     def test_restart_restores_only_nonsecret_preferences_over_new_env_defaults(self):
         self.assertEqual(self.preferences.load(DEFAULTS), DEFAULTS)
-        self.preferences.save(replace(DEFAULTS, tts_voice="anna", tts_volume=0,
+        self.preferences.save(replace(DEFAULTS, tts_voice="anna", tts_volume=0, tts_rate=94,
                                       memory_enabled=False, stt_microphone="0", close_to_tray=False))
         stored = self.path.read_text(encoding="utf-8")
         self.assertNotIn("secret-key", stored)
@@ -31,6 +31,7 @@ class PreferenceTests(unittest.TestCase):
         loaded = Preferences(self.path).load(changed_env)
         self.assertEqual((loaded.api_key, loaded.system_prompt, loaded.model), ("new-key", "New character", "vendor/new"))
         self.assertEqual((loaded.tts_voice, loaded.tts_volume, loaded.stt_microphone), ("anna", 0, "0"))
+        self.assertEqual(loaded.tts_rate, 94)
         self.assertFalse(loaded.memory_enabled)
         self.assertFalse(loaded.close_to_tray)
 
@@ -39,6 +40,8 @@ class PreferenceTests(unittest.TestCase):
         for data in ["{bad", "[]", '{"version":2}', '{"version":1,"settings":null}',
                      '{"version":1,"settings":{"tts_volume":true}}',
                      '{"version":1,"settings":{"tts_volume":101}}',
+                     '{"version":1,"settings":{"tts_rate":true}}',
+                     '{"version":1,"settings":{"tts_rate":79}}',
                      '{"version":1,"settings":{"tts_voice":"missing"}}',
                      '{"version":1,"settings":{"stt_model":"missing"}}',
                      '{"version":1,"settings":{"stt_pause_ms":true}}',
@@ -56,6 +59,13 @@ class PreferenceTests(unittest.TestCase):
         self.path.write_text(json.dumps({"version": 1, "settings": {"api_key": "injected", "tts_volume": 15}}))
         self.assertEqual(self.preferences.load(DEFAULTS).api_key, "secret-key")
         self.assertEqual(self.preferences.load(DEFAULTS).tts_volume, 15)
+
+    def test_reference_choice_persists_without_hugging_face_credentials(self):
+        path = str(self.path.parent / "reference.wav")
+        self.preferences.save(replace(DEFAULTS, tts_voice="reference", tts_reference=path, hf_token="hf-secret"))
+        self.assertNotIn("hf-secret", self.path.read_text())
+        loaded = self.preferences.load(DEFAULTS)
+        self.assertEqual((loaded.tts_voice, loaded.tts_reference), ("reference", path))
 
     def test_failed_atomic_replace_keeps_previous_defaults_and_cleans_temp_file(self):
         self.preferences.save(DEFAULTS)

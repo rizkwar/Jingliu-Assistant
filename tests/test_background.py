@@ -10,12 +10,13 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from companion.background import TrayController
 from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
+from qt_test_support import application
 
 
 class TrayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = application()
 
     def setUp(self):
         self.window = CompanionWindow(Settings("", DEFAULT_MODEL, "Mira", "Hi"))

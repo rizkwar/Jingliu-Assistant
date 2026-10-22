@@ -5,11 +5,11 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 from .character import load_character
+from .voice_settings import VOICES, validate_rate
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
-VOICES = ("alba", "anna", "azelma", "cosette", "eponine", "fantine", "jane", "vera")
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,12 @@ class Settings:
     avatar_y: int | None = None
     character_path: str = ""
     voice_preview: str = ""
+    tts_rate: int = 100
+    character_voice: str = ""
+    character_voice_rate: int = 100
+    character_voice_description: str = ""
+    tts_reference: str = ""
+    hf_token: str = field(default="", repr=False)
 
     def validate_connection(self) -> None:
         if not self.api_key or self.api_key == "your_key_here":
@@ -55,8 +61,9 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
     name = (values.get("COMPANION_NAME") or "Mira").strip() or "Mira"
     character = load_character(root, (values.get("CHARACTER_PROFILE") or "").strip(), name)
     voice = (values.get("TTS_VOICE") or "alba").strip().lower()
-    if voice not in VOICES:
-        raise ValueError("TTS_VOICE must be one of: " + ", ".join(VOICES))
+    if voice not in (*VOICES, "reference"):
+        raise ValueError("TTS_VOICE must be one of: " + ", ".join((*VOICES, "reference")))
+    reference = (values.get("TTS_REFERENCE") or "").strip()
     enabled = (values.get("TTS_ENABLED") or "true").strip().lower()
     if enabled not in {"true", "false", "1", "0", "yes", "no"}:
         raise ValueError("TTS_ENABLED must be true or false.")
@@ -66,6 +73,10 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
         raise ValueError("TTS_VOLUME must be a whole number from 0 to 100.") from exc
     if not 0 <= volume <= 100:
         raise ValueError("TTS_VOLUME must be a whole number from 0 to 100.")
+    try:
+        rate = validate_rate(int(values.get("TTS_RATE") or "100"))
+    except ValueError as exc:
+        raise ValueError("TTS_RATE must be a whole percentage from 80 to 115.") from exc
     stt_model = (values.get("STT_MODEL") or "base.en").strip()
     if stt_model not in {"tiny.en", "base.en", "small.en"}:
         raise ValueError("STT_MODEL must be tiny.en, base.en, or small.en.")
@@ -85,5 +96,11 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
         stt_microphone=(values.get("STT_MICROPHONE") or "").strip(),
         character_path=str(character.path),
         voice_preview=character.preview,
+        tts_rate=rate,
+        character_voice=character.voice,
+        character_voice_rate=character.rate,
+        character_voice_description=character.voice_description,
+        tts_reference=str((root / reference).resolve()) if reference else "",
+        hf_token=(values.get("HF_TOKEN") or "").strip(),
     )
 

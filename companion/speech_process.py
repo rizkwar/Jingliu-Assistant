@@ -1,7 +1,7 @@
 """Local speech engine. JSON commands on stdin, progress events on stdout.
 
 Run separately so Stop can cancel even a model download or native inference call.
-No API key, conversation history, or Qt dependency is needed here.
+No OpenRouter key, conversation history, or Qt dependency is needed here.
 """
 
 from contextlib import redirect_stdout
@@ -9,32 +9,57 @@ import json
 import logging
 import sys
 
+from .voice_settings import VOICES, playback_sample_rate, validate_rate
+from .reference_voice import inspect_reference, VoiceSetupError
+
 
 class PocketSpeaker:
     def __init__(self):
         self.model = None
         self.voices = {}
+        self.reference_keys = {}
 
     def prepare(self, voice, report):
+        reference = None
+        if voice not in VOICES:
+            reference = inspect_reference(voice)
         import torch
         from pocket_tts import TTSModel
-
         if self.model is None:
             report("loading")
             torch.set_num_threads(2)
             self.model = TTSModel.load_model(language="english_2026-10")
+        if reference is not None:
+            if not getattr(self.model, "has_voice_cloning", False):
+                raise VoiceSetupError(
+                    "The loaded Pocket TTS model supports stock voices only. Reference voices need access to "
+                    "kyutai/pocket-tts on Hugging Face. Review its model access terms, authenticate with HF_TOKEN "
+                    "in .env or the Hugging Face CLI, then reload settings and restart the voice engine. "
+                    "See docs/reference-voice.md. No stock voice was substituted."
+                )
+            if self.reference_keys.get(voice) != reference.fingerprint:
+                report("preparing")
+                for old in list(self.reference_keys):
+                    if old != voice:
+                        self.reference_keys.pop(old)
+                        self.voices.pop(old, None)
+                # The validator bounds duration; no external URL or serialized state is accepted.
+                self.voices[voice] = self.model.get_state_for_audio_prompt(reference.path)
+                self.reference_keys[voice] = reference.fingerprint
+            return
         if voice not in self.voices:
             report("loading")
             self.voices[voice] = self.model.get_state_for_audio_prompt(voice)
 
-    def speak(self, text, voice, volume, report):
+    def speak(self, text, voice, volume, report, rate=100):
         import numpy as np
         import sounddevice as sd
 
+        validate_rate(rate)
         self.prepare(voice, report)
         report("preparing")
         first = True
-        with sd.OutputStream(samplerate=self.model.sample_rate, channels=1, dtype="float32") as output:
+        with sd.OutputStream(samplerate=playback_sample_rate(self.model.sample_rate, rate), channels=1, dtype="float32") as output:
             for chunk in self.model.generate_audio_stream(self.voices[voice], text):
                 pcm = chunk.detach().cpu().numpy().astype(np.float32).reshape(-1, 1)
                 if not pcm.size:
@@ -68,8 +93,11 @@ def run(input_stream=None, output_stream=None, speaker=None):
                 if command.get("action") == "prepare":
                     speaker.prepare(command["voice"], report)
                 else:
-                    speaker.speak(command["text"], command["voice"], command["volume"], report)
+                    speaker.speak(command["text"], command["voice"], command["volume"], report,
+                                  rate=validate_rate(command.get("rate", 100)))
             emit(job_id, "done")
+        except VoiceSetupError as exc:
+            emit(job_id, "error", message=str(exc))
         except ImportError:
             emit(job_id, "error", message="Voice dependencies are missing. Run pip install -r requirements.txt.")
         except Exception:

@@ -20,6 +20,7 @@ from companion.worker import ReplyWorker
 from companion.speech_text import SpeechSegmenter
 from companion.storage import Store
 from companion.summary_ui import SummaryDialog
+from qt_test_support import application
 
 
 SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.", tts_enabled=False)
@@ -37,9 +38,11 @@ class FakeSpeech(QObject):
         self.calls = []
         self.segmenter = None
         self.state = "idle"
+        self.rates = []
 
-    def begin_reply(self, voice, volume):
+    def begin_reply(self, voice, volume, rate=100):
         self.voice, self.volume = voice, volume
+        self.rate = rate
         self.segmenter = SpeechSegmenter()
         self.busy = True
         self.state = "loading"
@@ -48,16 +51,17 @@ class FakeSpeech(QObject):
     def feed_reply(self, text):
         if self.segmenter is not None:
             for phrase in self.segmenter.feed(text):
-                self.speak(phrase, self.voice, self.volume)
+                self.speak(phrase, self.voice, self.volume, self.rate)
 
     def finish_reply(self):
         if self.segmenter is not None:
             for phrase in self.segmenter.finish():
-                self.speak(phrase, self.voice, self.volume)
+                self.speak(phrase, self.voice, self.volume, self.rate)
             self.segmenter = None
 
-    def speak(self, text, voice, volume):
+    def speak(self, text, voice, volume, rate=100):
         self.calls.append((text, voice, volume))
+        self.rates.append(rate)
         self.busy = True
         self.state = "speaking"
         self.changed.emit("Speaking…")
@@ -116,7 +120,7 @@ class FakeMicrophone(QObject):
 class WindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = application()
         cls.app.setStyle("Fusion")
 
     def setUp(self):
@@ -148,6 +152,13 @@ class WindowTests(unittest.TestCase):
     def send(self, text="Hi"):
         self.window.input.setPlainText(text)
         self.window._send()
+
+    def replace_window(self, settings=SETTINGS, **kwargs):
+        self.window.request_quit()
+        self.window.deleteLater()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        self.window = CompanionWindow(settings, **kwargs)
 
     def test_completed_turn_is_shown_and_retained_as_plain_text(self):
         def handler(request):
@@ -204,9 +215,8 @@ class WindowTests(unittest.TestCase):
         self.assertFalse(worker.error)
 
     def test_completed_reply_speaks_and_next_message_replaces_voice_session(self):
-        self.window.close()
         speech = FakeSpeech()
-        self.window = CompanionWindow(replace(SETTINGS, tts_enabled=True), speech=speech)
+        self.replace_window(replace(SETTINGS, tts_enabled=True), speech=speech)
         def handler(request):
             return httpx.Response(200, text=(
                 'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\n'
@@ -226,9 +236,8 @@ class WindowTests(unittest.TestCase):
         self.assertFalse(self.window.replay.isEnabled())
 
     def test_preview_needs_no_api_key_and_voice_error_keeps_text_chat_usable(self):
-        self.window.close()
         speech = FakeSpeech()
-        self.window = CompanionWindow(replace(SETTINGS, api_key=""), speech=speech)
+        self.replace_window(replace(SETTINGS, api_key=""), speech=speech)
         self.window._preview_voice()
         self.assertIn("Mira", speech.calls[0][0])
         speech.busy = False
@@ -244,8 +253,7 @@ class WindowTests(unittest.TestCase):
         settings = replace(SETTINGS, name=character.name, system_prompt=character.prompt,
                            character_path=str(character.path), voice_preview=character.preview)
         speech = FakeSpeech()
-        self.window.close()
-        self.window = CompanionWindow(SETTINGS, speech=speech)
+        self.replace_window(speech=speech)
         self.window.input.setPlainText("Keep this draft")
         conversation = self.window._conversation_id
         with patch("companion.ui.load_settings", return_value=settings):
@@ -271,11 +279,74 @@ class WindowTests(unittest.TestCase):
         self.assertIs(self.window.settings, previous)
         self.assertEqual(self.window.input.toPlainText(), "An unsent thought")
 
+    def test_character_voice_applies_to_preview_stream_and_replay_and_can_be_saved(self):
+        speech = FakeSpeech()
+        self.replace_window(replace(SETTINGS, character_voice="jane", character_voice_rate=94), speech=speech)
+        self.window.character_voice_button.click()
+        self.assertEqual(self.window.voice.currentText(), "jane")
+        self.assertEqual(self.window.delivery_rate.value(), 94)
+        self.window._preview_voice()
+        self.assertEqual(speech.rates[-1], 94)
+        self.window.auto_speak.setChecked(True)
+        with self.mock_client(lambda request: httpx.Response(200, text='data: {"choices":[{"delta":{"content":"A measured reply."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')):
+            self.send()
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertEqual(speech.rates[-1], 94)
+        self.window._read_last_reply()
+        self.assertEqual(speech.rates[-1], 94)
+        self.window.delivery_rate.setValue(100)
+        self.assertFalse(speech.busy)
+        self.window.delivery_rate.setValue(94)
+        self.window._save_preferences()
+        self.assertEqual(self.window.preferences.load(SETTINGS).tts_rate, 94)
+
+    def test_reference_selection_routes_preview_stream_replay_and_saved_reload_to_wav(self):
+        from pathlib import Path
+        import tempfile
+        from test_reference_voice import write_reference
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "reference.wav"
+            write_reference(path)
+            speech = FakeSpeech()
+            self.replace_window(replace(SETTINGS, tts_enabled=True), speech=speech)
+            with patch("companion.ui.QFileDialog.getOpenFileName", return_value=(str(path), "")):
+                self.window.choose_reference.click()
+            source = str(path.resolve())
+            self.assertEqual(self.window.voice.currentData(), "reference")
+            self.assertEqual(self.window.delivery_rate.value(), 100)
+            self.window._preview_voice()
+            self.assertEqual(speech.calls[-1][1], source)
+            with self.mock_client(lambda request: httpx.Response(200, text='data: {"choices":[{"delta":{"content":"A reference reply."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')):
+                self.send()
+                self.wait_until(lambda: self.window._worker is None)
+            self.assertEqual(speech.calls[-1][1], source)
+            self.window._read_last_reply()
+            self.assertEqual(speech.calls[-1][1], source)
+            self.window._save_preferences()
+            with patch("companion.ui.load_settings", return_value=SETTINGS):
+                self.window._reload_settings()
+            self.assertEqual(self.window._speech_voice(), source)
+            self.window.clear_reference.click()
+            self.assertNotEqual(self.window.voice.currentData(), "reference")
+            self.assertEqual(self.window._reference_path, "")
+
+    def test_invalid_reference_does_not_replace_current_voice(self):
+        with patch("companion.ui.QFileDialog.getOpenFileName", return_value=("missing.wav", "")), \
+             patch("companion.ui.QMessageBox.warning") as warning:
+            self.window.choose_reference.click()
+        warning.assert_called_once()
+        self.assertEqual(self.window.voice.currentData(), SETTINGS.tts_voice)
+        self.assertEqual(self.window._reference_path, "")
+
+    def test_queued_scroll_does_not_access_transcript_after_close(self):
+        self.window.request_quit()
+        with patch.object(self.window.transcript, "verticalScrollBar") as ensure_visible:
+            self.window._scroll_to_latest()
+        ensure_visible.assert_not_called()
+
     def use_fake_microphone(self):
-        self.window.close()
-        self.window.deleteLater()
         speech, microphone = FakeSpeech(), FakeMicrophone()
-        self.window = CompanionWindow(SETTINGS, speech=speech, microphone=microphone)
+        self.replace_window(speech=speech, microphone=microphone)
         return speech, microphone
 
     def test_recording_stops_speech_and_preserves_existing_draft_for_review(self):
@@ -413,11 +484,9 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(speech.calls[0][0], "Hello")
 
     def use_shared_store(self):
-        self.window.close()
-        self.window.deleteLater()
         store = Store(":memory:")
         self.addCleanup(store.close)
-        self.window = CompanionWindow(SETTINGS, store=store)
+        self.replace_window(store=store)
         return store
 
     def test_saved_conversation_is_restored_without_playing_audio(self):
@@ -428,9 +497,7 @@ class WindowTests(unittest.TestCase):
             self.send("Remember our discussion")
             self.wait_until(lambda: self.window._worker is None)
         conversation = self.window._conversation_id
-        self.window.close()
-        self.window.deleteLater()
-        self.window = CompanionWindow(SETTINGS, store=store)
+        self.replace_window(store=store)
         self.assertEqual(self.window._conversation_id, conversation)
         self.assertIn("Saved answer", self.window.transcript.toPlainText())
         self.assertEqual(self.window._messages[-1]["content"], "Saved answer")

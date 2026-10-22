@@ -11,12 +11,13 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from companion.library_ui import HistoryDialog, MemoryDialog
 from companion.storage import Store
 from companion.summary_ui import SummaryDialog
+from qt_test_support import application
 
 
 class LibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = application()
 
     def setUp(self):
         self.store = Store(":memory:")

@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 
+from .voice_settings import VOICES, validate_rate
+
 
 MAX_PROFILE_BYTES = 32768
 FIELDS = {
     "identity": {"name": str, "identity": str, "background": str},
     "personality": {"traits": list, "interests": list, "likes": list, "dislikes": list, "opinions": list},
     "speech": {"style": str, "vocabulary": str, "humor": str, "response_length": str, "preview": str},
+    "voice": {"builtin": str, "rate": int, "description": str},
     "relationship": {"dynamic": str, "affection": str, "boundaries": str},
     "reactions": {"excited": str, "confused": str, "frustrated": str, "joking": str, "disagreeing": str, "vulnerable": str},
     "continuity": {"shared_developments": str},
@@ -24,6 +27,9 @@ class Character:
     prompt: str
     path: Path
     preview: str = ""
+    voice: str = ""
+    rate: int = 100
+    voice_description: str = ""
 
 
 def _text(value, field):
@@ -56,8 +62,13 @@ def read_profile(path: Path) -> Character:
                 if not isinstance(value, list) or len(value) > 30:
                     raise ValueError(f"Character profile: {field} must be an array of at most 30 strings.")
                 values[key] = [_text(item, field) for item in value]
+            elif fields[key] is int:
+                values[key] = validate_rate(value)
             else:
                 values[key] = _text(value, field)
+    voice = data.get("voice", {})
+    if voice and voice.get("builtin") not in VOICES:
+        raise ValueError("Character profile: voice.builtin must name an available built-in voice.")
     name = data.get("identity", {}).get("name")
     if not name or len(name) > 80 or "\n" in name:
         raise ValueError("Character profile: identity.name must be a single line of 1 to 80 characters.")
@@ -75,7 +86,7 @@ def read_profile(path: Path) -> Character:
             example["context"] = _text(example["context"], "examples.context")
     parts = [f"Editable character profile: {name}"]
     for section in FIELDS:
-        if section == "reference":
+        if section in {"reference", "voice"}:
             continue  # Research/editing metadata, not dialogue instructions.
         parts.append(f"\n[{section}]")
         for key, value in data.get(section, {}).items():
@@ -89,7 +100,8 @@ def read_profile(path: Path) -> Character:
         if example.get("context"):
             parts.append("Illustrative context: " + example["context"])
         parts.extend(("User: " + example["user"], name + ": " + example["assistant"]))
-    return Character(name, "\n".join(parts), path.resolve(), data.get("speech", {}).get("preview", ""))
+    return Character(name, "\n".join(parts), path.resolve(), data.get("speech", {}).get("preview", ""),
+                     voice.get("builtin", ""), voice.get("rate", 100), voice.get("description", ""))
 
 
 def load_character(root: Path, selected="", legacy_name="Mira") -> Character:

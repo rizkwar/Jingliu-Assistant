@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from companion.speech import SpeechController
 from companion.speech_process import run
 from companion.speech_text import SpeechSegmenter, spoken_text
+from qt_test_support import application
 
 
 class SpokenTextTests(unittest.TestCase):
@@ -107,8 +108,8 @@ class SpeechProtocolTests(unittest.TestCase):
         class Speaker:
             calls = []
 
-            def speak(self, text, voice, volume, report):
-                self.calls.append((text, voice, volume))
+            def speak(self, text, voice, volume, report, rate=100):
+                self.calls.append((text, voice, volume, rate))
                 print("Third-party output belongs on stderr")
                 report("speaking")
 
@@ -145,7 +146,7 @@ for line in sys.stdin:
 class SpeechControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = application()
 
     def setUp(self):
         self.speech = SpeechController()
@@ -208,6 +209,30 @@ class SpeechControllerTests(unittest.TestCase):
         self.assertFalse(self.speech.busy)
         self.assertEqual(self.speech.process.state(), QProcess.ProcessState.NotRunning)
         self.assertEqual(self.states[-1], "Voice muted")
+
+    def test_rate_is_bound_to_each_voice_session_and_queued_phrase(self):
+        from unittest.mock import patch
+        with patch.object(self.speech, "_start_or_dispatch"):
+            self.speech.begin_reply("jane", 70, 94)
+            self.assertEqual(self.speech._pending["rate"], 94)
+            self.speech.feed_reply("A complete sentence. ")
+            self.speech.finish_reply()
+            self.speech._active_id = ""
+            self.speech._advance()
+            self.assertEqual(self.speech._pending["rate"], 94)
+            self.assertEqual(self.speech._pending["text"], "A complete sentence.")
+            self.speech.speak("Replay", "anna", 50, 100)
+            self.assertEqual(self.speech._pending["rate"], 100)
+
+    def test_hugging_face_token_is_only_in_child_environment_not_job_payload(self):
+        from unittest.mock import patch
+        with patch.object(self.speech, "_start_or_dispatch"):
+            self.speech.set_hf_token("hf-secret")
+            self.speech.begin_reply("reference.wav", 70)
+            self.assertEqual(self.speech.process.processEnvironment().value("HF_TOKEN"), "hf-secret")
+            self.assertNotIn("hf-secret", json.dumps(self.speech._pending))
+            self.speech.set_hf_token("")
+            self.assertFalse(self.speech.process.processEnvironment().contains("HF_TOKEN"))
 
     def test_streamed_phrases_play_in_order_without_repeating_at_finish(self):
         played = []
