@@ -42,6 +42,45 @@ class FakeSpeech(QObject):
         self.stop()
 
 
+class FakeMicrophone(QObject):
+    changed = Signal(str)
+    transcribed = Signal(str)
+    failed = Signal(str)
+    devices = Signal(list)
+    level = Signal(int)
+
+    def __init__(self):
+        super().__init__()
+        self.state = "idle"
+
+    @property
+    def busy(self):
+        return self.state != "idle"
+
+    def start(self, *args):
+        self.state = "recording"
+        self.changed.emit(self.state)
+
+    def finish(self):
+        self.state = "transcribing"
+        self.changed.emit(self.state)
+
+    def deliver(self, text):
+        self.state = "idle"
+        self.changed.emit(self.state)
+        self.transcribed.emit(text)
+
+    def cancel(self):
+        self.state = "idle"
+        self.changed.emit(self.state)
+
+    def shutdown(self):
+        self.cancel()
+
+    def refresh_devices(self):
+        self.devices.emit([])
+
+
 class WindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -164,4 +203,73 @@ class WindowTests(unittest.TestCase):
         speech.failed.emit("No speaker available")
         self.assertEqual(self.window.voice_status.text(), "No speaker available")
         self.assertTrue(self.window.send_button.isEnabled())
+
+    def use_fake_microphone(self):
+        self.window.close()
+        self.window.deleteLater()
+        speech, microphone = FakeSpeech(), FakeMicrophone()
+        self.window = CompanionWindow(SETTINGS, speech=speech, microphone=microphone)
+        return speech, microphone
+
+    def test_recording_stops_speech_and_preserves_existing_draft_for_review(self):
+        speech, mic = self.use_fake_microphone()
+        speech.busy = True
+        self.window.input.setPlainText("A draft")
+        self.window._begin_recording()
+        self.assertFalse(speech.busy)
+        self.assertFalse(self.window.input.isEnabled())
+        self.window._finish_recording()
+        mic.deliver("Recognized words")
+        self.assertEqual(self.window.input.toPlainText(), "A draft\nRecognized words")
+        self.assertTrue(self.window.input.isEnabled())
+        self.assertIsNone(self.window._worker)
+
+    def test_auto_send_routes_transcript_through_normal_chat(self):
+        _, mic = self.use_fake_microphone()
+        def handler(request):
+            return httpx.Response(200, text=(
+                'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}]}\n\n'
+                'data: [DONE]\n\n'
+            ))
+        with self.mock_client(handler):
+            self.window._begin_recording()
+            self.window._finish_recording()
+            mic.deliver("Hello Mira")
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertEqual(self.window._messages[0]["content"], "Hello Mira")
+
+    def test_empty_transcript_and_cancel_do_not_send_anything(self):
+        _, mic = self.use_fake_microphone()
+        self.window._begin_recording()
+        mic.deliver("")
+        self.assertEqual(self.window._messages, [])
+        self.assertIn("No clear speech", self.window.mic_status.text())
+        self.window._begin_recording()
+        self.window._stop()
+        self.assertFalse(mic.busy)
+        self.assertTrue(self.window.send_button.isEnabled())
+
+    def test_review_mode_keeps_transcription_editable(self):
+        _, mic = self.use_fake_microphone()
+        self.window.auto_send.setChecked(False)
+        self.window._begin_recording()
+        mic.deliver("Edit these words")
+        self.assertIsNone(self.window._worker)
+        self.assertEqual(self.window.input.toPlainText(), "Edit these words")
+
+    def test_pending_transcription_cannot_send_after_stop(self):
+        self.use_fake_microphone()
+        self.window.input.setPlainText("Pending words")
+        self.window._pending_transcription = "Pending words"
+        self.window._stop()
+        self.window._send_pending_transcription()
+        self.assertIsNone(self.window._worker)
+
+    def test_pending_transcription_cannot_send_after_window_closes(self):
+        self.use_fake_microphone()
+        self.window.input.setPlainText("Pending words")
+        self.window._pending_transcription = "Pending words"
+        self.window.close()
+        self.window._send_pending_transcription()
+        self.assertIsNone(self.window._worker)
 

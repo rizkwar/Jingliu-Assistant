@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 2: character + local voice
+## Step 3: push-to-talk conversations
 
 Implemented:
 
@@ -21,9 +21,12 @@ Implemented:
 - A reusable background speech process: models load only when needed and stay
   ready between normal requests. Stop cancels loading and playback; a new
   message also stops the previous voice.
+- Hold-to-talk microphone recording, input selection, and an input level meter.
+- A Windows global shortcut: **Ctrl+Alt+Space** starts or finishes recording.
+- Local English transcription with Faster-Whisper on CPU using INT8 computation.
+- Editable transcripts, optional automatic sending, and interruption of current replies.
 
-Microphone input, tray operation, and saved memory are future steps.
-Nothing records your microphone in this version. Conversations are held in RAM
+Tray operation and saved memory are future steps. Conversations are held in RAM
 and disappear when you close the app or start a new conversation.
 
 ## Run on Windows
@@ -44,6 +47,9 @@ COMPANION_NAME=Mira
 TTS_VOICE=alba
 TTS_ENABLED=true
 TTS_VOLUME=70
+STT_MODEL=base.en
+STT_AUTO_SEND=true
+STT_MICROPHONE=
 ```
 
 If `.env` is missing, copy `.env.example` to `.env` first. `.env` is excluded
@@ -96,9 +102,44 @@ and voice states loaded. Closing the window releases the speech process too.
 Voice playback failures are shown beside the voice controls; text chat remains
 available. Check your Windows default output device if you hear nothing.
 
+## Talk through your microphone
+
+1. Hold **Hold to talk**. Wait for **Listening** before you speak, then release
+   the button to finish. You can also press **Ctrl+Alt+Space** once to start
+   recording and again to finish, even while using another app. This brings
+   Mira's window forward so you can see the recording status.
+2. Recording stops after 60 seconds. Starting a recording stops Mira's current
+   voice and interrupts any response she is still generating.
+3. The microphone closes before local transcription starts. The first spoken
+   turn downloads the English model into `.cache/whisper/`; later turns reuse it.
+4. The recognized text appears in the input box and is sent automatically when
+   **Send transcription automatically** is checked. Uncheck it to edit each
+   transcript before sending. If you already have a draft, transcription is
+   appended and always waits for you to press **Send**.
+5. **Stop** cancels recording or transcription and discards pending recognition.
+   Silent or very short recordings do not send a message.
+
+Choose **Refresh** to list input devices, then select a microphone if the Windows
+default is not the one you want. The level meter should move while you speak.
+If the microphone cannot open, check **Settings > Privacy & security > Microphone**
+in Windows and allow desktop apps to use it. A conflicting global shortcut is
+reported in the window; the hold button remains available.
+
+The default `STT_MODEL=base.en` balances size and English recognition quality.
+Use `tiny.en` for a smaller model or `small.en` for a larger one. `STT_AUTO_SEND`
+sets the startup checkbox. Leave `STT_MICROPHONE` blank for the Windows default,
+or set it to an input device index or a name accepted by sounddevice. Device
+indices can change after reconnecting hardware. Existing `.env` files continue
+working without these settings; reload settings to apply edited startup defaults.
+
+Audio stays in memory, is limited to one minute, and is never written to a recording
+file or uploaded. Only the resulting text is sent to the language model when
+you send a message. Cancelling transcription terminates its process; the next
+turn reloads the model from the disk cache. Normal turns keep it ready in RAM.
+
 ## Data and provider behavior
 
-Typed messages, the character instructions, and recent context are sent to
+Typed or submitted transcribed messages, character instructions, and recent context are sent to
 OpenRouter and the selected model provider. Local conversation storage is not
 implemented yet. The free Nemotron endpoint's provider notice says requests
 are logged for security and product improvement, and asks users not to send
@@ -108,7 +149,8 @@ confidential or personal data. See the
 Speech synthesis and playback happen locally. Initial model and voice downloads
 need internet access; generated reply text is not sent to a speech service.
 Model caches are excluded from Git. Speech uses a CPU model; the app never
-initializes CUDA for speech. No microphone recording is implemented yet.
+initializes CUDA for speech. Recording only occurs after you press the talk
+button or use the recording shortcut; there is no always-on listening.
 
 Free endpoints can be rate limited or temporarily unavailable. The app uses
 only the configured model and does not switch to a paid model. Stop cancels the
@@ -117,15 +159,15 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Next: microphone conversations** — push-to-talk, Faster-Whisper transcription,
-   and speaking sentences as the language model streams them.
+1. **Faster spoken replies** — speak sentences as the language model streams them.
 2. **Persistent companion** — SQLite history, manageable memory, and tray support.
-3. **Natural interaction** — speech detection, interruption handling, and optional avatar.
+3. **Natural interaction** — speech detection, echo handling, and optional avatar.
 
 ## Verification
 
-Tests use mocked HTTP streams and a small fake speech process. They do not
-require an API key, download models, or play audio:
+Tests use mocked HTTP streams, fake microphone capture, and small fake local
+processes. They do not require an API key, access your microphone, download
+models, or play audio:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -136,9 +178,10 @@ API integration follows OpenRouter's
 [streaming reference](https://openrouter.ai/docs/api_reference/streaming).
 
 Speech follows the [Pocket TTS Python API](https://kyutai-labs.github.io/pocket-tts/API%20Reference/python-api/).
+Local recognition follows [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper).
 
 Suggested commit for this step:
 
 ```text
-feat: add local Pocket TTS voice playback and controls
+feat: add push-to-talk with local Whisper transcription
 ```

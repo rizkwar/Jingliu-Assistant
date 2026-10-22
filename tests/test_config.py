@@ -39,3 +39,15 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "0 to 100"):
                 load_settings(root)
 
+    def test_transcription_settings_are_validated(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True):
+            root = Path(folder)
+            (root / "character.md").write_text("You are {name}.", encoding="utf-8")
+            self.assertEqual(load_settings(root).stt_model, "base.en")
+            (root / ".env").write_text("STT_MODEL=tiny.en\nSTT_AUTO_SEND=false\nSTT_MICROPHONE=3\n", encoding="utf-8")
+            settings = load_settings(root)
+            self.assertEqual((settings.stt_model, settings.stt_auto_send, settings.stt_microphone), ("tiny.en", False, "3"))
+            os.environ["STT_MODEL"] = "unknown"
+            with self.assertRaisesRegex(ValueError, "STT_MODEL"):
+                load_settings(root)
+

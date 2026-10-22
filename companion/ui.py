@@ -2,11 +2,12 @@ from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
-    QPushButton, QSlider, QTextBrowser, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QSlider, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from .config import Settings, VOICES, load_settings
 from .speech import SpeechController
+from .microphone import MicrophoneController
 from .worker import ReplyWorker
 
 
@@ -23,6 +24,8 @@ QComboBox { background: #292e3c; border: 1px solid #3c4357; border-radius: 6px; 
 QComboBox QAbstractItemView { background: #292e3c; selection-background-color: #454055; }
 QSlider::groove:horizontal { height: 4px; background: #3c4357; border-radius: 2px; }
 QSlider::handle:horizontal { background: #b7a9ff; width: 13px; margin: -5px 0; border-radius: 6px; }
+QProgressBar { background: #292e3c; border: none; border-radius: 3px; max-height: 6px; }
+QProgressBar::chunk { background: #8fc7b2; border-radius: 3px; }
 QPushButton { background: #292e3c; border: 1px solid #3c4357; border-radius: 8px; padding: 8px 14px; }
 QPushButton:hover { background: #363d50; }
 QPushButton:disabled { color: #636d80; border-color: #303646; }
@@ -46,7 +49,7 @@ class MessageInput(QPlainTextEdit):
 
 
 class CompanionWindow(QMainWindow):
-    def __init__(self, settings: Settings, speech=None):
+    def __init__(self, settings: Settings, speech=None, microphone=None):
         super().__init__()
         self.settings = settings
         self._worker: ReplyWorker | None = None
@@ -55,16 +58,19 @@ class CompanionWindow(QMainWindow):
         self._closing = False
         self._last_reply = ""
         self.speech = speech if speech is not None else SpeechController(self)
+        self.microphone = microphone if microphone is not None else MicrophoneController(self)
+        self._mic_draft = ""
+        self._pending_transcription = ""
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
-        self.resize(720, 880)
-        self.setMinimumSize(540, 680)
+        self.resize(740, 960)
+        self.setMinimumSize(560, 740)
         self.setStyleSheet(STYLE)
 
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setContentsMargins(26, 24, 26, 22)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
         eyebrow = QLabel("YOUR DESKTOP COMPANION")
         eyebrow.setObjectName("eyebrow")
         layout.addWidget(eyebrow)
@@ -130,6 +136,50 @@ class CompanionWindow(QMainWindow):
         self.auto_speak.toggled.connect(self._speech_toggled)
         self.voice.currentTextChanged.connect(self._voice_selected)
         self.volume.valueChanged.connect(self._volume_changed)
+
+        mic_row = QHBoxLayout()
+        self.mic_device = QComboBox()
+        self.mic_device.setMinimumWidth(100)
+        self.mic_device.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.mic_device.addItem("Windows default microphone", None)
+        if settings.stt_microphone:
+            self.mic_device.addItem(settings.stt_microphone, settings.stt_microphone)
+            self.mic_device.setCurrentIndex(1)
+        mic_row.addWidget(self.mic_device, 1)
+        self.refresh_mics = QPushButton("Refresh")
+        self.refresh_mics.setToolTip("Find available microphones")
+        self.refresh_mics.clicked.connect(self.microphone.refresh_devices)
+        mic_row.addWidget(self.refresh_mics)
+        self.record_button = QPushButton("Hold to talk")
+        self.record_button.setToolTip("Hold to record, release to transcribe. Maximum 60 seconds.")
+        self.record_button.pressed.connect(self._begin_recording)
+        self.record_button.released.connect(self._finish_recording)
+        mic_row.addWidget(self.record_button)
+        layout.addLayout(mic_row)
+        mic_options = QHBoxLayout()
+        self.auto_send = QCheckBox("Send transcription automatically")
+        self.auto_send.setChecked(settings.stt_auto_send)
+        mic_options.addWidget(self.auto_send)
+        self.mic_level = QProgressBar()
+        self.mic_level.setRange(0, 100)
+        self.mic_level.setValue(0)
+        self.mic_level.setTextVisible(False)
+        self.mic_level.setMaximumWidth(100)
+        mic_options.addWidget(self.mic_level, 1)
+        layout.addLayout(mic_options)
+        self.mic_hint = QLabel("Hold to talk · Ctrl+Alt+Space toggles recording · 60-second limit")
+        self.mic_hint.setObjectName("hint")
+        self.mic_hint.setWordWrap(True)
+        layout.addWidget(self.mic_hint)
+        self.mic_status = QLabel("Microphone off")
+        self.mic_status.setObjectName("hint")
+        self.mic_status.setWordWrap(True)
+        layout.addWidget(self.mic_status)
+        self.microphone.changed.connect(self._mic_changed)
+        self.microphone.transcribed.connect(self._on_transcribed)
+        self.microphone.failed.connect(self._mic_failed)
+        self.microphone.devices.connect(self._mic_devices)
+        self.microphone.level.connect(self.mic_level.setValue)
         self.transcript = QTextBrowser()
         self.transcript.setOpenLinks(False)
         self.transcript.setUndoRedoEnabled(False)
@@ -186,7 +236,7 @@ class CompanionWindow(QMainWindow):
     @Slot()
     def _send(self) -> None:
         text = self.input.toPlainText().strip()
-        if self._worker or not text:
+        if self._closing or self._worker or self.microphone.busy or not text:
             return
         try:
             self.settings.validate_connection()
@@ -197,6 +247,7 @@ class CompanionWindow(QMainWindow):
             QMessageBox.information(self, "Message too long", "Please keep a message under 16,000 characters.")
             return
         self.speech.stop()
+        self._pending_transcription = ""
         self._messages.append({"role": "user", "content": text})
         # Keep at most 12 previous exchanges; the full visible transcript remains.
         context = self._messages[-25:]
@@ -215,13 +266,23 @@ class CompanionWindow(QMainWindow):
         worker.start()
 
     def _set_busy(self, busy: bool) -> None:
+        self._refresh_controls()
+        self.status.setText("Thinking…" if busy else "Ready")
+        if self.microphone.busy:
+            self.status.setText("Listening…" if self.microphone.state in {"opening", "recording"} else "Transcribing…")
+
+    def _refresh_controls(self) -> None:
+        busy = self._worker is not None or self.microphone.busy
         self.send_button.setEnabled(not busy)
+        self.input.setEnabled(not self.microphone.busy)
         self.stop_button.setEnabled(busy or self.speech.busy)
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
         self.preview.setEnabled(not busy and not self.speech.busy)
         self.replay.setEnabled(not busy and bool(self._last_reply) and not self.speech.busy)
-        self.status.setText("Thinking…" if busy else "Ready")
+        self.mic_device.setEnabled(not busy)
+        self.refresh_mics.setEnabled(not busy)
+        self.record_button.setEnabled(self.microphone.state not in {"loading", "transcribing"})
 
     @Slot(str, str)
     def _on_chunk(self, turn_id: str, text: str) -> None:
@@ -259,12 +320,18 @@ class CompanionWindow(QMainWindow):
         if self._closing:
             QTimer.singleShot(0, self.close)
         else:
-            if self._reply and not interrupted and self.auto_speak.isChecked():
+            if self._reply and not interrupted and self.auto_speak.isChecked() and not self.microphone.busy:
                 self._read_last_reply()
+            if self._pending_transcription:
+                QTimer.singleShot(0, self._send_pending_transcription)
             self.input.setFocus()
 
     @Slot()
     def _stop(self) -> None:
+        self._pending_transcription = ""
+        if self.microphone.busy:
+            self.microphone.cancel()
+            self.mic_status.setText("Recording or transcription cancelled")
         self.speech.stop()
         if self._worker:
             self._worker.stop()
@@ -273,10 +340,11 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _new_conversation(self) -> None:
-        if self._worker:
+        if self._worker or self.microphone.busy:
             return
         self.speech.stop()
         self._last_reply = ""
+        self._pending_transcription = ""
         self.replay.setEnabled(False)
         self._messages.clear()
         self.transcript.clear()
@@ -285,7 +353,7 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _reload_settings(self) -> None:
-        if self._worker:
+        if self._worker or self.microphone.busy:
             return
         try:
             settings = load_settings()
@@ -297,12 +365,21 @@ class CompanionWindow(QMainWindow):
         self.auto_speak.setChecked(settings.tts_enabled)
         self.voice.setCurrentText(settings.tts_voice)
         self.volume.setValue(settings.tts_volume)
+        self.auto_send.setChecked(settings.stt_auto_send)
+        self.mic_device.clear()
+        self.mic_device.addItem("Windows default microphone", None)
+        if settings.stt_microphone:
+            self.mic_device.addItem(settings.stt_microphone, settings.stt_microphone)
+            self.mic_device.setCurrentIndex(1)
         self.title.setText(settings.name)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
         self.status.setText("Ready" if settings.api_key else "Add API key")
         self._write("\nSettings reloaded.\n", "#a4adbf")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._closing = True
+        self._pending_transcription = ""
+        self.microphone.shutdown()
         self.speech.shutdown()
         if self._worker:
             self._closing = True
@@ -328,10 +405,7 @@ class CompanionWindow(QMainWindow):
     @Slot(str)
     def _voice_changed(self, state: str) -> None:
         self.voice_status.setText(state)
-        generating = self._worker is not None
-        self.stop_button.setEnabled(generating or self.speech.busy)
-        self.preview.setEnabled(not generating and not self.speech.busy)
-        self.replay.setEnabled(not generating and not self.speech.busy and bool(self._last_reply))
+        self._refresh_controls()
 
     @Slot(str)
     def _voice_failed(self, message: str) -> None:
@@ -351,4 +425,94 @@ class CompanionWindow(QMainWindow):
     @Slot(str)
     def _voice_selected(self, voice: str) -> None:
         self.speech.stop()
+
+    @Slot()
+    def _begin_recording(self) -> None:
+        if self.microphone.busy or self._closing:
+            return
+        self._mic_draft = self.input.toPlainText()
+        self._pending_transcription = ""
+        self.speech.stop()
+        if self._worker:
+            self._worker.stop()
+        self.microphone.start(self.mic_device.currentData(), self.settings.stt_model)
+
+    @Slot()
+    def _finish_recording(self) -> None:
+        self.microphone.finish()
+
+    @Slot()
+    def _toggle_recording(self) -> None:
+        if self._closing:
+            return
+        if self.microphone.state in {"opening", "recording"}:
+            self._finish_recording()
+        elif not self.microphone.busy:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            self._begin_recording()
+
+    @Slot(str)
+    def _mic_changed(self, state: str) -> None:
+        labels = {
+            "idle": "Microphone off", "opening": "Opening microphone… Wait for Listening before speaking.",
+            "recording": "Listening… Release the button or press Ctrl+Alt+Space to finish.",
+            "loading": "Loading transcription model… First use downloads the model.",
+            "transcribing": "Transcribing locally…",
+        }
+        self.mic_status.setText(labels.get(state, "Microphone off"))
+        self.record_button.setText("Finish recording" if state in {"opening", "recording"} else "Hold to talk")
+        self._refresh_controls()
+        if state != "idle":
+            self.status.setText("Listening…" if state in {"opening", "recording"} else "Transcribing…")
+        elif not self._worker:
+            self.status.setText("Ready")
+
+    @Slot(str)
+    def _on_transcribed(self, text: str) -> None:
+        if self._closing:
+            return
+        text = text.strip()
+        if not text:
+            self.mic_status.setText("No clear speech detected. Try again a little closer to the microphone.")
+            self.input.setFocus()
+            return
+        draft = self._mic_draft.strip()
+        self.input.setPlainText(draft + "\n" + text if draft else text)
+        self.input.setFocus()
+        if self.auto_send.isChecked() and not draft:
+            if self._worker:
+                # The interrupted API task may still be cleaning up; send only after it exits.
+                self.mic_status.setText("Transcript ready. Waiting for the interrupted reply to stop…")
+                self._pending_transcription = text
+            else:
+                self._send()
+                self.mic_status.setText("Transcript sent" if self._worker else "Transcript ready. Press Send.")
+        else:
+            self.mic_status.setText("Transcript ready. Edit it if needed, then press Send.")
+
+    def _send_pending_transcription(self) -> None:
+        text, self._pending_transcription = self._pending_transcription, ""
+        if (
+            text and not self._closing and not self.microphone.busy and not self._worker
+            and self.auto_send.isChecked() and self.input.toPlainText().strip() == text
+        ):
+            self._send()
+
+    @Slot(str)
+    def _mic_failed(self, message: str) -> None:
+        self.mic_status.setText(message)
+        self._refresh_controls()
+
+    @Slot(list)
+    def _mic_devices(self, devices: list) -> None:
+        selected = self.mic_device.currentData()
+        self.mic_device.clear()
+        self.mic_device.addItem("Windows default microphone", None)
+        for device in devices:
+            self.mic_device.addItem(device["name"], device["id"])
+        index = self.mic_device.findData(selected)
+        self.mic_device.setCurrentIndex(max(0, index))
+        self.mic_status.setText(f"Found {len(devices)} microphone inputs" if devices else "No microphone inputs found")
 

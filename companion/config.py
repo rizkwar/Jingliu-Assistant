@@ -19,6 +19,9 @@ class Settings:
     tts_voice: str = "alba"
     tts_enabled: bool = True
     tts_volume: int = 70
+    stt_model: str = "base.en"
+    stt_auto_send: bool = True
+    stt_microphone: str = ""
 
     def validate_connection(self) -> None:
         if not self.api_key or self.api_key == "your_key_here":
@@ -52,6 +55,12 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
         raise ValueError("TTS_VOLUME must be a whole number from 0 to 100.") from exc
     if not 0 <= volume <= 100:
         raise ValueError("TTS_VOLUME must be a whole number from 0 to 100.")
+    stt_model = (values.get("STT_MODEL") or "base.en").strip()
+    if stt_model not in {"tiny.en", "base.en", "small.en"}:
+        raise ValueError("STT_MODEL must be tiny.en, base.en, or small.en.")
+    stt_auto_send = (values.get("STT_AUTO_SEND") or "true").strip().lower()
+    if stt_auto_send not in {"true", "false", "1", "0", "yes", "no"}:
+        raise ValueError("STT_AUTO_SEND must be true or false.")
     return Settings(
         api_key=(values.get("OPENROUTER_API_KEY") or "").strip(),
         model=(values.get("OPENROUTER_MODEL") or DEFAULT_MODEL).strip(),
@@ -60,5 +69,8 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
         tts_voice=voice,
         tts_enabled=enabled in {"true", "1", "yes"},
         tts_volume=volume,
+        stt_model=stt_model,
+        stt_auto_send=stt_auto_send in {"true", "1", "yes"},
+        stt_microphone=(values.get("STT_MICROPHONE") or "").strip(),
     )
 
