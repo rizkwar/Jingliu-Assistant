@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Step 1: character + text conversation
+## Step 2: character + local voice
 
 Implemented:
 
@@ -14,8 +14,15 @@ Implemented:
 - Stop, new conversation, and reload settings controls.
 - Background API work so the window stays responsive, including during cancellation.
 - Clear messages for missing keys, rate limits, network failures, and interrupted streams.
+- Local Pocket TTS speech on CPU, starting after a complete text reply arrives.
+- Eight built-in English voices, a preview button, automatic speech toggle,
+  volume control, and **Read last reply**.
+- Streamed audio playback through your Windows default output device.
+- A reusable background speech process: models load only when needed and stay
+  ready between normal requests. Stop cancels loading and playback; a new
+  message also stops the previous voice.
 
-Voice, microphone input, tray operation, and saved memory are future steps.
+Microphone input, tray operation, and saved memory are future steps.
 Nothing records your microphone in this version. Conversations are held in RAM
 and disappear when you close the app or start a new conversation.
 
@@ -34,6 +41,9 @@ Open `.env` in your editor and fill in your key locally:
 OPENROUTER_API_KEY=your_key_here
 OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 COMPANION_NAME=Mira
+TTS_VOICE=alba
+TTS_ENABLED=true
+TTS_VOLUME=70
 ```
 
 If `.env` is missing, copy `.env.example` to `.env` first. `.env` is excluded
@@ -58,6 +68,34 @@ The second reply should refer to the first. Try **Stop** during a reply as well.
 Only the visible portion of an interrupted answer is used in later context.
 Failed turns with no answer stay visible but are excluded from later context.
 
+## Try her voice
+
+1. Launch the app and click **Preview**. This works without an OpenRouter key.
+2. The first preview downloads the English speech model and selected voice from
+   Hugging Face into `.cache/huggingface/` in this project. It can take a few
+   minutes. Subsequent previews reuse cached files.
+3. Choose a voice and preview it again. The available voices are `alba`, `anna`,
+   `azelma`, `cosette`, `eponine`, `fantine`, `jane`, and `vera`.
+4. Leave **Speak replies** checked to hear completed answers. Use **Stop** at
+   any time, or **Read last reply** to hear an answer again.
+
+The selected voice, toggle, and volume controls apply during the current app
+session. To set startup defaults, edit the `TTS_*` values in `.env` and click
+**Reload settings**. Existing `.env` files do not need updating; defaults apply
+when these entries are absent. Volume changes stop current playback; the new
+volume applies to the next preview or reply. A volume of zero skips synthesis.
+
+Fenced code blocks and raw URLs are omitted from speech. Very long answers are
+spoken as a short preview of up to about 2,400 characters; the full text stays
+visible. Speech currently starts after the language model finishes. Speaking
+sentences while the language model is still writing belongs to the next step.
+
+**Stop** terminates the speech process, so the next spoken request reloads the
+model into RAM from its disk cache. Normal completed requests keep the model
+and voice states loaded. Closing the window releases the speech process too.
+Voice playback failures are shown beside the voice controls; text chat remains
+available. Check your Windows default output device if you hear nothing.
+
 ## Data and provider behavior
 
 Typed messages, the character instructions, and recent context are sent to
@@ -67,6 +105,11 @@ are logged for security and product improvement, and asks users not to send
 confidential or personal data. See the
 [model page](https://openrouter.ai/nvidia/nemotron-3-ultra-550b-a55b:free).
 
+Speech synthesis and playback happen locally. Initial model and voice downloads
+need internet access; generated reply text is not sent to a speech service.
+Model caches are excluded from Git. Speech uses a CPU model; the app never
+initializes CUDA for speech. No microphone recording is implemented yet.
+
 Free endpoints can be rate limited or temporarily unavailable. The app uses
 only the configured model and does not switch to a paid model. Stop cancels the
 local request and closes its connection; upstream cancellation depends on the
@@ -74,14 +117,15 @@ provider. The app does not display or retain separate reasoning fields.
 
 ## Next steps
 
-1. **Next: Pocket TTS** — audition a voice and speak typed replies locally.
-2. **Microphone conversations** — push-to-talk and Faster-Whisper transcription.
-3. **Persistent companion** — SQLite history, manageable memory, and tray support.
-4. **Natural interaction** — speech detection, interruption handling, and optional avatar.
+1. **Next: microphone conversations** — push-to-talk, Faster-Whisper transcription,
+   and speaking sentences as the language model streams them.
+2. **Persistent companion** — SQLite history, manageable memory, and tray support.
+3. **Natural interaction** — speech detection, interruption handling, and optional avatar.
 
 ## Verification
 
-Tests use mocked HTTP streams and do not require an API key or make API calls:
+Tests use mocked HTTP streams and a small fake speech process. They do not
+require an API key, download models, or play audio:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -90,3 +134,11 @@ Tests use mocked HTTP streams and do not require an API key or make API calls:
 API integration follows OpenRouter's
 [quickstart](https://openrouter.ai/docs/quickstart) and
 [streaming reference](https://openrouter.ai/docs/api_reference/streaming).
+
+Speech follows the [Pocket TTS Python API](https://kyutai-labs.github.io/pocket-tts/API%20Reference/python-api/).
+
+Suggested commit for this step:
+
+```text
+feat: add local Pocket TTS voice playback and controls
+```

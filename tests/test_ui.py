@@ -2,20 +2,44 @@ import asyncio
 import os
 import time
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import httpx
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QEvent, QObject, Signal
 
 from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
 from companion.worker import ReplyWorker
 
 
-SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.")
+SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.", tts_enabled=False)
 REAL_CLIENT = httpx.AsyncClient
+
+
+class FakeSpeech(QObject):
+    changed = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.busy = False
+        self.calls = []
+
+    def speak(self, text, voice, volume):
+        self.calls.append((text, voice, volume))
+        self.busy = True
+        self.changed.emit("Speaking…")
+
+    def stop(self):
+        self.busy = False
+        self.changed.emit("Voice stopped")
+
+    def shutdown(self):
+        self.stop()
 
 
 class WindowTests(unittest.TestCase):
@@ -33,6 +57,8 @@ class WindowTests(unittest.TestCase):
             self.window._stop()
             self.wait_until(lambda: self.window._worker is None)
         self.window.close()
+        self.window.deleteLater()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
 
     def wait_until(self, condition, timeout=3):
@@ -105,4 +131,37 @@ class WindowTests(unittest.TestCase):
         worker.start()
         self.assertTrue(worker.wait(1000))
         self.assertFalse(worker.error)
+
+    def test_completed_reply_speaks_and_next_message_stops_playback(self):
+        self.window.close()
+        speech = FakeSpeech()
+        self.window = CompanionWindow(replace(SETTINGS, tts_enabled=True), speech=speech)
+        def handler(request):
+            return httpx.Response(200, text=(
+                'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\n'
+                'data: [DONE]\n\n'
+            ))
+        with self.mock_client(handler):
+            self.send()
+            self.wait_until(lambda: self.window._worker is None)
+            self.assertEqual(speech.calls, [("Hello", "alba", 70)])
+            self.assertTrue(self.window.stop_button.isEnabled())
+            self.send("Next question")
+            self.assertFalse(speech.busy)
+            self.wait_until(lambda: self.window._worker is None)
+        self.window._new_conversation()
+        self.assertFalse(speech.busy)
+        self.assertFalse(self.window.replay.isEnabled())
+
+    def test_preview_needs_no_api_key_and_voice_error_keeps_text_chat_usable(self):
+        self.window.close()
+        speech = FakeSpeech()
+        self.window = CompanionWindow(replace(SETTINGS, api_key=""), speech=speech)
+        self.window._preview_voice()
+        self.assertIn("Mira", speech.calls[0][0])
+        speech.busy = False
+        speech.changed.emit("Voice unavailable")
+        speech.failed.emit("No speaker available")
+        self.assertEqual(self.window.voice_status.text(), "No speaker available")
+        self.assertTrue(self.window.send_button.isEnabled())
 

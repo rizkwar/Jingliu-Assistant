@@ -1,6 +1,7 @@
 import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QEvent
 
 from .config import load_settings
 from .ui import CompanionWindow
@@ -17,7 +18,12 @@ def main() -> int:
         return 1
     window = CompanionWindow(settings)
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        window.speech.shutdown()
+        window.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 if __name__ == "__main__":

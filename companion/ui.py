@@ -1,11 +1,12 @@
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
-    QPushButton, QTextBrowser, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
+    QPushButton, QSlider, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from .config import Settings, load_settings
+from .config import Settings, VOICES, load_settings
+from .speech import SpeechController
 from .worker import ReplyWorker
 
 
@@ -18,6 +19,10 @@ QLabel#status { color: #b9b2fc; padding: 7px 12px; background: #29263c; border-r
 QTextBrowser { background: #1b1f2a; border: 1px solid #303646; border-radius: 12px; padding: 16px; }
 QPlainTextEdit { background: #1b1f2a; border: 1px solid #3c4357; border-radius: 10px; padding: 10px; }
 QPlainTextEdit:focus { border-color: #a99df5; }
+QComboBox { background: #292e3c; border: 1px solid #3c4357; border-radius: 6px; padding: 6px 10px; }
+QComboBox QAbstractItemView { background: #292e3c; selection-background-color: #454055; }
+QSlider::groove:horizontal { height: 4px; background: #3c4357; border-radius: 2px; }
+QSlider::handle:horizontal { background: #b7a9ff; width: 13px; margin: -5px 0; border-radius: 6px; }
 QPushButton { background: #292e3c; border: 1px solid #3c4357; border-radius: 8px; padding: 8px 14px; }
 QPushButton:hover { background: #363d50; }
 QPushButton:disabled { color: #636d80; border-color: #303646; }
@@ -41,16 +46,18 @@ class MessageInput(QPlainTextEdit):
 
 
 class CompanionWindow(QMainWindow):
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, speech=None):
         super().__init__()
         self.settings = settings
         self._worker: ReplyWorker | None = None
         self._messages: list[dict[str, str]] = []
         self._reply = ""
         self._closing = False
+        self._last_reply = ""
+        self.speech = speech if speech is not None else SpeechController(self)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
-        self.resize(720, 790)
-        self.setMinimumSize(540, 580)
+        self.resize(720, 880)
+        self.setMinimumSize(540, 680)
         self.setStyleSheet(STYLE)
 
         root = QWidget()
@@ -83,6 +90,46 @@ class CompanionWindow(QMainWindow):
         toolbar.addStretch()
         toolbar.addWidget(self.reload)
         layout.addLayout(toolbar)
+
+        voice_row = QHBoxLayout()
+        self.auto_speak = QCheckBox("Speak replies")
+        self.auto_speak.setChecked(settings.tts_enabled)
+        voice_row.addWidget(self.auto_speak)
+        voice_row.addStretch()
+        voice_row.addWidget(QLabel("Voice"))
+        self.voice = QComboBox()
+        self.voice.addItems(VOICES)
+        self.voice.setCurrentText(settings.tts_voice)
+        voice_row.addWidget(self.voice)
+        self.preview = QPushButton("Preview")
+        self.preview.clicked.connect(self._preview_voice)
+        voice_row.addWidget(self.preview)
+        layout.addLayout(voice_row)
+        audio_row = QHBoxLayout()
+        audio_row.addWidget(QLabel("Volume"))
+        self.volume = QSlider(Qt.Orientation.Horizontal)
+        self.volume.setRange(0, 100)
+        self.volume.setValue(settings.tts_volume)
+        self.volume.setMaximumWidth(130)
+        audio_row.addWidget(self.volume)
+        self.volume_label = QLabel(f"{settings.tts_volume}%")
+        self.volume_label.setMinimumWidth(36)
+        audio_row.addWidget(self.volume_label)
+        audio_row.addStretch()
+        self.replay = QPushButton("Read last reply")
+        self.replay.setEnabled(False)
+        self.replay.clicked.connect(self._read_last_reply)
+        audio_row.addWidget(self.replay)
+        layout.addLayout(audio_row)
+        self.voice_status = QLabel("Voice loads on first use")
+        self.voice_status.setObjectName("hint")
+        self.voice_status.setWordWrap(True)
+        layout.addWidget(self.voice_status)
+        self.speech.changed.connect(self._voice_changed)
+        self.speech.failed.connect(self._voice_failed)
+        self.auto_speak.toggled.connect(self._speech_toggled)
+        self.voice.currentTextChanged.connect(self._voice_selected)
+        self.volume.valueChanged.connect(self._volume_changed)
         self.transcript = QTextBrowser()
         self.transcript.setOpenLinks(False)
         self.transcript.setUndoRedoEnabled(False)
@@ -149,6 +196,7 @@ class CompanionWindow(QMainWindow):
         if len(text) > 16000:
             QMessageBox.information(self, "Message too long", "Please keep a message under 16,000 characters.")
             return
+        self.speech.stop()
         self._messages.append({"role": "user", "content": text})
         # Keep at most 12 previous exchanges; the full visible transcript remains.
         context = self._messages[-25:]
@@ -168,9 +216,11 @@ class CompanionWindow(QMainWindow):
 
     def _set_busy(self, busy: bool) -> None:
         self.send_button.setEnabled(not busy)
-        self.stop_button.setEnabled(busy)
+        self.stop_button.setEnabled(busy or self.speech.busy)
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
+        self.preview.setEnabled(not busy and not self.speech.busy)
+        self.replay.setEnabled(not busy and bool(self._last_reply) and not self.speech.busy)
         self.status.setText("Thinking…" if busy else "Ready")
 
     @Slot(str, str)
@@ -189,6 +239,7 @@ class CompanionWindow(QMainWindow):
             return
         interrupted = worker.stop_requested.is_set() or bool(worker.error)
         if self._reply:
+            self._last_reply = self._reply
             content = self._reply
             if interrupted:
                 content += "\n[This reply was interrupted; only the text above was shown.]"
@@ -208,10 +259,13 @@ class CompanionWindow(QMainWindow):
         if self._closing:
             QTimer.singleShot(0, self.close)
         else:
+            if self._reply and not interrupted and self.auto_speak.isChecked():
+                self._read_last_reply()
             self.input.setFocus()
 
     @Slot()
     def _stop(self) -> None:
+        self.speech.stop()
         if self._worker:
             self._worker.stop()
             self.stop_button.setEnabled(False)
@@ -221,6 +275,9 @@ class CompanionWindow(QMainWindow):
     def _new_conversation(self) -> None:
         if self._worker:
             return
+        self.speech.stop()
+        self._last_reply = ""
+        self.replay.setEnabled(False)
         self._messages.clear()
         self.transcript.clear()
         self._welcome()
@@ -236,12 +293,17 @@ class CompanionWindow(QMainWindow):
             QMessageBox.warning(self, "Could not reload settings", str(exc))
             return
         self.settings = settings
+        self.speech.stop()
+        self.auto_speak.setChecked(settings.tts_enabled)
+        self.voice.setCurrentText(settings.tts_voice)
+        self.volume.setValue(settings.tts_volume)
         self.title.setText(settings.name)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
         self.status.setText("Ready" if settings.api_key else "Add API key")
         self._write("\nSettings reloaded.\n", "#a4adbf")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self.speech.shutdown()
         if self._worker:
             self._closing = True
             self._stop()
@@ -250,4 +312,43 @@ class CompanionWindow(QMainWindow):
             event.ignore()
         else:
             event.accept()
+
+    @Slot()
+    def _preview_voice(self) -> None:
+        self.speech.speak(
+            f"Hi, I'm {self.settings.name}. Let's think it through, one step at a time.",
+            self.voice.currentText(), self.volume.value(),
+        )
+
+    @Slot()
+    def _read_last_reply(self) -> None:
+        if self._last_reply:
+            self.speech.speak(self._last_reply, self.voice.currentText(), self.volume.value())
+
+    @Slot(str)
+    def _voice_changed(self, state: str) -> None:
+        self.voice_status.setText(state)
+        generating = self._worker is not None
+        self.stop_button.setEnabled(generating or self.speech.busy)
+        self.preview.setEnabled(not generating and not self.speech.busy)
+        self.replay.setEnabled(not generating and not self.speech.busy and bool(self._last_reply))
+
+    @Slot(str)
+    def _voice_failed(self, message: str) -> None:
+        self.voice_status.setText(message)
+
+    @Slot(bool)
+    def _speech_toggled(self, enabled: bool) -> None:
+        if not enabled:
+            self.speech.stop()
+
+    @Slot(int)
+    def _volume_changed(self, volume: int) -> None:
+        self.volume_label.setText(f"{volume}%")
+        # The current process has a fixed gain; stop so mute takes effect immediately.
+        self.speech.stop()
+
+    @Slot(str)
+    def _voice_selected(self, voice: str) -> None:
+        self.speech.stop()
 

@@ -26,3 +26,16 @@ class SettingsTests(unittest.TestCase):
             os.environ["OPENROUTER_API_KEY"] = "from-shell"
             self.assertEqual(load_settings(root).api_key, "from-shell")
 
+    def test_voice_settings_have_defaults_and_validate_volume(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {}, clear=True):
+            root = Path(folder)
+            (root / "character.md").write_text("You are {name}.", encoding="utf-8")
+            settings = load_settings(root)
+            self.assertEqual((settings.tts_voice, settings.tts_enabled, settings.tts_volume), ("alba", True, 70))
+            (root / ".env").write_text("TTS_VOICE=anna\nTTS_ENABLED=false\nTTS_VOLUME=35\n", encoding="utf-8")
+            settings = load_settings(root)
+            self.assertEqual((settings.tts_voice, settings.tts_enabled, settings.tts_volume), ("anna", False, 35))
+            os.environ["TTS_VOLUME"] = "101"
+            with self.assertRaisesRegex(ValueError, "0 to 100"):
+                load_settings(root)
+
