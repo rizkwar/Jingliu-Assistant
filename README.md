@@ -3,18 +3,20 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Jingliu desktop avatar (Stage 5)
+## Jingliu desktop avatar (Stage 6)
 
 The approved v5 portrait now displays in the assistant's floating desktop window,
 with idle blinking, breathing and hair motion. Open **Start Mira.cmd**, then
 **Settings → Show desktop avatar**. Drag to move, use the bottom-right grip to
 resize, or right-click for chat and reload controls. **Animate avatar** pauses
 idle motion. Her mouth now follows actual local TTS playback, including silence
-and Stop. This uses audio amplitude; conversation expressions are a later stage.
+and Stop. This uses audio amplitude. Listening now shows an attentive posture;
+thinking uses a focused half-lidded expression, with smooth transitions.
 
 To check lip-sync, leave **Animate avatar** enabled and click **Preview voice**
 at a nonzero volume, then try **Stop** during speech. See the
 [Stage 5 guide](docs/avatar-stage5.md) for timing, tests and limitations.
+See the [Stage 6 guide](docs/avatar-stage6.md) for conversation cues and checks.
 
 See the [Stage 4 guide](docs/avatar-stage4.md) for setup, local character
 assignments, fallback behavior and native verification. A fresh environment needs
@@ -425,7 +427,8 @@ in the chat window. The avatar uses your configured companion name in its toolti
 
 The mesh portrait shows idle motion and mouth movement from actual local speaker
 playback. Loading a voice or generating text alone does not open its mouth. Its
-tooltip reflects activity; conversation expressions are a later stage.
+tooltip reflects activity. Listening and thinking have restrained visual cues;
+expression controls stay separate from the text sent to TTS.
 
 Uncheck **Animate avatar** for a static portrait. The fallback mascot's timer also stops while
 the avatar is hidden, suspended, closing, or showing an error. Save defaults retains
@@ -604,5 +607,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: sync avatar mouth with local speech playback
+feat: add restrained avatar conversation expressions
 ```

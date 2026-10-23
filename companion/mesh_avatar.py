@@ -1,4 +1,4 @@
-"""Transparent Qt host for the local mesh renderer (display/idle only)."""
+"""Transparent local mesh renderer, with activity cues and playback lip-sync."""
 from PySide6.QtCore import QFile, QIODevice, QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QLabel, QSizeGrip, QVBoxLayout
@@ -25,6 +25,7 @@ class LocalRequests(QWebEngineUrlRequestInterceptor):
 class RendererBridge(QObject):
     pauseChanged = Signal(bool)
     voiceChanged = Signal(float, int, bool)
+    activityChanged = Signal(str, int)
     status = Signal(str)
 
     @Slot(str)
@@ -41,6 +42,7 @@ class MeshDesktopAvatar(DesktopAvatar):
         self.failed = False
         self._disposed = False
         self._voice_sequence = 0
+        self._activity_sequence = 0
         self.clearMask()
         self.setMinimumSize(220, 240)
         self.setMaximumSize(720, 760)
@@ -104,6 +106,7 @@ class MeshDesktopAvatar(DesktopAvatar):
         if status == 'ready':
             self.ready = True
             self.notice.hide()
+            self._publish_activity()
             self._sync_timer()
         else:
             self.failed = True
@@ -134,6 +137,15 @@ class MeshDesktopAvatar(DesktopAvatar):
     def paintEvent(self, event):
         if self.failed:
             super().paintEvent(event)
+
+    def set_activity(self, state):
+        super().set_activity(state)
+        if getattr(self, 'ready', False) and not self.failed and not self._disposed:
+            self._publish_activity()
+
+    def _publish_activity(self):
+        self._activity_sequence += 1
+        self.bridge.activityChanged.emit(self.state, self._activity_sequence)
 
     def hideEvent(self, event):
         if hasattr(self, 'bridge'):
