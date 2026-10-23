@@ -553,6 +553,13 @@ only the configured model and does not switch to a paid model. Stop cancels the
 local request and closes its connection; upstream cancellation depends on the
 provider. The app does not display or retain separate reasoning fields.
 
+## Publishing privacy
+
+Local credentials, conversations, recordings and generated working assets stay
+Git-ignored. A publishing check also reviews tracked history and commit identities;
+the included push hook and GitHub workflow help catch accidental exposure.
+See [publishing safely](docs/publishing-safely.md) for the commands and limits.
+
 ## Next steps
 
 1. **Voice interruption** — acoustic echo cancellation for speaking during playback.

@@ -12,3 +12,34 @@ data/
 voices/
 *.toml.bak
 
+# Private recordings, conversations, credentials, and local backups.
+recordings/
+attachments/
+backups/
+logs/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.opus
+*.aac
+*.aiff
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-*
+*.log
+*.bak
+*.backup
+*.bundle
+*.pem
+*.key
+*.p12
+*.pfx
+/.aws/
+/.ssh/
+/.codex/
+
