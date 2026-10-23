@@ -34,6 +34,7 @@ class AvatarAssets:
             "viewer.js": (web / "viewer.js", "text/javascript; charset=utf-8"),
             "conversation-state.js": (web / "conversation-state.js", "text/javascript; charset=utf-8"),
             "render-quality.js": (web / "render-quality.js", "text/javascript; charset=utf-8"),
+            "render-cadence.js": (web / "render-cadence.js", "text/javascript; charset=utf-8"),
             "style.css": (web / "style.css", "text/css; charset=utf-8"),
             "mesh-avatar.js": (web / "vendor/mesh-avatar.js", "text/javascript; charset=utf-8"),
             "avatar.mavatar": (Path(avatar), "application/octet-stream"),

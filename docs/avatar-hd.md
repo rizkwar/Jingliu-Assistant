@@ -25,7 +25,8 @@ A hidden HD toggle was verified to draw zero frames.
 This improves the existing source; it is not a new 4K portrait or restoration of
 missing detail. Increase **Avatar size** if you want the face larger. HD requires
 more graphics work and buffer memory. Stage 7's performance figures describe the
-earlier balanced path, not fresh measurements of HD mode.
+earlier balanced path. The newer [idle performance check](avatar-performance.md)
+measures HD rendering and its reduced idle draw rate.
 
 The local vendor changes are reproducible with `scripts/patch_avatar_runtime.py`,
 which verifies the original pinned build hash before adding the sizing helper and

@@ -32,7 +32,8 @@ def main():
     app.setStyle('Fusion')
     temporary = tempfile.TemporaryDirectory()
     defaults = Preferences(ROOT / 'data/preferences.json').load(load_settings())
-    settings = replace(defaults, api_key='offline-check', tts_enabled=False, avatar_enabled=False,
+    settings = replace(defaults, api_key='offline-check', llm_provider='openrouter',
+                       tts_enabled=False, avatar_enabled=False, avatar_hd=True,
                        avatar_animated=True, avatar_width=320, avatar_height=350,
                        avatar_motion=100, avatar_lip_sensitivity=100)
     store = Store(':memory:')
@@ -82,7 +83,8 @@ def main():
         return result
 
     report = {'logical_cpus':os.cpu_count(), 'cpu':os.environ.get('PROCESSOR_IDENTIFIER', 'unknown'),
-              'window_logical_pixels':[320, 350], 'offline_tts':True, 'phases':[], 'checks':{}}
+              'window_logical_pixels':[320, 350], 'hd':True,
+              'offline_tts':True, 'phases':[], 'checks':{}}
     try:
         wait(lambda: getattr(widget, 'ready', False) or getattr(widget, 'failed', False), 25)
         if not getattr(widget, 'ready', False):

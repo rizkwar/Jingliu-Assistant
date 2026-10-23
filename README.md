@@ -32,7 +32,10 @@ See the [Stage 6 guide](docs/avatar-stage6.md) for conversation cues and checks.
 In Settings, scroll to **Avatar size**, **Movement intensity**, and **Lip-sync
 sensitivity**; changes apply immediately, and **Save defaults** keeps them.
 The resize grip's actual dimensions are saved too. Hidden avatars stop drawing;
-visible rendering is capped near 30 FPS.
+waiting uses about 20 FPS, while listening, thinking and speaking use up to 30 FPS.
+HD resolution stays the same. See [idle performance](docs/avatar-performance.md)
+for the measured comparison (about 9.5% to 5.3% whole-machine CPU in short HD idle
+samples on this machine) and its limits.
 
 See the [Stage 7 guide](docs/avatar-stage7.md) for measured resource use,
 verification, and replacing the rig with your own character. The earlier balanced-renderer run

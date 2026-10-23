@@ -30,7 +30,9 @@ existing app controls. There is no new microphone or camera access.
 
 ## Rendering and lifecycle
 
-Actual WebGL draws are capped near 30 FPS. Elapsed-time stepping still handles
+The original Stage 7 renderer capped WebGL draws near 30 FPS. The subsequent
+[idle optimization](avatar-performance.md) uses 20 FPS while waiting and 30 FPS
+during conversation, retaining HD resolution. Elapsed-time stepping still handles
 different display refresh rates. The loop stops when hidden, reduced motion is
 enabled, suspended, closing or disposed. Hidden voice resets, state/control
 updates and resize notifications do not trigger extra draws. A visible static
