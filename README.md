@@ -3,6 +3,11 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
+The natural-animation upgrade is at **checkpoint 1: inspection complete**.
+See the [motion inspection and proposed experiment](docs/avatar-motion-checkpoint1.md)
+for the current limitations, baseline recording locations, rig/tool assessment
+and next preview. The running avatar still uses its existing animation.
+
 ## Response model and HD avatar
 
 In **Settings → Response model**, choose **OpenRouter** or **ChatGPT subscription
