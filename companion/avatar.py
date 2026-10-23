@@ -271,7 +271,11 @@ class AvatarController(QObject):
             revision = mapping.stat().st_mtime_ns if mapping.exists() else None
         except OSError:
             revision = None
-        assignment = (self.window.settings.character_path, revision)
+        try:
+            visual_model = self.window.avatar_models.selected(self.window.settings.character_path)['id']
+        except (OSError, ValueError):
+            visual_model = 'current'
+        assignment = (self.window.settings.character_path, revision, visual_model)
         if self.widget is not None and assignment != getattr(self, '_assignment', None):
             self._release_widget()
         self._assignment = assignment
@@ -325,6 +329,16 @@ class AvatarController(QObject):
     def _create_widget(self):
         from .avatar_assets import assigned_avatar
         try:
+            model = self.window.avatar_models.selected(self.window.settings.character_path)
+        except (OSError, ValueError):
+            model = {'kind': 'mesh'}  # A damaged experimental index must not block the original avatar.
+        try:
+            if model['kind'] == 'live2d':
+                from .mesh_avatar import MeshDesktopAvatar
+                widget = MeshDesktopAvatar(self.window.avatar_models.model_path(model), kind='live2d',
+                                           appearance=model.get('appearance', {}))
+                widget.set_framing(model.get('framing', 'portrait'))
+                return widget
             path = assigned_avatar(self.window.settings.character_path)
             if path is not None:
                 from .mesh_avatar import MeshDesktopAvatar

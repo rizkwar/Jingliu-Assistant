@@ -46,7 +46,7 @@ export class AssistantMotion {
   suspend(){this.clearCursor();this.resetVoice();this.stopPreview();}
   startPreview(){
     if(this.mode!=='idle'||this.requested!=='idle'||this.level>0||this.settings.motion===0||this.preview)return false;
-    this.clearCursor();this.preview=new MotionPreview(this.pose);return true;
+    this.clearCursor();this.preview=this.avatar.createMotionPreview?.(this.pose)??new MotionPreview(this.pose);return true;
   }
   stopPreview(){this.preview=null;}
   update(seconds,now){

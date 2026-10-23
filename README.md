@@ -14,6 +14,14 @@ See the [integration and verification guide](docs/avatar-motion-checkpoint5.md).
 **Preview Head Motion.cmd** remains a separate comparison and rig-review tool;
 its pointer tracking stays within the preview page.
 
+**Experimental rigged model:** Jingliu now has a **visual model** selector in
+Settings. Choose the imported **Jingliu - Live2D (Bailyovo)** rig to test authored
+left/right and up/down head turns, hair physics, blinking and playback lip-sync.
+Choose **AI portrait (current)** to restore the existing avatar immediately.
+Personality, voice and memories stay with the same character. More local Live2D
+models can be added to the selector. See the
+[experimental Live2D guide](docs/experimental-live2d.md) for setup, controls and credits.
+
 **Motion polish:** Settings now has **Calm**, **Natural**, and **Lively** presets,
 plus a silent **Preview movement** button. Manual slider changes show **Custom**.
 The preview ends on its own or stops when conversation, playback, hiding or
@@ -658,5 +666,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-fix: keep affectionate dialogue in character
+fix: stabilize Live2D ribbon physics
 ```

@@ -13,11 +13,19 @@ let visual, activity = 'ready', activitySequence = -1;
 let visible = false, controlsSequence = -1, movement = 1, sensitivity = 1;
 let cursorEnabled=true, gaze=1, hair=.45, attentionSequence=-1, cursorSequence=-1;
 let previewSequence=-1;
+let framing='portrait';
+let appearance={};
 const canvas = document.querySelector('canvas');
 canvas.dataset.renderQuality = 'hd';
 bridge.qualityChanged.connect(hd => {
   canvas.dataset.renderQuality = hd ? 'hd' : 'balanced';
   if (paused) render();
+});
+bridge.framingChanged.connect(value=>{
+  framing=value;avatar?.setFraming?.(value);if(paused)render();
+});
+bridge.appearanceChanged.connect(value=>{
+  appearance=JSON.parse(value);avatar?.setAppearance?.(appearance);if(paused)render();
 });
 function render(dt = 0) {
   if (avatar && visible && !document.hidden && !disposed) {
@@ -116,7 +124,17 @@ document.querySelector('canvas').addEventListener('webglcontextlost', () => {
   paused = true; sync(); bridge.report('error');
 });
 try {
-  avatar = await loadMeshAvatar(document.querySelector('canvas'), './avatar.mavatar', {manual:true, fit:'contain'});
+  const configResponse=await fetch('./renderer.json');
+  if(!configResponse.ok)throw new Error('Missing renderer configuration');
+  const config=await configResponse.json();
+  if(config.kind==='live2d'){
+    const {loadLive2DAvatar}=await import('./live2d-avatar.js');
+    avatar=await loadLive2DAvatar(canvas,'./model/model3.json');
+    avatar.setFraming(framing);
+    avatar.setAppearance(appearance);
+  }else if(config.kind==='mesh'){
+    avatar=await loadMeshAvatar(canvas, './avatar.mavatar', {manual:true, fit:'contain'});
+  }else throw new Error('Unknown renderer');
   avatar.setAutoMotion(false); avatar.setAutoIdle(false); avatar.setSwayGain(0.45);
   visual = new AssistantMotion(avatar);
   visual.setControls(movement,gaze,hair,cursorEnabled);
@@ -131,6 +149,7 @@ try {
   observer.observe(document.querySelector('canvas'));
   // Read-only diagnostics for native rendering checks, no animation command API.
   window.avatarDiagnostics = () => ({frames, paused, visible, movement, sensitivity, activity, visualMode:visual.mode,
+    renderer:config.kind, rig:avatar.rigDiagnostics?.()??null,
     quality:canvas.dataset.renderQuality, motion:visual.snapshot(),
     targetFps:cadence.frameRate(),
     expression:avatar.getExpression().name, parameters:avatar.getParameters(),

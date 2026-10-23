@@ -48,7 +48,7 @@ class PublishSafetyTests(unittest.TestCase):
         self.assertEqual(self.scan(history=True).returncode, 0)
 
     def test_env_and_private_recordings_are_blocked(self):
-        for path in (".env", "clip.wav", "chat.sqlite3", "data/conversation.json", "old.bundle"):
+        for path in (".env", "clip.wav", "chat.sqlite3", "data/conversation.json", "old.bundle", "ext_sources/model.zip"):
             with self.subTest(path=path):
                 self.write(path, "private content")
         result = self.scan()

@@ -23,6 +23,7 @@ from .continuity import MAX_SUMMARY_CHARS, SUMMARY_PROMPT, recent_messages, spli
 from .summary_ui import SummaryDialog
 from .avatar import AvatarController, activity_state
 from .avatar_presets import AVATAR_MOTION_PRESETS, motion_preset_name
+from .avatar_models import AvatarModels
 from .connection_ui import ConnectionPanel
 from .prompts import reply_prompt
 from .reference_voice import inspect_reference, VoiceSetupError
@@ -71,7 +72,7 @@ class CompanionWindow(QMainWindow):
     suspended_changed = Signal(bool)
     activity_changed = Signal(str)
 
-    def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None):
+    def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None, models=None):
         super().__init__()
         settings = active_character_voice(settings)
         self.settings = settings
@@ -91,6 +92,7 @@ class CompanionWindow(QMainWindow):
         self.suspended = False
         self.preferences = preferences if preferences is not None else Preferences()
         self.characters = characters if characters is not None else CharacterLibrary(PROJECT_ROOT)
+        self.avatar_models = models if models is not None else AvatarModels(PROJECT_ROOT)
         self._last_reply = ""
         self.speech = speech if speech is not None else SpeechController(self)
         if hasattr(self.speech, "set_hf_token"):
@@ -356,6 +358,36 @@ class CompanionWindow(QMainWindow):
         self.reset_avatar = QPushButton("Reset position")
         avatar_row.addWidget(self.reset_avatar)
         settings_layout.addLayout(avatar_row)
+        model_row = QHBoxLayout()
+        self.avatar_model_label = QLabel('Visual model')
+        self.avatar_model = QComboBox()
+        self.avatar_model.setAccessibleName('Character visual model')
+        self.avatar_model_label.setBuddy(self.avatar_model)
+        model_row.addWidget(self.avatar_model_label)
+        model_row.addWidget(self.avatar_model, 1)
+        self.add_avatar_model = QPushButton('Add Live2D model')
+        self.add_avatar_model.setToolTip('Import a local model ZIP or .model3.json for this character.')
+        model_row.addWidget(self.add_avatar_model)
+        settings_layout.addLayout(model_row)
+        self.avatar_model_status = QLabel()
+        self.avatar_model_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.avatar_model_status.setObjectName('hint')
+        self.avatar_model_status.setWordWrap(True)
+        settings_layout.addWidget(self.avatar_model_status)
+        framing_row = QHBoxLayout()
+        framing_row.addWidget(QLabel('Model framing'))
+        self.avatar_framing = QComboBox()
+        self.avatar_framing.addItem('Portrait', 'portrait')
+        self.avatar_framing.addItem('Full model', 'full')
+        framing_row.addWidget(self.avatar_framing, 1)
+        self.avatar_blindfold = QCheckBox('Blindfold')
+        framing_row.addWidget(self.avatar_blindfold)
+        settings_layout.addLayout(framing_row)
+        self._refresh_avatar_models()
+        self.avatar_model.currentIndexChanged.connect(self._select_avatar_model)
+        self.avatar_framing.currentIndexChanged.connect(self._set_avatar_framing)
+        self.avatar_blindfold.toggled.connect(self._set_avatar_blindfold)
+        self.add_avatar_model.clicked.connect(self._import_avatar_model)
         self.animate_avatar = QCheckBox("Animate avatar")
         self.animate_avatar.setChecked(settings.avatar_animated)
         settings_layout.addWidget(self.animate_avatar)
@@ -803,6 +835,7 @@ class CompanionWindow(QMainWindow):
         self.connection.apply(settings)
         self._refresh_character_label()
         self._refresh_characters()
+        self._refresh_avatar_models()
         self._interrupt_speech()
         if hasattr(self.speech, "set_hf_token"):
             self.speech.set_hf_token(settings.hf_token)
@@ -850,6 +883,82 @@ class CompanionWindow(QMainWindow):
         self.character_label.setToolTip(path)
         self.edit_character.setEnabled(Path(path).suffix.lower() == ".toml")
         self.open_character_file.setEnabled(bool(path))
+
+    def _refresh_avatar_models(self):
+        with QSignalBlocker(self.avatar_model), QSignalBlocker(self.avatar_framing), QSignalBlocker(self.avatar_blindfold):
+            self.avatar_model.clear()
+            try:
+                profile = self.settings.character_path
+                selected = self.avatar_models.selected(profile)
+                for model in self.avatar_models.models(profile):
+                    self.avatar_model.addItem(model['name'], model['id'])
+                self.avatar_model.setCurrentIndex(self.avatar_model.findData(selected['id']))
+                self.avatar_framing.setCurrentIndex(self.avatar_framing.findData(selected.get('framing', 'portrait')))
+                live2d = selected['kind'] == 'live2d'
+                self.avatar_framing.setEnabled(live2d)
+                self.avatar_blindfold.setVisible(bool(selected.get('blindfold_parameter')))
+                self.avatar_blindfold.setChecked(bool(selected.get('blindfold', False)))
+                self.avatar_model_status.setText(
+                    ('Experimental Live2D rig. ' + selected.get('credit', '') if live2d else
+                     'Current AI portrait. Choose another visual model to experiment.')
+                    + ' Model selection is saved for this character; voice and conversations stay the same.')
+            except (OSError, ValueError) as exc:
+                self.avatar_model.addItem('Current avatar', 'current')
+                self.avatar_framing.setEnabled(False)
+                self.avatar_blindfold.hide()
+                self.avatar_model_status.setText(str(exc))
+        self.avatar_model_label.setText(self.settings.name + ' visual model')
+        self.add_avatar_model.setEnabled(bool(self.settings.character_path))
+
+    @Slot()
+    def _select_avatar_model(self):
+        model_id = self.avatar_model.currentData()
+        if not model_id:
+            return
+        try:
+            self.avatar_models.select(self.settings.character_path, model_id)
+            self.avatar.reload_avatar()
+            self._refresh_avatar_models()
+        except (OSError, ValueError) as exc:
+            self._refresh_avatar_models()
+            self.avatar_model_status.setText(str(exc))
+
+    @Slot()
+    def _set_avatar_framing(self):
+        if not self.avatar_framing.isEnabled():
+            return
+        try:
+            self.avatar_models.set_framing(self.settings.character_path, self.avatar_model.currentData(),
+                                           self.avatar_framing.currentData())
+            if self.avatar.widget is not None and hasattr(self.avatar.widget, 'set_framing'):
+                self.avatar.widget.set_framing(self.avatar_framing.currentData())
+        except (OSError, ValueError) as exc:
+            self.avatar_model_status.setText(str(exc))
+
+    @Slot(bool)
+    def _set_avatar_blindfold(self, enabled):
+        try:
+            model = self.avatar_models.set_blindfold(self.settings.character_path, self.avatar_model.currentData(), enabled)
+            if self.avatar.widget is not None and hasattr(self.avatar.widget, 'set_appearance'):
+                self.avatar.widget.set_appearance(model.get('appearance', {}))
+        except (OSError, ValueError) as exc:
+            self.avatar_model_status.setText(str(exc))
+
+    @Slot()
+    def _import_avatar_model(self):
+        source, _ = QFileDialog.getOpenFileName(self, 'Add a Live2D model for ' + self.settings.name,
+            str(PROJECT_ROOT / 'ext_sources') if (PROJECT_ROOT / 'ext_sources').is_dir() else '',
+            'Live2D models (*.zip *.model3.json)')
+        if not source:
+            return
+        try:
+            model = self.avatar_models.import_live2d(self.settings.character_path, source,
+                                                    'Live2D - ' + Path(source).stem[:100])
+            self.avatar_models.select(self.settings.character_path, model['id'])
+            self.avatar.reload_avatar()
+            self._refresh_avatar_models()
+        except (OSError, ValueError) as exc:
+            self.avatar_model_status.setText(str(exc))
 
     def _refresh_characters(self):
         self.character_select.clear()

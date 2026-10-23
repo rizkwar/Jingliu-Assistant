@@ -27,7 +27,7 @@ def assigned_avatar(profile, root=PROJECT_ROOT):
 
 
 class AvatarAssets:
-    def __init__(self, avatar, root=PROJECT_ROOT, bridge_script=b''):
+    def __init__(self, avatar, root=PROJECT_ROOT, bridge_script=b'', *, kind='mesh'):
         web = root / "companion/avatar_web"
         paths = {
             "index.html": (web / "index.html", "text/html; charset=utf-8"),
@@ -41,9 +41,24 @@ class AvatarAssets:
             "stable-step.js": (web / "stable-step.js", "text/javascript; charset=utf-8"),
             "style.css": (web / "style.css", "text/css; charset=utf-8"),
             "mesh-avatar.js": (web / "vendor/mesh-avatar.js", "text/javascript; charset=utf-8"),
-            "avatar.mavatar": (Path(avatar), "application/octet-stream"),
         }
-        assets = {'qwebchannel.js': (bridge_script, 'text/javascript; charset=utf-8')}
+        assets = {'qwebchannel.js': (bridge_script, 'text/javascript; charset=utf-8'),
+                  'renderer.json': (json.dumps({'kind': kind}).encode(), 'application/json')}
+        if kind == 'mesh':
+            paths['avatar.mavatar'] = (Path(avatar), 'application/octet-stream')
+        elif kind == 'live2d':
+            from .avatar_models import live2d_bundle
+            for name in ('live2d-avatar.js', 'live2d-rig.js', 'live2d-physics.js', 'rig-preview.js'):
+                paths[name] = (web / name, 'text/javascript; charset=utf-8')
+            runtime = root / '.cache/avatar-runtimes/live2d'
+            for name in ('pixi.min.js', 'unsafe-eval.min.js', 'cubism4.min.js', 'live2dcubismcore.min.js'):
+                paths['runtime/' + name] = (runtime / name, 'text/javascript; charset=utf-8')
+            types = {'.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+                     '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+            for name, body in live2d_bundle(avatar).items():
+                assets['model/' + name] = (body, types.get(Path(name).suffix, 'application/octet-stream'))
+        else:
+            raise ValueError('Unsupported avatar renderer.')
         for name, (path, mime) in paths.items():
             if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
                 raise ValueError("Avatar files are missing or too large. See docs/avatar-stage4.md.")
@@ -67,7 +82,8 @@ class AvatarAssets:
                 handler.send_header("X-Content-Type-Options", "nosniff")
                 handler.send_header("Referrer-Policy", "no-referrer")
                 handler.send_header("Permissions-Policy", "microphone=(), camera=(), geolocation=()")
-                handler.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' blob:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+                wasm = " 'wasm-unsafe-eval'" if kind == 'live2d' else ''
+                handler.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'" + wasm + "; style-src 'self'; connect-src 'self' blob:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
                 handler.end_headers()
                 handler.wfile.write(body)
 

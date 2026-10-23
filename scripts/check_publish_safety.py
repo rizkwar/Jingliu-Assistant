@@ -24,7 +24,7 @@ USER_PATH = re.compile(rb"(?i)(?:[A-Z]:[/\\]+Users[/\\]+[^\s/\\\"']+|/(?:Users|h
 NO_REPLY = b"@users.noreply.github.com"
 SYSTEM_EMAILS = {b"noreply@github.com"}
 EXAMPLE_DOMAINS = {b"example.com", b"example.net", b"example.org"}
-PRIVATE_DIRS = {".venv", ".cache", "artifacts", "data", "voices", "recordings",
+PRIVATE_DIRS = {".venv", ".cache", "artifacts", "data", "voices", "ext_sources", "recordings",
                 "attachments", "backups", "logs", ".aws", ".ssh", ".codex"}
 PRIVATE_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".aiff",
                     ".sqlite", ".sqlite3", ".db", ".log", ".bak", ".backup", ".bundle",

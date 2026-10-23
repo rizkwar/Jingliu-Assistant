@@ -10,6 +10,7 @@ artifacts/
 .cache/
 data/
 voices/
+ext_sources/
 *.toml.bak
 
 # Private recordings, conversations, credentials, and local backups.

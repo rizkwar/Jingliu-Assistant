@@ -34,6 +34,8 @@ class RendererBridge(QObject):
     pageVisibility = Signal(bool)
     visibilityChanged = Signal(bool)
     qualityChanged = Signal(bool)
+    framingChanged = Signal(str)
+    appearanceChanged = Signal(str)
     status = Signal(str)
 
     @Slot(str)
@@ -53,8 +55,9 @@ class RendererBridge(QObject):
 class MeshDesktopAvatar(DesktopAvatar):
     preview_changed = Signal(bool, str)
 
-    def __init__(self, path):
+    def __init__(self, path, *, kind='mesh', appearance=None):
         super().__init__()
+        self.kind = kind
         self.assets = None
         self.ready = False
         self.failed = False
@@ -65,6 +68,8 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._motion = 100
         self._sensitivity = 100
         self._hd = True
+        self._framing = 'portrait'
+        self._appearance = dict(appearance or {})
         self._cursor_attention = True
         self._gaze = 100
         self._hair = 45
@@ -126,10 +131,10 @@ class MeshDesktopAvatar(DesktopAvatar):
                 raise ValueError('Qt WebChannel resource is missing.')
             bridge_script = bytes(script.readAll())
             script.close()
-            self.assets = AvatarAssets(path, bridge_script=bridge_script)
+            self.assets = AvatarAssets(path, bridge_script=bridge_script, kind=kind)
             self.interceptor = LocalRequests(self.assets.url, self.profile)
             self.profile.setUrlRequestInterceptor(self.interceptor)
-            self.timeout.start(20000)
+            self.timeout.start(60000 if kind == 'live2d' else 20000)
             self.view.setUrl(QUrl(self.assets.url))
         except (OSError, ValueError):
             self._status('error')
@@ -145,6 +150,8 @@ class MeshDesktopAvatar(DesktopAvatar):
             self._publish_activity()
             self.set_visual_controls(self._motion, self._sensitivity)
             self.set_hd(self._hd)
+            self.set_framing(self._framing)
+            self.set_appearance(self._appearance)
             self.set_attention_controls(self._cursor_attention, self._gaze, self._hair)
             self._sync_timer()
             self.preview_changed.emit(False, 'Ready for a silent movement preview.')
@@ -154,7 +161,11 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.view.hide()
             self.grip.hide()
             self.setFixedSize(280, 280)
-            self.notice.setText('Avatar unavailable. Using the simple mascot.\nCheck local files / graphics support.\nSee docs/avatar-stage4.md.')
+            self.notice.setText(
+                'Live2D unavailable. Choose AI portrait in Settings to restore it.\n'
+                'Check the model and run Setup Live2D.cmd.\nSee docs/experimental-live2d.md.'
+                if self.kind == 'live2d' else
+                'Avatar unavailable. Using the simple mascot.\nCheck local files / graphics support.\nSee docs/avatar-stage4.md.')
             self.notice.show()
             # Leave space above the error message for the native mascot.
             self.layout().insertSpacing(0, 174)
@@ -233,6 +244,17 @@ class MeshDesktopAvatar(DesktopAvatar):
         if self.ready and not self.failed and not self._disposed:
             self.bridge.controlsChanged.emit(self._motion, self._sensitivity, self._controls_sequence)
         self._sync_timer()
+
+    def set_framing(self, value):
+        self._framing = value if value in {'portrait', 'full'} else 'portrait'
+        if self.ready and not self.failed and not self._disposed:
+            self.bridge.framingChanged.emit(self._framing)
+
+    def set_appearance(self, values):
+        import json
+        self._appearance = dict(values)
+        if self.ready and not self.failed and not self._disposed:
+            self.bridge.appearanceChanged.emit(json.dumps(self._appearance))
 
     def set_attention_controls(self, enabled, gaze, hair):
         self._cursor_attention = bool(enabled)
