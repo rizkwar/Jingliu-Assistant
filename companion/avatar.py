@@ -69,6 +69,7 @@ class DesktopAvatar(QWidget):
         self.state = "ready"
         self.name = "Mira"
         self.animated = True
+        self.voice_level = 0.
         self._phase = 0
         self._press = None
         self._offset = QPoint()
@@ -96,7 +97,16 @@ class DesktopAvatar(QWidget):
         self.animated = animated
         if not animated:
             self._phase = 0
+            self.reset_voice()
         self._sync_timer()
+        self.update()
+
+    def set_voice_level(self, level):
+        self.voice_level = max(0., min(1., level)) if self.animated and self.isVisible() else 0.
+        self.update()
+
+    def reset_voice(self):
+        self.voice_level = 0.
         self.update()
 
     def _sync_timer(self):
@@ -116,6 +126,7 @@ class DesktopAvatar(QWidget):
 
     def hideEvent(self, event):
         self.timer.stop()
+        self.reset_voice()
         self._press = None
         super().hideEvent(event)
 
@@ -188,10 +199,10 @@ class DesktopAvatar(QWidget):
                 painter.drawLine(QPointF(x - 5, 70), QPointF(x + 5, 70))
             else:
                 painter.drawLine(QPointF(x + shift, 64), QPointF(x + shift, 75))
-        if self.state == "speaking":
+        if self.voice_level > 0:
             painter.setBrush(QColor("#28253c"))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(QRectF(77, 88, 14, 5 + abs(math.sin(phase / 2)) * 8))
+            painter.drawEllipse(QRectF(77, 88, 14, 3 + self.voice_level * 10))
         else:
             smile = QPainterPath(QPointF(75, 90))
             smile.quadTo(QPointF(84, 98 if self.state != "error" else 83), QPointF(93, 90))
@@ -227,6 +238,9 @@ class AvatarController(QObject):
         window.reset_avatar.clicked.connect(self.reset_position)
         window.activity_changed.connect(self.set_activity)
         window.closed.connect(self.shutdown)
+        if hasattr(window.speech, 'playback_level'):
+            window.speech.playback_level.connect(self.set_voice_level)
+            window.speech.playback_reset.connect(self.reset_voice)
         app = QGuiApplication.instance()
         app.screenAdded.connect(self._screen_added)
         app.screenRemoved.connect(self.constrain)
@@ -324,6 +338,16 @@ class AvatarController(QObject):
     def set_activity(self, state):
         if self.widget is not None:
             self.widget.set_activity(state)
+
+    @Slot(float)
+    def set_voice_level(self, level):
+        if self.widget is not None and hasattr(self.widget, 'set_voice_level'):
+            self.widget.set_voice_level(level)
+
+    @Slot()
+    def reset_voice(self):
+        if self.widget is not None and hasattr(self.widget, 'reset_voice'):
+            self.widget.reset_voice()
 
     @Slot()
     def reset_position(self):

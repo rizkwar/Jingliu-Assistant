@@ -52,24 +52,16 @@ class PocketSpeaker:
             self.voices[voice] = self.model.get_state_for_audio_prompt(voice)
 
     def speak(self, text, voice, volume, report, rate=100):
-        import numpy as np
-        import sounddevice as sd
+        from .audio_playback import play_chunks
 
         validate_rate(rate)
         self.prepare(voice, report)
         report("preparing")
-        first = True
-        with sd.OutputStream(samplerate=playback_sample_rate(self.model.sample_rate, rate), channels=1, dtype="float32") as output:
+        def chunks():
             for chunk in self.model.generate_audio_stream(self.voices[voice], text):
-                pcm = chunk.detach().cpu().numpy().astype(np.float32).reshape(-1, 1)
-                if not pcm.size:
-                    continue
-                if first:
-                    report("speaking")
-                    first = False
-                output.write(np.clip(pcm * (volume / 100), -1, 1))
-        if first:
-            raise RuntimeError("No audio was generated")
+                yield chunk.detach().cpu().numpy()
+        play_chunks(chunks(), playback_sample_rate(self.model.sample_rate, rate), volume,
+                    report, getattr(report, 'playback', lambda *_: None))
 
 
 def run(input_stream=None, output_stream=None, speaker=None):
@@ -90,6 +82,7 @@ def run(input_stream=None, output_stream=None, speaker=None):
             # Third-party progress output must never corrupt the JSON protocol.
             with redirect_stdout(sys.stderr):
                 report = lambda state: emit(job_id, "status", state=state)
+                report.playback = lambda level, at: emit(job_id, "playback", level=level, at=at)
                 if command.get("action") == "prepare":
                     speaker.prepare(command["voice"], report)
                 else:

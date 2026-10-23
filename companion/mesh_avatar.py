@@ -24,6 +24,7 @@ class LocalRequests(QWebEngineUrlRequestInterceptor):
 
 class RendererBridge(QObject):
     pauseChanged = Signal(bool)
+    voiceChanged = Signal(float, int, bool)
     status = Signal(str)
 
     @Slot(str)
@@ -39,6 +40,7 @@ class MeshDesktopAvatar(DesktopAvatar):
         self.ready = False
         self.failed = False
         self._disposed = False
+        self._voice_sequence = 0
         self.clearMask()
         self.setMinimumSize(220, 240)
         self.setMaximumSize(720, 760)
@@ -134,13 +136,29 @@ class MeshDesktopAvatar(DesktopAvatar):
             super().paintEvent(event)
 
     def hideEvent(self, event):
+        if hasattr(self, 'bridge'):
+            self.reset_voice()
         super().hideEvent(event)
         self._sync_timer()
+
+    def set_voice_level(self, level):
+        if self.failed:
+            DesktopAvatar.set_voice_level(self, level)
+            return
+        if self.ready and not self.failed and not self._disposed and self.isVisible() and self.animated:
+            self._voice_sequence += 1
+            self.bridge.voiceChanged.emit(level, self._voice_sequence, False)
+
+    def reset_voice(self):
+        self.voice_level = 0.
+        self._voice_sequence += 1
+        self.bridge.voiceChanged.emit(0., self._voice_sequence, True)
 
     def dispose(self):
         if self._disposed:
             return
         self._disposed = True
+        self.reset_voice()
         self.timeout.stop()
         self.bridge.pauseChanged.emit(True)
         self.view.stop()

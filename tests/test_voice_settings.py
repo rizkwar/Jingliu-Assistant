@@ -20,12 +20,10 @@ class VoiceRateTests(unittest.TestCase):
                 validate_rate(value)
 
     def test_engine_sets_output_rate_and_keeps_chunk_order_and_gain(self):
-        streams, played = [], []
-        class Output:
-            def __init__(self, **kwargs): streams.append(kwargs)
-            def __enter__(self): return self
-            def __exit__(self, *args): pass
-            def write(self, chunk): played.append(chunk.copy())
+        calls = []
+        def playback(chunks, sample_rate, volume, report, levels):
+            calls.append((sample_rate, volume, list(chunks)))
+            report('speaking')
         class Chunk:
             def __init__(self, samples): self.samples = np.array(samples, dtype=np.float32)
             def detach(self): return self
@@ -39,10 +37,10 @@ class VoiceRateTests(unittest.TestCase):
         speaker = PocketSpeaker()
         speaker.model, speaker.voices = Model(), {"jane": object()}
         statuses = []
-        with patch.object(speaker, "prepare"), patch.dict(sys.modules, {"sounddevice": SimpleNamespace(OutputStream=Output)}):
+        with patch.object(speaker, "prepare"), patch('companion.audio_playback.play_chunks', side_effect=playback):
             speaker.speak("A sample.", "jane", 50, statuses.append, rate=94)
-        self.assertEqual(streams[0]["samplerate"], 22560)
-        np.testing.assert_allclose(np.concatenate(played).ravel(), [0.1, -0.2, 0.4])
+        self.assertEqual(calls[0][:2], (22560, 50))
+        np.testing.assert_allclose(np.concatenate(calls[0][2]).ravel(), [0.2, -0.4, 0.8])
         self.assertEqual(statuses, ["preparing", "speaking"])
 
     def test_protocol_passes_rate_defaults_old_commands_and_rejects_bad_rate(self):

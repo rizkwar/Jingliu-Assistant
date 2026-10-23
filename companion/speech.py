@@ -1,12 +1,14 @@
 """Qt controller for a lazy, reusable local speech process."""
 
 import json
+import math
+import time
 from collections import deque
 from pathlib import Path
 import sys
 from uuid import uuid4
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, Qt, QTimer, Signal, Slot
 
 from .config import PROJECT_ROOT
 from .speech_text import SpeechSegmenter, spoken_text
@@ -17,6 +19,8 @@ class SpeechController(QObject):
     changed = Signal(str)
     failed = Signal(str)
     spoken = Signal(str)
+    playback_level = Signal(float)
+    playback_reset = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,6 +61,15 @@ class SpeechController(QObject):
         self.deadline.setSingleShot(True)
         self.deadline.setInterval(600_000)
         self.deadline.timeout.connect(self._timed_out)
+        self._levels = deque(maxlen=128)
+        self._level_timer = QTimer(self)
+        self._level_timer.setSingleShot(True)
+        self._level_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._level_timer.timeout.connect(self._deliver_levels)
+        self._level_watchdog = QTimer(self)
+        self._level_watchdog.setSingleShot(True)
+        self._level_watchdog.setInterval(200)
+        self._level_watchdog.timeout.connect(self.playback_reset.emit)
 
     @property
     def busy(self):
@@ -158,6 +171,7 @@ class SpeechController(QObject):
             self.process.write((json.dumps(command) + "\n").encode("utf-8"))
 
     def stop(self):
+        self._reset_playback()
         was_busy = self.busy
         self.state = "idle"
         self.deadline.stop()
@@ -195,11 +209,14 @@ class SpeechController(QObject):
             if not isinstance(event, dict) or event.get("id") != self._active_id:
                 continue
             kind = event.get("type")
-            if kind == "status":
+            if kind == "playback":
+                self._accept_level(event)
+            elif kind == "status":
                 labels = {"loading": "Loading voice…", "preparing": "Preparing speech…", "speaking": "Speaking…"}
                 state = event.get("state")
                 self._report(labels.get(state, "Preparing speech…"), state if state in labels else "preparing")
             elif kind == "done":
+                self._reset_playback()
                 self.deadline.stop()
                 self._active_id = ""
                 text, self._current_text = self._current_text, ""
@@ -208,6 +225,40 @@ class SpeechController(QObject):
                 self._advance()
             elif kind == "error":
                 self._fail(event.get("message", "Voice playback failed. Text chat still works."))
+
+    def _reset_playback(self):
+        self._level_timer.stop()
+        self._level_watchdog.stop()
+        self._levels.clear()
+        self.playback_reset.emit()
+
+    def _accept_level(self, event):
+        level, at = event.get('level'), event.get('at')
+        if (type(level) not in (float, int) or type(at) not in (float, int)
+                or not math.isfinite(level) or not math.isfinite(at)
+                or not 0 <= level <= 1 or not -.5 <= at - time.monotonic() <= 2):
+            return
+        if self._levels and at < self._levels[-1][0]:
+            return
+        self._levels.append((at, self._active_id, level))
+        if not self._level_timer.isActive():
+            self._deliver_levels()
+
+    @Slot()
+    def _deliver_levels(self):
+        now = time.monotonic()
+        latest = None
+        while self._levels and self._levels[0][0] <= now:
+            latest = self._levels.popleft()
+        if latest is not None and latest[1] == self._active_id and self._active_id:
+            # After a blocked UI, skip obsolete mouth frames rather than replaying.
+            if now - latest[0] < .2:
+                self.playback_level.emit(latest[2])
+                self._level_watchdog.start()
+            else:
+                self.playback_reset.emit()
+        if self._levels:
+            self._level_timer.start(max(1, math.ceil((self._levels[0][0] - time.monotonic()) * 1000)))
 
     @Slot()
     def _drain_errors(self):

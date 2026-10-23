@@ -3,13 +3,18 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Jingliu desktop avatar (Stage 4)
+## Jingliu desktop avatar (Stage 5)
 
 The approved v5 portrait now displays in the assistant's floating desktop window,
 with idle blinking, breathing and hair motion. Open **Start Mira.cmd**, then
 **Settings → Show desktop avatar**. Drag to move, use the bottom-right grip to
 resize, or right-click for chat and reload controls. **Animate avatar** pauses
-idle motion. Speech synchronization and expressions are later stages.
+idle motion. Her mouth now follows actual local TTS playback, including silence
+and Stop. This uses audio amplitude; conversation expressions are a later stage.
+
+To check lip-sync, leave **Animate avatar** enabled and click **Preview voice**
+at a nonzero volume, then try **Stop** during speech. See the
+[Stage 5 guide](docs/avatar-stage5.md) for timing, tests and limitations.
 
 See the [Stage 4 guide](docs/avatar-stage4.md) for setup, local character
 assignments, fallback behavior and native verification. A fresh environment needs
@@ -414,12 +419,13 @@ models, and does not start recording.
 
 The simple fallback mascot's badge distinguishes Ready, Opening mic, Listening, Transcribing, Thinking,
 Writing, Summarizing, Loading voice, Speaking, Suspended, Needs attention, and Closing.
-The mouth animates only during reported speech playback, rather than while voice
-preparation is running. Colors and text distinguish activity; detailed errors remain
+The mouth follows levels from actual speaker output, with no movement during voice
+preparation. Colors and text distinguish activity; detailed errors remain
 in the chat window. The avatar uses your configured companion name in its tooltip.
 
-The mesh portrait currently shows idle motion only, with a resting mouth; its
-tooltip reflects activity. No speech or expression animation is connected yet.
+The mesh portrait shows idle motion and mouth movement from actual local speaker
+playback. Loading a voice or generating text alone does not open its mouth. Its
+tooltip reflects activity; conversation expressions are a later stage.
 
 Uncheck **Animate avatar** for a static portrait. The fallback mascot's timer also stops while
 the avatar is hidden, suspended, closing, or showing an error. Save defaults retains
@@ -598,5 +604,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: display local mesh avatar in desktop companion
+feat: sync avatar mouth with local speech playback
 ```

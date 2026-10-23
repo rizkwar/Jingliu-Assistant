@@ -79,6 +79,18 @@ class AvatarWindowTests(unittest.TestCase):
         self.assertFalse(self.window.speech.busy)
         self.assertFalse(self.window.hands_free.isChecked())
 
+    def test_fallback_mouth_uses_output_level_and_resets_when_hidden(self):
+        widget = self.enable()
+        widget.set_activity('speaking')
+        self.assertEqual(widget.voice_level, 0)
+        self.window.avatar.set_voice_level(.7)
+        self.assertEqual(widget.voice_level, .7)
+        self.window.avatar.reset_voice()
+        self.assertEqual(widget.voice_level, 0)
+        self.window.avatar.set_voice_level(.7)
+        self.window.show_avatar.setChecked(False)
+        self.assertEqual(widget.voice_level, 0)
+
     def test_hidden_suspended_and_reduced_motion_avatar_do_not_run_timer(self):
         widget = self.enable()
         self.assertTrue(widget.timer.isActive())
