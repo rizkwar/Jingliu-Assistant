@@ -12,6 +12,7 @@ from .voice_settings import validate_rate
 
 
 FIELDS = {
+    'llm_provider': str, 'openrouter_model': str, 'codex_model': str,
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
     "tts_rate": int,
     "tts_reference": str,
@@ -23,6 +24,7 @@ FIELDS = {
     "avatar_x": (int, type(None)), "avatar_y": (int, type(None)),
     "avatar_width": int, "avatar_height": int,
     "avatar_motion": int, "avatar_lip_sensitivity": int,
+    "avatar_hd": bool,
 }
 
 
@@ -33,6 +35,11 @@ def validate(values):
     if any(type(value) not in (FIELDS[key] if isinstance(FIELDS[key], tuple) else (FIELDS[key],))
            for key, value in clean.items()):
         raise ValueError("Saved preferences contain an invalid value type.")
+    if clean.get('llm_provider', 'openrouter') not in {'openrouter', 'codex'}:
+        raise ValueError('Saved model provider is invalid.')
+    for key in ('openrouter_model', 'codex_model'):
+        if len(clean.get(key, '')) > 160 or any(c.isspace() for c in clean.get(key, '')):
+            raise ValueError('Saved model ID is invalid.')
     if "tts_voice" in clean and clean["tts_voice"] not in (*VOICES, "reference"):
         raise ValueError("Saved voice is not available.")
     if "tts_volume" in clean and not 0 <= clean["tts_volume"] <= 100:
@@ -83,6 +90,8 @@ class Preferences:
         else:
             values = self._values
         settings = replace(defaults, **values)
+        if settings.openrouter_model:
+            settings = replace(settings, model=settings.openrouter_model)
         if settings.character_path:
             settings = with_character(settings, load_character(PROJECT_ROOT, settings.character_path, defaults.name))
         return settings

@@ -175,6 +175,20 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.window.status.text(), "Ready")
         self.assertTrue(self.window.send_button.isEnabled())
 
+    def test_switching_response_provider_keeps_character_voice_memory_and_conversation(self):
+        before=self.window.settings
+        conversation=self.window._conversation_id
+        messages=self.window._messages
+        self.window.connection.provider.setCurrentIndex(self.window.connection.provider.findData('codex'))
+        self.assertEqual(self.window.settings.llm_provider,'codex')
+        self.assertEqual(self.window.settings.system_prompt,before.system_prompt)
+        self.assertEqual(self.window.settings.character_path,before.character_path)
+        self.assertEqual(self.window.settings.tts_reference,before.tts_reference)
+        self.assertEqual(self.window._conversation_id,conversation)
+        self.assertIs(self.window._messages,messages)
+        self.window.connection.provider.setCurrentIndex(0)
+        self.assertEqual(self.window.settings.llm_provider,'openrouter')
+
     def test_failed_turn_is_visible_but_excluded_from_context(self):
         with self.mock_client(lambda request: httpx.Response(429, json={"error": {"message": "busy"}})):
             self.send()

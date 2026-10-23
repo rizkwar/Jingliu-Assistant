@@ -93,3 +93,10 @@ class PreferenceTests(unittest.TestCase):
                              ('avatar_lip_sensitivity', 201), ('avatar_lip_sensitivity', 24)]:
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 self.preferences.save(replace(DEFAULTS, **{field:value}))
+
+    def test_provider_choice_and_hd_quality_persist_without_changing_personality_or_keys(self):
+        self.preferences.save(replace(DEFAULTS,llm_provider='codex',codex_model='chosen-model',avatar_hd=False))
+        loaded=Preferences(self.path).load(DEFAULTS)
+        self.assertEqual((loaded.llm_provider,loaded.codex_model,loaded.avatar_hd),('codex','chosen-model',False))
+        self.assertEqual(loaded.system_prompt,DEFAULTS.system_prompt)
+        self.assertEqual(loaded.api_key,DEFAULTS.api_key)

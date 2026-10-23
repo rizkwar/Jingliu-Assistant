@@ -3,6 +3,18 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
+## Response model and HD avatar
+
+In **Settings → Response model**, choose **OpenRouter** or **ChatGPT subscription
+via Codex**. For Codex, click **Sign in to ChatGPT**, then **Check connection /
+models** and choose a model. **Save defaults** keeps the selection. Character,
+voice, avatar and the current conversation stay in place when switching models.
+See [model providers](docs/model-providers.md) for setup, limits and verification.
+
+**HD rendering** is on by default for a sharper portrait. It preserves the approved
+artwork and can be turned off in Settings to reduce graphics load.
+See [HD rendering](docs/avatar-hd.md) for before/after pixel sizes and limits.
+
 ## Jingliu desktop avatar (Stage 7 complete)
 
 The approved v5 portrait now displays in the assistant's floating desktop window,
@@ -23,7 +35,7 @@ The resize grip's actual dimensions are saved too. Hidden avatars stop drawing;
 visible rendering is capped near 30 FPS.
 
 See the [Stage 7 guide](docs/avatar-stage7.md) for measured resource use,
-verification, and replacing the rig with your own character. The native run
+verification, and replacing the rig with your own character. The earlier balanced-renderer run
 observed about **9.1% whole-machine CPU while visibly idle**, **19.5% during local
 speech**, and **0.6% while hidden** on this 16-thread machine, including the loaded
 TTS process. These are short measurements, not performance guarantees.
@@ -617,5 +629,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: add avatar controls and verify performance
+feat: add Codex subscription model selection and HD avatar rendering
 ```

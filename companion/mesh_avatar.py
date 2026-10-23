@@ -28,6 +28,7 @@ class RendererBridge(QObject):
     activityChanged = Signal(str, int)
     controlsChanged = Signal(int, int, int)
     visibilityChanged = Signal(bool)
+    qualityChanged = Signal(bool)
     status = Signal(str)
 
     @Slot(str)
@@ -48,6 +49,7 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._controls_sequence = 0
         self._motion = 100
         self._sensitivity = 100
+        self._hd = True
         self.clearMask()
         self.setMinimumSize(220, 240)
         self.setMaximumSize(640, 700)
@@ -113,6 +115,7 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.notice.hide()
             self._publish_activity()
             self.set_visual_controls(self._motion, self._sensitivity)
+            self.set_hd(self._hd)
             self._sync_timer()
         else:
             self.failed = True
@@ -167,6 +170,11 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._controls_sequence += 1
         if self.ready and not self.failed and not self._disposed:
             self.bridge.controlsChanged.emit(self._motion, self._sensitivity, self._controls_sequence)
+
+    def set_hd(self, enabled):
+        self._hd = bool(enabled)
+        if self.ready and not self.failed and not self._disposed:
+            self.bridge.qualityChanged.emit(self._hd)
 
     def set_voice_level(self, level):
         if self.failed:

@@ -1,4 +1,4 @@
-"""OpenRouter streaming, independent of the desktop interface."""
+"""Response backends, independent of the character and desktop interface."""
 
 from collections.abc import AsyncIterator
 import json
@@ -56,6 +56,11 @@ async def stream_reply(
     messages: list[dict[str, str]],
 ) -> AsyncIterator[str]:
     settings.validate_connection()
+    if settings.llm_provider == 'codex':
+        from .codex_backend import stream_codex
+        async for text in stream_codex(settings, messages):
+            yield text
+        return
     payload = {
         "model": settings.model,
         "messages": [{"role": "system", "content": settings.system_prompt}, *messages],

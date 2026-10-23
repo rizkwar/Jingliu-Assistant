@@ -1,3 +1,4 @@
+import {drawingSize} from './render-quality.js';
 /*! fflate
 MIT License
 
@@ -801,7 +802,15 @@ function Ln(n, e) {
       o.bindVertexArray(null), this.lighting.shadow && !this.shadow && (this.shadow = new Rn(o, u));
     }
     resize() {
-      const x = this.canvas, o = Math.min(window.devicePixelRatio || 1, 2), h = Math.round(x.clientWidth * o), T = Math.round(x.clientHeight * o);
+      const x = this.canvas, hd = x.dataset.renderQuality === "hd", [h, T] = drawingSize(x.clientWidth, x.clientHeight, window.devicePixelRatio, hd);
+      if (this.hd !== hd) {
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        for (const layer of this.layers) {
+          this.gl.bindTexture(this.gl.TEXTURE_2D, layer.tex);
+          this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, hd ? this.gl.LINEAR : this.gl.LINEAR_MIPMAP_LINEAR);
+        }
+        this.hd = hd;
+      }
       (x.width !== h || x.height !== T) && (x.width = h, x.height = T);
       const f = (this.fit === "cover" ? Math.max : Math.min)(h / (t.w * (1 + 2 * this.pad.side)), T / (t.h * (1 + this.pad.top))), w = (h - t.w * f) / 2, B = (T - t.h * f) / (this.fit === "cover" ? 2 : 1);
       this.scale = [2 * f / h, -2 * f / T], this.offset = [-1 + 2 * w / h, 1 - 2 * B / T], this.pxScale = f, this.pxOff = [w, B];

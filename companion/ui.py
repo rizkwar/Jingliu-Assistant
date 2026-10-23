@@ -22,6 +22,7 @@ from .preferences import Preferences
 from .continuity import MAX_SUMMARY_CHARS, SUMMARY_PROMPT, recent_messages, split_turns
 from .summary_ui import SummaryDialog
 from .avatar import AvatarController, activity_state
+from .connection_ui import ConnectionPanel
 from .prompts import reply_prompt
 from .reference_voice import inspect_reference, VoiceSetupError
 
@@ -197,6 +198,9 @@ class CompanionWindow(QMainWindow):
         settings_hint.setObjectName("hint")
         settings_hint.setWordWrap(True)
         settings_layout.addWidget(settings_hint)
+        self.connection = ConnectionPanel(settings)
+        settings_layout.addWidget(self.connection)
+        self.connection.changed.connect(self._connection_changed)
         character_row = QHBoxLayout()
         self.character_label = QLabel()
         self.character_label.setWordWrap(True)
@@ -355,6 +359,10 @@ class CompanionWindow(QMainWindow):
         self.animate_avatar = QCheckBox("Animate avatar")
         self.animate_avatar.setChecked(settings.avatar_animated)
         settings_layout.addWidget(self.animate_avatar)
+        self.avatar_hd = QCheckBox('HD rendering')
+        self.avatar_hd.setChecked(settings.avatar_hd)
+        self.avatar_hd.setToolTip('Sharper portrait rendering. Turn off to reduce graphics load.')
+        settings_layout.addWidget(self.avatar_hd)
         for field, label, lower, upper, value, unit in (
             ('avatar_size', 'Avatar size', 220, 640, settings.avatar_width, 'px'),
             ('avatar_motion', 'Movement intensity', 0, 100, settings.avatar_motion, '%'),
@@ -474,11 +482,18 @@ class CompanionWindow(QMainWindow):
             f"Type a message to {self.settings.name}. Recent messages stay in context "
             "and are saved locally. Use /remember to save a preference across conversations.\n\n", "#a4adbf"
         )
-        if not self.settings.api_key:
+        if self.settings.llm_provider == 'openrouter' and not self.settings.api_key:
             self.status.setText("Add API key")
             self._write("Setup: add your OpenRouter key to .env, then open Settings and reload .env.\n", "#d6be8c")
         else:
             self.status.setText("Ready")
+
+    def _connection_changed(self):
+        if self._closing: return
+        self._end_handsfree()
+        self._interrupt_speech()
+        self.settings = replace(self.settings, **self.connection.values())
+        self.status.setText('Ready' if self.settings.llm_provider == 'codex' or self.settings.api_key else 'Add API key')
 
     @Slot()
     def _send(self) -> None:
@@ -559,6 +574,7 @@ class CompanionWindow(QMainWindow):
         self.preview.setEnabled(not busy and not self.speech.busy)
         self.character_voice_button.setEnabled(bool(self.settings.character_voice) and not busy)
         self.character_select.setEnabled(not busy)
+        self.connection.setEnabled(not busy)
         self.add_character.setEnabled(not busy)
         self.edit_character.setEnabled(not busy and Path(self.settings.character_path).suffix.lower() == ".toml")
         self.choose_reference.setEnabled(not busy)
@@ -735,6 +751,7 @@ class CompanionWindow(QMainWindow):
 
     def _apply_settings(self, settings, *, retry_voice=False):
         self.settings = settings
+        self.connection.apply(settings)
         self._refresh_character_label()
         self._refresh_characters()
         self._interrupt_speech()
@@ -758,6 +775,7 @@ class CompanionWindow(QMainWindow):
         self.close_to_tray.setChecked(settings.close_to_tray)
         self.show_avatar.setChecked(settings.avatar_enabled)
         self.animate_avatar.setChecked(settings.avatar_animated)
+        self.avatar_hd.setChecked(settings.avatar_hd)
         self.avatar_size.setValue(settings.avatar_width)
         self.avatar_motion.setValue(settings.avatar_motion)
         self.avatar_lip_sensitivity.setValue(settings.avatar_lip_sensitivity)
@@ -768,7 +786,7 @@ class CompanionWindow(QMainWindow):
             self.mic_device.setCurrentIndex(1)
         self.title.setText(settings.name)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
-        self.status.setText("Ready" if settings.api_key else "Add API key")
+        self.status.setText("Ready" if settings.api_key or settings.llm_provider == 'codex' else "Add API key")
         self._activity_error = False
         self._refresh_controls()
         self._refresh_activity()
@@ -886,6 +904,7 @@ class CompanionWindow(QMainWindow):
     def _current_preferences(self):
         return replace(
             self.settings, tts_enabled=self.auto_speak.isChecked(), tts_voice=self.voice.currentData(),
+            **self.connection.values(),
             tts_reference=self._reference_path,
             tts_volume=self.volume.value(), tts_rate=self.delivery_rate.value(), stt_auto_send=self.auto_send.isChecked(),
             stt_model=self.stt_model.currentText(),
@@ -896,6 +915,7 @@ class CompanionWindow(QMainWindow):
             avatar_x=self.avatar.position()[0], avatar_y=self.avatar.position()[1],
             avatar_width=self.avatar.dimensions()[0], avatar_height=self.avatar.dimensions()[1],
             avatar_motion=self.avatar_motion.value(), avatar_lip_sensitivity=self.avatar_lip_sensitivity.value(),
+            avatar_hd=self.avatar_hd.isChecked(),
         )
 
     @Slot()
@@ -978,6 +998,7 @@ class CompanionWindow(QMainWindow):
                 event.ignore()
                 return
         self._closing = True
+        self.connection.shutdown()
         self._refresh_activity()
         self._dismiss_dialogs()
         self._pending_transcription = ""

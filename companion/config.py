@@ -35,6 +35,7 @@ class Settings:
     avatar_height: int = 350
     avatar_motion: int = 100
     avatar_lip_sensitivity: int = 100
+    avatar_hd: bool = True
     character_path: str = ""
     voice_preview: str = ""
     tts_rate: int = 100
@@ -44,8 +45,18 @@ class Settings:
     character_reference: str = ""
     tts_reference: str = ""
     hf_token: str = field(default="", repr=False)
+    llm_provider: str = 'openrouter'
+    openrouter_model: str = ''
+    codex_model: str = ''
 
     def validate_connection(self) -> None:
+        if self.llm_provider == 'codex':
+            import re
+            if self.codex_model and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}', self.codex_model):
+                raise ValueError('Choose a valid Codex model from Settings.')
+            return
+        if self.llm_provider != 'openrouter':
+            raise ValueError('Choose OpenRouter or ChatGPT subscription via Codex in Settings.')
         if not self.api_key or self.api_key == "your_key_here":
             raise ValueError(
                 "Add your OpenRouter key to OPENROUTER_API_KEY in .env, "

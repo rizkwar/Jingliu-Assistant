@@ -8,6 +8,12 @@ let avatar, observer, frame = 0, previous = 0, paused = true, disposed = false, 
 let voiceSequence = -1, voiceAt = 0, voiceActive = false;
 let visual, activity = 'ready', activitySequence = -1;
 let visible = false, controlsSequence = -1, movement = 1, sensitivity = 1;
+const canvas = document.querySelector('canvas');
+canvas.dataset.renderQuality = 'hd';
+bridge.qualityChanged.connect(hd => {
+  canvas.dataset.renderQuality = hd ? 'hd' : 'balanced';
+  if (paused) render();
+});
 function render(dt = 0) {
   if (avatar && visible && !document.hidden && !disposed) {
     avatar.advance(dt, dt > 0 ? 1/dt : 30); frames++;
@@ -87,6 +93,7 @@ try {
   observer.observe(document.querySelector('canvas'));
   // Read-only diagnostics for native rendering checks, no animation command API.
   window.avatarDiagnostics = () => ({frames, paused, visible, movement, sensitivity, activity, visualMode:visual.mode,
+    quality:canvas.dataset.renderQuality,
     expression:avatar.getExpression().name, parameters:avatar.getParameters(),
     canvas:[document.querySelector('canvas').width, document.querySelector('canvas').height]});
   bridge.report('ready');

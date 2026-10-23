@@ -37,7 +37,7 @@ class ReplyWorker(QThread):
         except asyncio.CancelledError:
             pass
         except (ChatError, ValueError) as exc:
-            self.error = str(exc).replace(self.settings.api_key, "[redacted]")
+            self.error = str(exc).replace(self.settings.api_key, "[redacted]") if self.settings.api_key else str(exc)
         except Exception:
             # Never dump credentials, transcripts, or provider internals into logs.
             self.error = "An unexpected error occurred while generating the reply. Try again."

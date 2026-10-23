@@ -82,18 +82,20 @@ def run_checks(root=ROOT, engines=False):
         settings = load_settings(root)
         checks.append(Check("ok", "Configuration", ".env defaults and the selected character profile are valid."))
         try:
-            settings.validate_connection()
-            checks.append(Check("ok", "API configuration", "Key and model ID configured. No online request was made."))
-        except ValueError:
-            checks.append(Check("warning", "API configuration",
-                                "Key or model ID needs attention in .env. Offline features remain available."))
-        try:
             from .preferences import Preferences
             settings = Preferences(root / "data" / "preferences.json").load(settings)
             checks.append(Check("ok", "Saved preferences", "Readable, or defaults will be used."))
         except (OSError, ValueError):
             checks.append(Check("warning", "Saved preferences",
                                 "Invalid or unreadable. The app can use defaults; Settings > Save defaults repairs the file."))
+        try:
+            settings.validate_connection()
+            checks.append(Check('ok', 'API configuration',
+                'Codex selected. Sign-in is checked from Settings; no inference was requested.'
+                if settings.llm_provider == 'codex' else 'Key and model ID configured. No online request was made.'))
+        except ValueError:
+            checks.append(Check('warning', 'API configuration',
+                'Choose a provider and model in Settings; OpenRouter credentials belong in .env. Offline features remain available.'))
         if settings.tts_voice == "reference":
             from .reference_voice import inspect_reference, VoiceSetupError
             try:

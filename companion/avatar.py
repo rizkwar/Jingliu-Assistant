@@ -240,6 +240,7 @@ class AvatarController(QObject):
         window.avatar_size.valueChanged.connect(self.set_size)
         window.avatar_motion.valueChanged.connect(self.set_visual_controls)
         window.avatar_lip_sensitivity.valueChanged.connect(self.set_visual_controls)
+        window.avatar_hd.toggled.connect(self.set_hd)
         window.activity_changed.connect(self.set_activity)
         window.closed.connect(self.shutdown)
         if hasattr(window.speech, 'playback_level'):
@@ -360,6 +361,11 @@ class AvatarController(QObject):
         if self.widget is not None and hasattr(self.widget, 'set_visual_controls'):
             self.widget.set_visual_controls(self.window.avatar_motion.value(),
                                             self.window.avatar_lip_sensitivity.value())
+            self.set_hd()
+
+    def set_hd(self):
+        if self.widget is not None and hasattr(self.widget, 'set_hd'):
+            self.widget.set_hd(self.window.avatar_hd.isChecked())
 
     @Slot()
     def hide_avatar(self):
