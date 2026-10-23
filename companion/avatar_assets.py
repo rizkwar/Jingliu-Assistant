@@ -36,6 +36,7 @@ class AvatarAssets:
             "render-quality.js": (web / "render-quality.js", "text/javascript; charset=utf-8"),
             "render-cadence.js": (web / "render-cadence.js", "text/javascript; charset=utf-8"),
             "assistant-motion.js": (web / "assistant-motion.js", "text/javascript; charset=utf-8"),
+            "motion-preview.js": (web / "motion-preview.js", "text/javascript; charset=utf-8"),
             "idle-attention.js": (web / "idle-attention.js", "text/javascript; charset=utf-8"),
             "stable-step.js": (web / "stable-step.js", "text/javascript; charset=utf-8"),
             "style.css": (web / "style.css", "text/css; charset=utf-8"),

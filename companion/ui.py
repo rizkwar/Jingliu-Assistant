@@ -2,14 +2,14 @@ from dataclasses import replace
 import sqlite3
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QTextBrowser, QVBoxLayout, QWidget,
 )
 
-from .config import PROJECT_ROOT, Settings, VOICES, load_settings
+from .config import PROJECT_ROOT, Settings, VOICES, active_character_voice, load_settings
 from .character import character_key, load_character, read_profile
 from .characters import CharacterLibrary
 from .character_ui import CharacterDialog
@@ -22,6 +22,7 @@ from .preferences import Preferences
 from .continuity import MAX_SUMMARY_CHARS, SUMMARY_PROMPT, recent_messages, split_turns
 from .summary_ui import SummaryDialog
 from .avatar import AvatarController, activity_state
+from .avatar_presets import AVATAR_MOTION_PRESETS, motion_preset_name
 from .connection_ui import ConnectionPanel
 from .prompts import reply_prompt
 from .reference_voice import inspect_reference, VoiceSetupError
@@ -72,6 +73,7 @@ class CompanionWindow(QMainWindow):
 
     def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None):
         super().__init__()
+        settings = active_character_voice(settings)
         self.settings = settings
         self.activity = "ready"
         self._activity_error = False
@@ -232,10 +234,8 @@ class CompanionWindow(QMainWindow):
         voice_row.addStretch()
         voice_row.addWidget(QLabel("Voice"))
         self.voice = QComboBox()
-        for voice in VOICES:
-            self.voice.addItem(voice, voice)
-        self.voice.addItem("Reference recording", "reference")
-        self.voice.setCurrentIndex(self.voice.findData(settings.tts_voice))
+        self._set_voice_option(settings.tts_voice)
+        self.voice.setEnabled(False)  # One active character voice, no stock catalog.
         voice_row.addWidget(self.voice)
         self.preview = QPushButton("Preview")
         self.preview.clicked.connect(self._preview_voice)
@@ -369,6 +369,19 @@ class CompanionWindow(QMainWindow):
             'Brief desktop cursor glances with pauses between them. Cursor positions stay on this computer. '
             'Save defaults to keep this setting.')
         settings_layout.addWidget(self.avatar_cursor_attention)
+        preset_row = QHBoxLayout()
+        preset_label = QLabel('Motion preset')
+        self.avatar_preset = QComboBox()
+        self.avatar_preset.setAccessibleName('Motion preset')
+        preset_label.setBuddy(self.avatar_preset)
+        self.avatar_preset.addItems([*AVATAR_MOTION_PRESETS, 'Custom'])
+        self.avatar_preset.setToolTip(
+            'Calm reduces movement and gaze. Natural uses the original movement settings. '
+            'Lively adds hair follow-through within the same head-turn limits. '
+            'Adjust the sliders for Custom; Save defaults keeps the values.')
+        preset_row.addWidget(preset_label)
+        preset_row.addWidget(self.avatar_preset, 1)
+        settings_layout.addLayout(preset_row)
         for field, label, lower, upper, value, unit in (
             ('avatar_size', 'Avatar size', 220, 640, settings.avatar_width, 'px'),
             ('avatar_motion', 'Movement intensity', 0, 100, settings.avatar_motion, '%'),
@@ -397,6 +410,21 @@ class CompanionWindow(QMainWindow):
             setattr(self, field, slider)
             setattr(self, field + '_label', amount)
             settings_layout.addLayout(row)
+        # Set the initial label before connecting the combo: loading saved or
+        # custom slider values must never apply a named preset over them.
+        self._sync_avatar_preset()
+        self.avatar_preset.currentTextChanged.connect(self._apply_avatar_preset)
+        for slider in (self.avatar_motion, self.avatar_gaze, self.avatar_hair):
+            slider.valueChanged.connect(self._sync_avatar_preset)
+        self.preview_avatar_motion = QPushButton('Preview movement')
+        self.preview_avatar_motion.setEnabled(False)
+        self.preview_avatar_motion.setToolTip(
+            'A short silent movement preview. It does not record audio or start a conversation.')
+        settings_layout.addWidget(self.preview_avatar_motion)
+        self.avatar_preview_status = QLabel('Show and animate a mesh avatar to preview its movement.')
+        self.avatar_preview_status.setObjectName('hint')
+        self.avatar_preview_status.setWordWrap(True)
+        settings_layout.addWidget(self.avatar_preview_status)
         self.preference_status = QLabel("Character selection is saved automatically. Save defaults keeps further voice and app adjustments. API keys stay in .env.")
         self.preference_status.setObjectName("hint")
         self.preference_status.setWordWrap(True)
@@ -579,7 +607,7 @@ class CompanionWindow(QMainWindow):
         busy = self._worker is not None or self.microphone.busy or self.suspended
         self.send_button.setEnabled(not busy)
         self.input.setEnabled(not self.microphone.busy)
-        self.stop_button.setEnabled(self._worker is not None or self.microphone.busy or self.speech.busy or self.hands_free.isChecked())
+        self._refresh_stop_button()
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
         self.history_button.setEnabled(not busy)
@@ -601,6 +629,12 @@ class CompanionWindow(QMainWindow):
         self.hands_free.setEnabled(not self._closing and not self.suspended and (self.hands_free.isChecked() or not self.microphone.busy))
         self.record_button.setEnabled(not self.suspended and self.microphone.state not in {"loading", "transcribing"})
         self._refresh_activity()
+
+    def _refresh_stop_button(self) -> None:
+        preview_active = bool(getattr(getattr(getattr(self, 'avatar', None), 'widget', None),
+                                      '_preview_active', False))
+        self.stop_button.setEnabled(self._worker is not None or self.microphone.busy or self.speech.busy
+                                    or self.hands_free.isChecked() or preview_active)
 
     def _refresh_activity(self) -> None:
         state = activity_state(
@@ -764,6 +798,7 @@ class CompanionWindow(QMainWindow):
         self.preference_status.setText("Reloaded .env and the character profile, with saved app preferences.")
 
     def _apply_settings(self, settings, *, retry_voice=False):
+        settings = active_character_voice(settings)
         self.settings = settings
         self.connection.apply(settings)
         self._refresh_character_label()
@@ -775,7 +810,7 @@ class CompanionWindow(QMainWindow):
             self.speech.shutdown()  # Retry gated weights after CLI login/access changes.
         self._reference_path = settings.tts_reference
         self.auto_speak.setChecked(settings.tts_enabled)
-        self.voice.setCurrentIndex(self.voice.findData(settings.tts_voice))
+        self._set_voice_option(settings.tts_voice)
         self._refresh_reference_label()
         self.delivery_rate.setValue(settings.tts_rate)
         self.character_voice_button.setToolTip(settings.character_voice_description)
@@ -936,6 +971,23 @@ class CompanionWindow(QMainWindow):
             avatar_cursor_attention=self.avatar_cursor_attention.isChecked(),
             avatar_gaze=self.avatar_gaze.value(), avatar_hair=self.avatar_hair.value(),
         )
+
+    @Slot()
+    def _sync_avatar_preset(self) -> None:
+        name = motion_preset_name(self.avatar_motion.value(), self.avatar_gaze.value(),
+                                  self.avatar_hair.value())
+        with QSignalBlocker(self.avatar_preset):
+            self.avatar_preset.setCurrentText(name)
+
+    @Slot(str)
+    def _apply_avatar_preset(self, name: str) -> None:
+        preset = AVATAR_MOTION_PRESETS.get(name)
+        if preset is None:
+            self._sync_avatar_preset()
+            return
+        for slider, value in zip((self.avatar_motion, self.avatar_gaze, self.avatar_hair), preset):
+            slider.setValue(value)
+        self._sync_avatar_preset()
 
     @Slot()
     def _save_preferences(self) -> None:
@@ -1105,6 +1157,13 @@ class CompanionWindow(QMainWindow):
             return self._reference_path or "reference"
         return self.voice.currentData()
 
+    def _set_voice_option(self, mode):
+        with QSignalBlocker(self.voice):
+            self.voice.clear()
+            label = f"{self.settings.name}'s voice" if mode == 'reference' else mode
+            self.voice.addItem(label, mode)
+        self.voice.setToolTip('The active character voice. Use a reference recording to change its sound.')
+
     def _refresh_reference_label(self) -> None:
         if not self._reference_path:
             self.reference_label.setText("No reference selected · Use a clean 3–30 second WAV of one speaker.")
@@ -1127,7 +1186,7 @@ class CompanionWindow(QMainWindow):
             return
         self._interrupt_speech()
         self._reference_path = str(reference.path)
-        self.voice.setCurrentIndex(self.voice.findData("reference"))
+        self._set_voice_option('reference')
         self.delivery_rate.setValue(100)
         self._refresh_reference_label()
         self.preference_status.setText(f"Reference selected: {reference.seconds:.1f}s. Preview to test model access and the voice; Save defaults to keep it.")
@@ -1136,9 +1195,8 @@ class CompanionWindow(QMainWindow):
     def _clear_reference(self) -> None:
         self._interrupt_speech()
         self._reference_path = ""
-        if self.voice.currentData() == "reference":
-            self.voice.setCurrentIndex(self.voice.findData(self.settings.character_voice or "alba"))
-            self.delivery_rate.setValue(100)
+        self._set_voice_option('reference')
+        self.delivery_rate.setValue(100)
         self._refresh_reference_label()
 
     @Slot(int)
@@ -1153,7 +1211,7 @@ class CompanionWindow(QMainWindow):
         self._end_handsfree()
         self._interrupt_speech()
         self._reference_path = self.settings.character_reference
-        self.voice.setCurrentIndex(self.voice.findData("reference" if self._reference_path else self.settings.character_voice))
+        self._set_voice_option('reference' if self._reference_path else self.settings.character_voice)
         self._refresh_reference_label()
         self.delivery_rate.setValue(self.settings.character_voice_rate)
         self.preference_status.setText("Character voice applied. Preview to listen; Save defaults to keep it.")

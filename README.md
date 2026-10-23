@@ -14,6 +14,11 @@ See the [integration and verification guide](docs/avatar-motion-checkpoint5.md).
 **Preview Head Motion.cmd** remains a separate comparison and rig-review tool;
 its pointer tracking stays within the preview page.
 
+**Motion polish:** Settings now has **Calm**, **Natural**, and **Lively** presets,
+plus a silent **Preview movement** button. Manual slider changes show **Custom**.
+The preview ends on its own or stops when conversation, playback, hiding or
+pausing needs priority. See [avatar polish](docs/avatar-polish.md) for details.
+
 ## Response model and HD avatar
 
 In **Settings → Response model**, choose **OpenRouter** or **ChatGPT subscription
@@ -44,8 +49,9 @@ In Settings, scroll to **Avatar size**, **Movement intensity**, **Lip-sync
 sensitivity**, **Gaze intensity** and **Hair response**; changes apply immediately
 (motion controls ease smoothly), and **Save defaults** keeps them.
 The resize grip's actual dimensions are saved too. Hidden avatars stop drawing;
-waiting uses about 20 FPS, while listening, thinking and speaking use up to 30 FPS.
-HD resolution stays the same. See the current
+the visible, animated avatar now targets **60 FPS** during idle, previews and
+conversation. See the [60 FPS change and measurements](docs/avatar-fps.md).
+HD resolution stays the same. See the earlier
 [motion integration measurements](docs/avatar-motion-checkpoint5.md) and the earlier
 [idle performance comparison](docs/avatar-performance.md) for their test conditions.
 
@@ -81,7 +87,7 @@ Implemented:
 - Clear messages for missing keys, rate limits, network failures, and interrupted streams.
 - Local Pocket TTS speech on CPU, with phrases queued while the text reply streams.
 - Voice preparation overlaps language-model generation; queued phrases play in order.
-- Eight built-in English voices, a preview button, automatic speech toggle,
+- Jingliu's local reference voice, a preview button, automatic speech toggle,
   volume control, and **Read last reply**.
 - Streamed audio playback through your Windows default output device.
 - A reusable background speech process: models load only when needed and stay
@@ -124,7 +130,8 @@ generated on request and saved explicitly after review.
 2. Enter a name and describe their personality, background, speaking style,
    relationship with you, and reactions. Include sample dialogue if you like.
 3. Choose a clean **3–30 second PCM WAV** of one English speaker, ideally
-   **8–15 seconds** without music. A recording is optional; you can use a built-in voice.
+   **8–15 seconds** without music. Existing profiles without a recording retain
+   their configured voice; the editor no longer offers alternative stock speakers.
 4. Click **Preview voice**, then **Save and use character**.
 
 Use the character dropdown in **Settings** to switch, or **Edit character** to
@@ -180,11 +187,11 @@ Open `.env` in your editor and fill in your key locally:
 OPENROUTER_API_KEY=your_key_here
 OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 CHARACTER_PROFILE=character.toml
-TTS_VOICE=alba
+TTS_VOICE=reference
 TTS_ENABLED=true
 TTS_VOLUME=70
 TTS_RATE=100
-TTS_REFERENCE=
+TTS_REFERENCE=voices/jingliu-reference.wav
 STT_MODEL=base.en
 STT_AUTO_SEND=true
 STT_MICROPHONE=
@@ -193,6 +200,9 @@ STT_MICROPHONE=
 If `.env` is missing, copy `.env.example` to `.env` first. `.env` is excluded
 from Git. Do not paste your key into chat or commit it. Environment variables
 take precedence over `.env` values if you already set them in your shell.
+The Jingliu recording is local and excluded from Git; restore it at the configured
+path or choose your local WAV in Settings. Missing voice audio leaves text chat
+usable and reports a voice setup message instead of selecting another speaker.
 
 Then launch:
 
@@ -241,7 +251,7 @@ Failed turns with no answer stay visible but are excluded from later context.
 
 The active [character.toml](character.toml) contains her identity, fictional
 background, traits, interests, likes/dislikes, opinions, speaking style, reactions,
-affection, boundaries, and fourteen original conversation examples. Her reserved
+affection, boundaries, and sixteen original conversation examples. Her reserved
 manner draws on the [official trailer](https://www.youtube.com/watch?v=fMiYAEj46Rc)
 and [game dialogue](https://honkai-star-rail.fandom.com/wiki/Jingliu/Voice-Overs).
 Her warmer romantic interest in you is an editable companion adaptation.
@@ -259,6 +269,8 @@ character and selected memories, without the previous chat's notes. Save real
 preferences or developments in **Memories** or with `/remember`; automatic
 personal-memory extraction has not been added. She is instructed to acknowledge
 missing context and distinguish fictional lore from actual shared conversations.
+Ordinary affectionate exchanges stay in character, without unsolicited AI-emotion
+disclaimers. Explicit questions about the app's real identity still get an honest answer.
 
 The [editing guide](docs/character-guide.md) covers every profile field, selection,
 legacy Markdown support, and memory behavior. The [sample conversations and manual
@@ -271,12 +283,10 @@ disagreement, summaries, and restarts. Exact phrasing is generated by the model.
 2. The first preview downloads the English speech model and selected voice from
    Hugging Face into `.cache/huggingface/` in this project. It can take a few
    minutes. Subsequent previews reuse cached files.
-3. Choose a voice and preview it again. The available voices are `alba`, `anna`,
-   `azelma`, `cosette`, `eponine`, `fantine`, `jane`, and `vera`.
-   **Use character voice** applies Jingliu's recommended **Jane at 94% delivery**.
-   This aims for a calmer, slightly lower English delivery using a stock voice;
-   it does not reproduce her game's actor. Preview it and adjust to your taste.
-   For a voice conditioned on a recording instead, use **Choose reference WAV**.
+3. The voice control shows only **Jingliu's voice**, using her local recording.
+   Alternative stock speakers have been removed from Settings and the character
+   editor. **Use character voice** restores the profile's recording at 100%
+   delivery. **Choose reference WAV** lets you replace the recording deliberately.
    See the [reference-voice setup guide](docs/reference-voice.md) for recording
    requirements and access to the full Pocket TTS model. This workspace has a
    [prepared local Jingliu reference](docs/jingliu-reference.md), excluded from Git.
@@ -295,8 +305,12 @@ The **Delivery** slider ranges from 80% to 115%. Below 100% slows playback and
 lowers pitch together; 100% restores the original voice. It applies consistently
 to Preview, streamed replies, and Read last reply. Changing it stops current
 playback and discards queued phrases. `TTS_RATE` sets the unsaved startup default.
-The character file's optional `[voice]` section recommends a voice and rate;
-the button applies it explicitly, without automatically replacing a saved choice.
+The character file's `[voice]` section sets its recording and delivery rate.
+A selected local recording takes priority over an old stock-speaker preference;
+an existing selected recording and its delivery adjustment are preserved. Clearing
+a recording leaves reference mode unconfigured instead of switching speakers.
+The local Pocket TTS model remains installed to generate speech; removing speaker
+choices does not delete shared model weights or your recordings.
 Changing the voice, volume, or turning speech off stops the current reply's
 speech queue. Enabling speech again applies to the next response; use **Read
 last reply** after generation finishes to replay the current answer.
@@ -644,5 +658,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: integrate natural avatar motion and desktop cursor attention
+fix: keep affectionate dialogue in character
 ```

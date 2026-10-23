@@ -135,3 +135,19 @@ def with_character(settings: Settings, character, *, use_voice=False) -> Setting
                       tts_reference=character.reference, tts_rate=character.rate)
     return replace(settings, **values)
 
+
+def active_character_voice(settings: Settings) -> Settings:
+    """Use the selected recording, then the profile's recording, without a stock menu.
+
+    Old stock preferences remain readable. A configured recording takes
+    priority over that old selection; a missing recording is reported by TTS,
+    never silently replaced with a different speaker.
+    """
+    if settings.tts_reference:
+        return replace(settings, tts_voice='reference',
+                       tts_rate=settings.tts_rate if settings.tts_voice == 'reference' else 100)
+    if settings.character_reference:
+        return replace(settings, tts_voice='reference', tts_reference=settings.character_reference,
+                       tts_rate=settings.character_voice_rate)
+    return settings
+

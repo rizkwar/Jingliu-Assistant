@@ -151,13 +151,15 @@ class CharacterWindowTests(unittest.TestCase):
             dialog.name.setText("Nara Moon")
             dialog.description.setPlainText("Reserved and curious; gentle wit.")
             dialog.builtin.setCurrentText("vera")
+            self.assertEqual(dialog.builtin.count(), 1)
+            self.assertTrue(dialog.builtin.isHidden())
             dialog.save.click()
             if dialog.saved_path is None:
                 self.fail(dialog.feedback.text())
         self.run_editor(edit, edit=True)
         self.assertEqual(self.window.settings.name, "Nara Moon")
         self.assertEqual(self.window._conversation_id, conversation)
-        self.assertEqual(self.window._speech_voice(), "vera")
+        self.assertEqual(self.window._speech_voice(), "jane")
         self.assertIn("Reserved and curious", self.window.settings.system_prompt)
 
     def test_failed_selection_keeps_current_character_and_draft(self):

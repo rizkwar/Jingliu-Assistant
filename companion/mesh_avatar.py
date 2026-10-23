@@ -1,5 +1,5 @@
 """Transparent local mesh renderer, with activity cues and playback lip-sync."""
-from PySide6.QtCore import QFile, QIODevice, QObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QEvent, QFile, QIODevice, QObject, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import QLabel, QSizeGrip, QVBoxLayout
 from PySide6.QtWebChannel import QWebChannel
@@ -29,6 +29,9 @@ class RendererBridge(QObject):
     controlsChanged = Signal(int, int, int)
     attentionChanged = Signal(bool, int, int, int)
     cursorChanged = Signal(float, float, bool, int)
+    previewChanged = Signal(bool, int)
+    previewEnded = Signal(int, bool)
+    pageVisibility = Signal(bool)
     visibilityChanged = Signal(bool)
     qualityChanged = Signal(bool)
     status = Signal(str)
@@ -38,8 +41,18 @@ class RendererBridge(QObject):
         if status in {'ready', 'error'}:
             self.status.emit(status)
 
+    @Slot(int, bool)
+    def finishPreview(self, sequence, completed):
+        self.previewEnded.emit(sequence, completed)
+
+    @Slot(bool)
+    def reportVisibility(self, visible):
+        self.pageVisibility.emit(visible)
+
 
 class MeshDesktopAvatar(DesktopAvatar):
+    preview_changed = Signal(bool, str)
+
     def __init__(self, path):
         super().__init__()
         self.assets = None
@@ -58,6 +71,9 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._attention_sequence = 0
         self._cursor_sequence = 0
         self._cursor_sample = None
+        self._preview_active = False
+        self._preview_sequence = 0
+        self._page_visible = True
         self.cursor_timer = QTimer(self)
         self.cursor_timer.setInterval(100)  # Local logical coordinates; no input hook.
         self.cursor_timer.timeout.connect(self._sample_cursor)
@@ -97,6 +113,8 @@ class MeshDesktopAvatar(DesktopAvatar):
         self.channel.registerObject('renderer', self.bridge)
         self.page.setWebChannel(self.channel)
         self.bridge.status.connect(self._status)
+        self.bridge.previewEnded.connect(self._preview_finished)
+        self.bridge.pageVisibility.connect(self._page_visibility)
         self.page.renderProcessTerminated.connect(lambda *_: self._status('error'))
         self.view.loadFinished.connect(lambda ok: None if ok else self._status('error'))
         self.timeout = QTimer(self)
@@ -129,6 +147,7 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.set_hd(self._hd)
             self.set_attention_controls(self._cursor_attention, self._gaze, self._hair)
             self._sync_timer()
+            self.preview_changed.emit(False, 'Ready for a silent movement preview.')
         else:
             self.failed = True
             self.ready = False
@@ -144,16 +163,22 @@ class MeshDesktopAvatar(DesktopAvatar):
                 self.assets = None
             self._sync_timer()
             self.update()
+            self.preview_changed.emit(False, 'Movement preview needs a working mesh avatar.')
 
     def _sync_timer(self):
         if not hasattr(self, 'bridge'):
             self.timer.stop()
             return
         self.timer.stop()
+        present = self.isVisible() and not self.isMinimized() and self._page_visible
+        if getattr(self, '_preview_active', False) and not (
+                self.ready and not self.failed and not self._disposed and present
+                and self.animated and self._motion > 0 and self.state == 'ready'):
+            self._end_preview('Movement preview stopped.')
         if hasattr(self, 'cursor_timer'):
-            active = (self.ready and not self.failed and not self._disposed and self.isVisible()
+            active = (self.ready and not self.failed and not self._disposed and present
                       and self.animated and self._cursor_attention and self._motion > 0
-                      and self.state == 'ready')
+                      and self.state == 'ready' and not self._preview_active)
             if active:
                 self.cursor_timer.start()
                 # First sample runs on the next timer turn, after visibility,
@@ -163,9 +188,23 @@ class MeshDesktopAvatar(DesktopAvatar):
                 self._clear_cursor()
         if self.failed:
             DesktopAvatar._sync_timer(self)
-        self.bridge.visibilityChanged.emit(self.isVisible())
-        self.bridge.pauseChanged.emit(not (self.isVisible() and self.animated and self.ready
+        self.bridge.visibilityChanged.emit(present)
+        self.bridge.pauseChanged.emit(not (present and self.animated and self.ready
                                           and self.state not in {'suspended', 'closing'}))
+
+    @Slot(bool)
+    def _page_visibility(self, visible):
+        if self._disposed:
+            return
+        self._page_visible = bool(visible)
+        self._sync_timer()
+        self.preview_changed.emit(self._preview_active, '')
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, 'bridge'):
+            self._sync_timer()
+            self.preview_changed.emit(self._preview_active, '')
 
     def paintEvent(self, event):
         if self.failed:
@@ -234,7 +273,46 @@ class MeshDesktopAvatar(DesktopAvatar):
         if self.ready and not self.failed and not self._disposed:
             self.bridge.qualityChanged.emit(self._hd)
 
+    def start_motion_preview(self):
+        if (self._preview_active or not self.ready or self.failed or self._disposed
+                or not self.isVisible() or self.isMinimized() or not self._page_visible
+                or not self.animated or self._motion <= 0
+                or self.state != 'ready'):
+            return False
+        self._preview_active = True
+        self._preview_sequence += 1
+        self._sync_timer()  # Stop cursor polling before the finite demo starts.
+        self.bridge.previewChanged.emit(True, self._preview_sequence)
+        self.preview_changed.emit(True, 'Silent preview: left, right, a small tilt, then rest.')
+        return True
+
+    def _end_preview(self, message):
+        if not getattr(self, '_preview_active', False):
+            return
+        self._preview_active = False
+        self._preview_sequence += 1
+        self.bridge.previewChanged.emit(False, self._preview_sequence)
+        self.preview_changed.emit(False, message)
+
+    def stop_motion_preview(self):
+        self._end_preview('Movement preview stopped.')
+        self._sync_timer()
+
+    @Slot(int, bool)
+    def _preview_finished(self, sequence, completed):
+        if sequence != self._preview_sequence or not self._preview_active or self._disposed:
+            return
+        self._preview_active = False
+        message = ('Movement preview finished. Normal idle has resumed.' if completed else
+                   'Movement preview stopped. Try again when idle and visible.')
+        self.preview_changed.emit(False, message)
+        self._sync_timer()
+
     def set_voice_level(self, level):
+        was_previewing = self._preview_active
+        self._end_preview('Movement preview stopped for voice playback.')
+        if was_previewing:
+            self._sync_timer()
         if self.failed:
             DesktopAvatar.set_voice_level(self, level)
             return
@@ -243,6 +321,10 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.bridge.voiceChanged.emit(level, self._voice_sequence, False)
 
     def reset_voice(self):
+        was_previewing = self._preview_active
+        self._end_preview('Movement preview stopped.')
+        if was_previewing:
+            self._sync_timer()
         self.voice_level = 0.
         self._voice_sequence += 1
         self.bridge.voiceChanged.emit(0., self._voice_sequence, True)
@@ -250,6 +332,7 @@ class MeshDesktopAvatar(DesktopAvatar):
     def dispose(self):
         if self._disposed:
             return
+        self._end_preview('Movement preview stopped.')
         self._disposed = True
         self.cursor_timer.stop()
         self._clear_cursor()

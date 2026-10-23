@@ -1,6 +1,6 @@
 # A voice conditioned on a recording
 
-The **Reference recording** voice mode conditions Pocket TTS on a local WAV,
+The active character's voice conditions Pocket TTS on a local WAV,
 so new dialogue uses vocal characteristics from that recording. This is a
 different approach from adjusting the speed of Jane or another stock voice.
 The existing streaming, interruption, and local playback system still applies.
@@ -72,15 +72,17 @@ problem and does **not** substitute a stock voice. Text chat remains usable.
 ## Select and test
 
 1. Open **Settings > Choose reference WAV** and select the recording. This selects
-   **Reference recording** and resets Delivery to **100%** to preserve its natural
+   the character's recording voice and resets Delivery to **100%** to preserve its natural
    pitch and timing before you audition it.
 2. Click **Preview**. It uses the profile's preview sentence, so you hear newly
    generated dialogue rather than simply playing the original recording.
 3. Enable **Speak replies**, then try a short typed or spoken exchange. Streaming
    replies and **Read last reply** use the same selected reference.
 4. Use **Save defaults** to retain the voice mode and local reference path across
-   restarts. **Clear** removes that choice and returns to a stock voice. Selecting
-   a stock voice keeps the saved reference available but inactive.
+   restarts. **Clear** removes the current recording and keeps reference mode
+   unconfigured; it never substitutes a stock speaker. **Use character voice**
+   restores the profile's recording. Settings shows one active voice, and the
+   character editor no longer exposes the stock-speaker catalog.
 
 The reference is encoded once per speech process and reused across phrases.
 Replacing its audio causes the next request to rebuild that state. Stop can
@@ -91,7 +93,7 @@ You can also configure defaults in `.env`:
 
 ```dotenv
 TTS_VOICE=reference
-TTS_REFERENCE=voices/jingliu.wav
+TTS_REFERENCE=voices/jingliu-reference.wav
 TTS_RATE=100
 ```
 

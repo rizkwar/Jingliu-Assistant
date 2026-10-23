@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 
 from .characters import ProfileDraft
 from .reference_voice import inspect_reference
-from .voice_settings import VOICES
 
 
 class CharacterDialog(QDialog):
@@ -38,7 +37,7 @@ class CharacterDialog(QDialog):
         layout.setSpacing(12)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
-        hint = QLabel("Describe who they are and how they talk. Add a recording to give their local speaking voice its vocal characteristics. You can save without a recording and use a built-in voice.")
+        hint = QLabel("Describe who they are and how they talk. Add a recording for their local speaking voice. Existing profiles keep their configured voice when no recording is attached.")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         form = QFormLayout()
@@ -78,10 +77,10 @@ class CharacterDialog(QDialog):
         audio_hint.setWordWrap(True)
         layout.addWidget(audio_hint)
         voice_form = QFormLayout()
-        self.builtin = QComboBox()
-        self.builtin.addItems(VOICES)
-        self.builtin.setCurrentText(draft.builtin)
-        voice_form.addRow("Voice without recording", self.builtin)
+        self.builtin = QComboBox(self)
+        # Retain legacy profile metadata without exposing alternative speakers.
+        self.builtin.addItem(draft.builtin)
+        self.builtin.hide()
         self.rate = QSpinBox()
         self.rate.setRange(80, 115)
         self.rate.setSuffix("%")

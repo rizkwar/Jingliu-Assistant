@@ -49,9 +49,12 @@ editor. Save it, then choose **Reload .env + character**. Restarting also loads
 it. A malformed file produces an error; a failed reload keeps the current profile
 and unsent draft intact.
 
-For the original Jingliu profile, **Use character voice** applies **Jane at 94%
-delivery**, a stock approximation of a calm, slightly lower English sound. The
-preview sentence comes from the profile. To use your chosen recording, select
+For the original Jingliu profile, **Use character voice** applies her local
+recording at **100% delivery**. The preview sentence comes from the profile.
+Settings displays one active character voice, without alternative stock speakers.
+The character editor also hides the old stock-speaker selector. Existing profiles
+without recordings retain their configured voice for compatibility. To replace
+the character's recording, select
 **Choose reference WAV** or save it through **Edit character**. The
 [reference-voice guide](reference-voice.md) covers model access and setup.
 
@@ -122,6 +125,15 @@ For a more romantic interpretation, edit `relationship.affection` and the flirti
 examples. For a more reserved one, reduce overt affection there. Keep practical
 help, sincere disagreement, and respect for your requests in either version.
 Changes to quiet-evening preferences or humor are adaptations, not additions to canon.
+
+Ordinary affectionate dialogue stays in character. Questions about caring or love
+receive a personal response suited to the profile and current relationship, without
+an unsolicited explanation of AI emotions. This does not require a declaration of
+love: restraint, teasing, and honest disagreement still belong to her. Explicit
+questions about whether she is human or an AI receive a brief, honest answer.
+Older out-of-character replies and neutral summaries do not set the speaking style.
+Edit `relationship.affection`, `speech`, and `examples` to tune this balance, then
+use **Reload .env + character**. Existing conversations and memories stay intact.
 
 ## Personality and continuity
 

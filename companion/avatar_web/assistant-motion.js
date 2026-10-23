@@ -1,5 +1,6 @@
 import {IdleAttention} from './idle-attention.js';
 import {visualMode} from './conversation-state.js';
+import {MotionPreview} from './motion-preview.js';
 
 const clamp=(x,low,high)=>Math.max(low,Math.min(high,x));
 const unit=x=>Number.isFinite(x)?clamp(x,0,1):0;
@@ -22,6 +23,7 @@ export class AssistantMotion {
     this.settings={motion:1,gaze:1,hair:.45};this.amount=1;
     this.pose={angleX:0,angleY:-.5,angleZ:0,bodyAngleX:0,bodyAngleZ:0,gazeX:0,gazeY:0,browY:0};
     this.level=0;this.nod=0;this.expression='neutral';
+    this.preview=null;
     avatar.setExpression('neutral');avatar.setTalkGain(0);
   }
   request(state,now){
@@ -29,17 +31,24 @@ export class AssistantMotion {
     if(next!==this.requested){this.requested=next;this.since=now;}
     // Stop idle cursor attention immediately when a conversation needs focus.
     this.idle.setCursorEnabled(this.cursorEnabled&&next==='idle');
+    if(next!=='idle')this.stopPreview();
   }
   setControls(motion,gaze,hair,cursor){
     this.settings={motion:unit(motion),gaze:unit(gaze),hair:clamp(Number.isFinite(hair)?hair:.45,.2,.8)};
     this.cursorEnabled=Boolean(cursor);
     this.idle.setCursorEnabled(this.cursorEnabled&&this.requested==='idle');
+    if(this.settings.motion===0)this.stopPreview();
   }
-  setCursor(target){this.idle.setCursor(this.cursorEnabled&&this.requested==='idle'?target:null);}
+  setCursor(target){this.idle.setCursor(!this.preview&&this.cursorEnabled&&this.requested==='idle'?target:null);}
   clearCursor(){this.idle.setCursor(null);}
-  setVoice(level){this.level=unit(level);}
+  setVoice(level){this.level=unit(level);if(this.level>0)this.stopPreview();}
   resetVoice(){this.level=0;this.nod=0;}
-  suspend(){this.clearCursor();this.resetVoice();}
+  suspend(){this.clearCursor();this.resetVoice();this.stopPreview();}
+  startPreview(){
+    if(this.mode!=='idle'||this.requested!=='idle'||this.level>0||this.settings.motion===0||this.preview)return false;
+    this.clearCursor();this.preview=new MotionPreview(this.pose);return true;
+  }
+  stopPreview(){this.preview=null;}
   update(seconds,now){
     const dt=Number.isFinite(seconds)?clamp(seconds,0,.1):0;
     if(this.mode!==this.requested&&now-this.since>=180)this.mode=this.requested;
@@ -51,11 +60,13 @@ export class AssistantMotion {
     }
     this.amount+=(style.amount-this.amount)*(1-Math.exp(-dt*3));
     const idle=this.idle.update(dt).pose;
-    const target={...idle};
-    for(const key of Object.keys(target))target[key]*=this.amount;
+    const sample=this.preview?.update(dt);
+    const target=sample?{...sample.pose}:{...idle};
+    if(!sample)for(const key of Object.keys(target))target[key]*=this.amount;
     const nodTarget=this.mode==='speaking'?this.level*1.4:0;
     this.nod+=(nodTarget-this.nod)*(1-Math.exp(-dt*(nodTarget>this.nod?7:3)));
-    target.angleY+=style.y-this.nod;target.angleZ+=style.z;target.browY=style.brow;
+    if(!sample){target.angleY+=style.y-this.nod;target.angleZ+=style.z;}
+    target.browY=style.brow;
     // Opaque half-eye patches include their irises. Keep them centered while
     // thinking; listening, speaking and cursor attention use the open-eye rig.
     if(this.mode==='thinking'){target.gazeX=0;target.gazeY=0;}
@@ -63,6 +74,7 @@ export class AssistantMotion {
     if(expression!==this.expression){this.expression=expression;this.avatar.setExpression(expression);}
     for(const key of Object.keys(this.pose))this.pose[key]+=(target[key]-this.pose[key])*(1-Math.exp(-dt*5));
     this.apply();
+    if(sample?.finished)this.preview=null;
   }
   apply(){
     const pose={...this.pose};
@@ -72,5 +84,6 @@ export class AssistantMotion {
     this.avatar.setParameters(pose,1);
   }
   snapshot(){return {mode:this.mode,requested:this.requested,expression:this.expression,
-    movement:this.intensity,gaze:this.gaze,hair:this.hair,nod:this.nod,attention:this.idle.snapshot()};}
+    movement:this.intensity,gaze:this.gaze,hair:this.hair,nod:this.nod,attention:this.idle.snapshot(),
+    preview:this.preview?{label:this.preview.update(0).label,time:this.preview.time,duration:this.preview.duration}:null};}
 }

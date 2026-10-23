@@ -234,6 +234,7 @@ class AvatarController(QObject):
         self._shutdown = False
         self._position = (window.settings.avatar_x, window.settings.avatar_y)
         self._dimensions = (window.settings.avatar_width, window.settings.avatar_height)
+        self._preview_message = ''
         window.show_avatar.toggled.connect(self.set_enabled)
         window.animate_avatar.toggled.connect(self.set_animated)
         window.reset_avatar.clicked.connect(self.reset_position)
@@ -244,6 +245,10 @@ class AvatarController(QObject):
         window.avatar_cursor_attention.toggled.connect(self.set_attention_controls)
         window.avatar_gaze.valueChanged.connect(self.set_attention_controls)
         window.avatar_hair.valueChanged.connect(self.set_attention_controls)
+        window.preview_avatar_motion.clicked.connect(self.toggle_motion_preview)
+        window.hands_free.toggled.connect(self._preview_context_changed)
+        window.speech.changed.connect(self._preview_context_changed)
+        window.microphone.changed.connect(self._preview_context_changed)
         window.activity_changed.connect(self.set_activity)
         window.closed.connect(self.shutdown)
         if hasattr(window.speech, 'playback_level'):
@@ -283,6 +288,7 @@ class AvatarController(QObject):
         self._apply_dimensions()
         self.set_visual_controls()
         self.set_attention_controls()
+        self._update_preview_controls()
 
     @Slot(bool)
     def set_enabled(self, enabled):
@@ -297,6 +303,8 @@ class AvatarController(QObject):
                 self.widget.menu_requested.connect(self.show_menu)
                 self.widget.resized.connect(self.constrain)
                 self.widget.resized.connect(self._resized)
+                if hasattr(self.widget, 'preview_changed'):
+                    self.widget.preview_changed.connect(self._preview_changed)
                 self.widget.set_name(self.window.settings.name)
                 self.widget.set_animated(self.window.animate_avatar.isChecked())
                 self._apply_dimensions()
@@ -312,6 +320,7 @@ class AvatarController(QObject):
             self.widget.show()
         elif self.widget is not None:
             self.widget.hide()
+        self._update_preview_controls()
 
     def _create_widget(self):
         from .avatar_assets import assigned_avatar
@@ -367,6 +376,7 @@ class AvatarController(QObject):
             self.widget.set_visual_controls(self.window.avatar_motion.value(),
                                             self.window.avatar_lip_sensitivity.value())
             self.set_hd()
+        self._update_preview_controls()
 
     def set_hd(self):
         if self.widget is not None and hasattr(self.widget, 'set_hd'):
@@ -386,11 +396,66 @@ class AvatarController(QObject):
     def set_animated(self, enabled):
         if self.widget is not None:
             self.widget.set_animated(enabled)
+        self._update_preview_controls()
 
     @Slot(str)
     def set_activity(self, state):
         if self.widget is not None:
             self.widget.set_activity(state)
+        self._preview_context_changed()
+
+    def _preview_block_reason(self):
+        window = self.window
+        if self._shutdown or window._closing:
+            return 'Movement preview is unavailable while closing.'
+        if (window.suspended or window.activity != 'ready' or window._worker is not None
+                or window.microphone.busy or window.speech.busy):
+            return 'Movement preview is available when the conversation is idle.'
+        if window.hands_free.isChecked():
+            return 'Turn off Hands-free before previewing movement.'
+        if self.widget is None or not hasattr(self.widget, 'start_motion_preview'):
+            return 'Show a mesh avatar to preview its movement.'
+        if getattr(self.widget, 'failed', False):
+            return 'Movement preview needs a working mesh avatar. Try Reload avatar.'
+        if not getattr(self.widget, 'ready', False):
+            return 'Wait for the mesh avatar to finish loading.'
+        if self.widget.state != 'ready':
+            return 'Movement preview is available when the conversation is idle.'
+        if (not self.widget.isVisible() or self.widget.isMinimized()
+                or not getattr(self.widget, '_page_visible', True) or not self.widget.animated):
+            return 'Show the avatar and enable Animate avatar to preview movement.'
+        if window.avatar_motion.value() <= 0:
+            return 'Increase Movement intensity above zero to preview movement.'
+        return ''
+
+    @Slot()
+    def _preview_context_changed(self, *_):
+        if (self.widget is not None and getattr(self.widget, '_preview_active', False)
+                and self._preview_block_reason()):
+            self.widget.stop_motion_preview()
+        self._update_preview_controls()
+
+    @Slot(bool, str)
+    def _preview_changed(self, running, message):
+        self._preview_message = message
+        self.window._refresh_stop_button()
+        self._update_preview_controls()
+
+    def _update_preview_controls(self):
+        running = self.widget is not None and getattr(self.widget, '_preview_active', False)
+        reason = self._preview_block_reason()
+        self.window.preview_avatar_motion.setText('Stop preview' if running else 'Preview movement')
+        self.window.preview_avatar_motion.setEnabled(running or not reason)
+        self.window.avatar_preview_status.setText(
+            reason or self._preview_message or 'Silent preview of head turns, gaze and hair. No recording or speech.')
+
+    @Slot()
+    def toggle_motion_preview(self):
+        if self.widget is not None and getattr(self.widget, '_preview_active', False):
+            self.widget.stop_motion_preview()
+        elif not self._preview_block_reason():
+            self.widget.start_motion_preview()
+        self._update_preview_controls()
 
     @Slot(float)
     def set_voice_level(self, level):

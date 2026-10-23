@@ -1,33 +1,27 @@
-import {visualMode} from './conversation-state.js';
-
-// Keep full-rate expressions and lips during interaction; waiting needs fewer
-// expensive mesh deformations and GL draws, at the same pixel resolution.
+// A consistent visible rate avoids coarse idle motion and a cadence change when
+// conversation starts. requestAnimationFrame still limits slower displays.
 export class RenderCadence {
   constructor() {
-    this.until = 0;
     this.restart();
   }
 
-  boost(now) { this.until = now + 1000; }
-
   restart() { this.previous = null; this.deadline = null; this.rate = 0; }
 
-  frameRate(activity, voiceActive, now) {
-    return voiceActive || visualMode(activity) !== 'idle' || now < this.until ? 30 : 20;
-  }
+  frameRate() { return 60; }
 
-  step(now, activity, voiceActive) {
-    const rate = this.frameRate(activity, voiceActive, now);
-    // A rate change takes effect on the next display frame, especially when
-    // speech begins. Deadlines avoid quantizing 30 FPS to 20 on jittery displays.
+  step(now) {
+    if (!Number.isFinite(now)) return null;
+    const rate = this.frameRate();
+    // Preserve the deadline phase through small vsync jitter. Snapping every
+    // late deadline to now would gradually lose frames on a busy UI thread.
     if (rate !== this.rate) { this.deadline = now; this.rate = rate; }
     if (this.deadline !== null && now + 0.5 < this.deadline) return null;
     const dt = this.previous === null ? 1 / rate : Math.max(.000001, Math.min((now - this.previous) / 1000, .1));
     this.previous = now;
     const interval = 1000 / rate;
-    this.deadline = Math.max((this.deadline ?? now) + interval, now);
     // A stalled window gets one bounded step, never a burst of catch-up draws.
-    if (this.deadline <= now) this.deadline = now + interval;
+    const periods = Math.max(1, Math.floor((now - this.deadline + .5) / interval) + 1);
+    this.deadline += periods * interval;
     return dt;
   }
 }

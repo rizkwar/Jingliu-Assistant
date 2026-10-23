@@ -1,5 +1,9 @@
 # Lower idle rendering cost
 
+Historical 20/30 FPS measurements. The current avatar uses a
+[60 FPS target](avatar-fps.md) for smoother movement; the comparison below records
+the earlier power-saving change.
+
 The avatar now targets **20 FPS while waiting** and **30 FPS while listening,
 thinking or speaking**. The higher rate also continues for one second after a
 state, control, visibility or size change so transitions can settle. Actual

@@ -37,7 +37,8 @@ class CharacterTests(unittest.TestCase):
         self.assertEqual(settings.name, "Jingliu")
         self.assertEqual(settings.tts_voice, "vera")  # Character does not silently choose a voice.
         self.assertIn("You have my attention", settings.voice_preview)
-        self.assertEqual((settings.character_voice, settings.character_voice_rate), ("jane", 94))
+        self.assertEqual((settings.character_voice, settings.character_voice_rate), ("jane", 100))
+        self.assertEqual(Path(settings.character_reference).name, 'jingliu-reference.wav')
         self.assertNotIn("[voice]", settings.system_prompt)
         self.assertEqual(Path(settings.character_path), self.profile.resolve())
         self.profile.write_text(self.profile.read_text(encoding="utf-8").replace('name = "Jingliu"', 'name = "Luna"'), encoding="utf-8")
@@ -76,8 +77,8 @@ class CharacterTests(unittest.TestCase):
     def test_voice_preset_rejects_unknown_voices_and_invalid_rates(self):
         original = self.profile.read_text(encoding="utf-8")
         for text in (original.replace('builtin = "jane"', 'builtin = "invented"'),
-                     original.replace("rate = 94", "rate = 12"),
-                     original.replace("rate = 94", "rate = true")):
+                     original.replace("rate = 100", "rate = 12"),
+                     original.replace("rate = 100", "rate = true")):
             self.profile.write_text(text, encoding="utf-8")
             with self.assertRaises(ValueError):
                 read_profile(self.profile)

@@ -110,7 +110,8 @@ runtime patch. `advanceStable(seconds)` advances springs in steps no larger than
 20 ms, then deforms and draws once. Each outer frame simulates at most 100 ms;
 sprite fading receives that total elapsed time once. This avoids the unstable
 large spring step observed in the earlier recording without multiplying mesh
-draws during a stall. Idle targets 20 FPS and active states 30 FPS at the existing
+draws during a stall. This checkpoint originally used 20 FPS idle and 30 FPS active;
+the later [frame-pacing change](avatar-fps.md) raises both to 60 FPS at the same
 HD resolution.
 
 `scripts/patch_avatar_runtime.py` accepts only the known pinned pristine,
@@ -171,7 +172,7 @@ Local evidence is ignored under `.cache/head-motion-checkpoint5/`, including
 API credentials or voice recordings. Resource measurements below describe this
 single local run, not a before/after benchmark or a performance guarantee.
 
-On this 16-logical-CPU Windows machine, with a 320 ? 350 logical-pixel avatar,
+On this 16-logical-CPU Windows machine, with a 320 x 350 logical-pixel avatar,
 HD enabled and 125% display scaling, the final audio run observed:
 
 | Phase | Seconds | Whole-machine CPU | Summed working set | Draws/sec |
@@ -185,7 +186,7 @@ when present, including the verification polling. Speech uses the cached stock
 Alba voice and includes CPU inference. Stop terminates that speech process, so
 the hidden row is not a voice-model-loaded measurement. Working sets sum shared
 pages too; they are not private allocated RAM. GPU use was not measured.
-The 5?6 second samples are too short to imply a guaranteed resource budget or
+The 5-6 second samples are too short to imply a guaranteed resource budget or
 a speedup over earlier stages. Hidden rendering and cursor polling stopped.
 
 

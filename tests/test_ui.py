@@ -281,7 +281,8 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(Path(open_file.call_args.args[0].toLocalFile()), character.path)
         self.window.voice.setCurrentText("vera")
         self.window._preview_voice()
-        self.assertEqual(speech.calls[-1], (character.preview, "vera", 70))
+        self.assertEqual(self.window.voice.count(), 1)
+        self.assertEqual(speech.calls[-1], (character.preview, character.reference, 70))
 
     def test_invalid_character_reload_keeps_current_profile_and_draft(self):
         self.window.input.setPlainText("An unsent thought")
@@ -341,7 +342,8 @@ class WindowTests(unittest.TestCase):
                 self.window._reload_settings()
             self.assertEqual(self.window._speech_voice(), source)
             self.window.clear_reference.click()
-            self.assertNotEqual(self.window.voice.currentData(), "reference")
+            self.assertEqual(self.window.voice.currentData(), "reference")
+            self.assertEqual(self.window._speech_voice(), "reference")
             self.assertEqual(self.window._reference_path, "")
 
     def test_invalid_reference_does_not_replace_current_voice(self):
@@ -351,6 +353,31 @@ class WindowTests(unittest.TestCase):
         warning.assert_called_once()
         self.assertEqual(self.window.voice.currentData(), SETTINGS.tts_voice)
         self.assertEqual(self.window._reference_path, "")
+
+    def test_old_stock_selection_uses_only_the_character_recording(self):
+        from pathlib import Path
+        import tempfile
+        from test_reference_voice import write_reference
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'jingliu-reference.wav'
+            write_reference(path)
+            speech = FakeSpeech()
+            settings = replace(SETTINGS, name='Jingliu', tts_voice='vera', tts_rate=94,
+                               character_voice='jane', character_reference=str(path),
+                               character_voice_rate=100)
+            self.replace_window(settings, speech=speech)
+            self.assertEqual(self.window.voice.count(), 1)
+            self.assertEqual(self.window.voice.currentText(), "Jingliu's voice")
+            self.assertEqual(self.window.voice.currentData(), 'reference')
+            self.assertFalse(self.window.voice.isEnabled())
+            self.assertEqual(self.window.delivery_rate.value(), 100)
+            self.window._preview_voice()
+            self.assertEqual(speech.calls[-1][1], str(path))
+            self.window.character_voice_button.click()
+            self.assertEqual(self.window._speech_voice(), str(path))
+            self.window._save_preferences()
+            self.assertEqual(self.window.preferences.load(settings).tts_voice, 'reference')
+            self.assertEqual(self.window.preferences.load(settings).tts_reference, str(path))
 
     def test_queued_scroll_does_not_access_transcript_after_close(self):
         self.window.request_quit()
