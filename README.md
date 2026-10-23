@@ -3,12 +3,18 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Jingliu mesh avatar preview (Stage 3)
+## Jingliu desktop avatar (Stage 4)
 
-The approved v5 portrait has a separately prepared animated rig. Double-click
-**`Preview Jingliu Avatar.cmd`** to open its local browser preview, with blink,
-head-turn and silent mouth tests. The assistant still uses its existing mascot;
-native integration and speech synchronization come in later stages.
+The approved v5 portrait now displays in the assistant's floating desktop window,
+with idle blinking, breathing and hair motion. Open **Start Mira.cmd**, then
+**Settings → Show desktop avatar**. Drag to move, use the bottom-right grip to
+resize, or right-click for chat and reload controls. **Animate avatar** pauses
+idle motion. Speech synchronization and expressions are later stages.
+
+See the [Stage 4 guide](docs/avatar-stage4.md) for setup, local character
+assignments, fallback behavior and native verification. A fresh environment needs
+the updated `requirements.txt` (or run **Setup Mira.cmd**) and restored local rig.
+The separate **Preview Jingliu Avatar.cmd** remains available for rig review.
 
 See the [Stage 3 guide](docs/avatar-stage3.md) for the local exports, visual review,
 test results and Studio editing instructions. Artwork and rig files remain local
@@ -394,7 +400,7 @@ replaces it with valid settings.
 
 Open **Settings**, check **Show desktop avatar**, and click **Save defaults** if
 you want it to appear after restarting. The avatar is off by default. Its graphics
-are drawn locally in Qt; enabling it works without an API key, does not load audio
+are rendered locally; enabling it works without an API key, does not load audio
 models, and does not start recording.
 
 - **Click** the mascot to open the existing chat window. Your draft and conversation
@@ -406,13 +412,16 @@ models, and does not start recording.
 - **Show desktop avatar** in the tray menu also toggles visibility. Closing the
   avatar itself hides it; choose **Quit** to exit the whole app.
 
-The badge distinguishes Ready, Opening mic, Listening, Transcribing, Thinking,
+The simple fallback mascot's badge distinguishes Ready, Opening mic, Listening, Transcribing, Thinking,
 Writing, Summarizing, Loading voice, Speaking, Suspended, Needs attention, and Closing.
 The mouth animates only during reported speech playback, rather than while voice
 preparation is running. Colors and text distinguish activity; detailed errors remain
 in the chat window. The avatar uses your configured companion name in its tooltip.
 
-Uncheck **Animate avatar** for a static mascot. The animation timer also stops while
+The mesh portrait currently shows idle motion only, with a resting mouth; its
+tooltip reflects activity. No speech or expression animation is connected yet.
+
+Uncheck **Animate avatar** for a static portrait. The fallback mascot's timer also stops while
 the avatar is hidden, suspended, closing, or showing an error. Save defaults retains
 your animation choice. The avatar stays available when chat is hidden in the tray;
 the existing rule that hiding chat ends hands-free listening still applies.
@@ -589,5 +598,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: add character creator with local voice samples and profile switching
+feat: display local mesh avatar in desktop companion
 ```

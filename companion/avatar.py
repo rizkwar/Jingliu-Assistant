@@ -53,6 +53,7 @@ class DesktopAvatar(QWidget):
     open_requested = Signal()
     hide_requested = Signal()
     menu_requested = Signal(QPoint)
+    resized = Signal()
 
     def __init__(self):
         # A separate tool window stays reachable when the chat is hidden in the tray.
@@ -122,6 +123,10 @@ class DesktopAvatar(QWidget):
         self.hide_requested.emit()
         self.hide()
         event.ignore()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -231,6 +236,17 @@ class AvatarController(QObject):
 
     def refresh(self):
         self._position = (self.window.settings.avatar_x, self.window.settings.avatar_y)
+        # A profile reload can replace an assignment without restarting the app.
+        from .config import PROJECT_ROOT
+        mapping = PROJECT_ROOT / 'data/avatars.json'
+        try:
+            revision = mapping.stat().st_mtime_ns if mapping.exists() else None
+        except OSError:
+            revision = None
+        assignment = (self.window.settings.character_path, revision)
+        if self.widget is not None and assignment != getattr(self, '_assignment', None):
+            self._release_widget()
+        self._assignment = assignment
         if self.widget is not None:
             self.widget.set_name(self.window.settings.name)
             x, y = self._position
@@ -249,10 +265,11 @@ class AvatarController(QObject):
         self.window.reset_avatar.setEnabled(enabled)
         if enabled:
             if self.widget is None:
-                self.widget = DesktopAvatar()
+                self.widget = self._create_widget()
                 self.widget.open_requested.connect(self.window.show_companion)
                 self.widget.hide_requested.connect(self.hide_avatar)
                 self.widget.menu_requested.connect(self.show_menu)
+                self.widget.resized.connect(self.constrain)
                 self.widget.set_name(self.window.settings.name)
                 self.widget.set_animated(self.window.animate_avatar.isChecked())
                 x, y = self._position
@@ -265,6 +282,34 @@ class AvatarController(QObject):
             self.widget.show()
         elif self.widget is not None:
             self.widget.hide()
+
+    def _create_widget(self):
+        from .avatar_assets import assigned_avatar
+        try:
+            path = assigned_avatar(self.window.settings.character_path)
+            if path is not None:
+                from .mesh_avatar import MeshDesktopAvatar
+                return MeshDesktopAvatar(path)
+        except (ImportError, OSError, ValueError):
+            widget = DesktopAvatar()
+            widget.setToolTip('Mesh avatar unavailable. See docs/avatar-stage4.md; using the simple mascot.')
+            # A visible message as well as a tooltip, without blocking chat startup.
+            from PySide6.QtWidgets import QLabel
+            widget.clearMask()
+            widget.setFixedSize(260, 235)
+            notice = QLabel('Mesh avatar unavailable.\nSee docs/avatar-stage4.md.', widget)
+            notice.setGeometry(0, 174, 260, 60)
+            notice.setStyleSheet('background:#222633; color:#eceaf5; padding:6px')
+            notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            return widget
+        return DesktopAvatar()
+
+    def _release_widget(self):
+        self.widget.hide()
+        if hasattr(self.widget, 'dispose'):
+            self.widget.dispose()
+        self.widget.deleteLater()
+        self.widget = None
 
     @Slot()
     def hide_avatar(self):
@@ -311,16 +356,21 @@ class AvatarController(QObject):
         menu.addAction("Stop", self.window._stop)
         menu.addAction("Resume" if self.window.suspended else "Suspend", self.window.toggle_suspended)
         menu.addSeparator()
+        menu.addAction("Reload avatar", self.reload_avatar)
         menu.addAction("Reset position", self.reset_position)
         menu.addAction("Hide avatar", self.hide_avatar)
         menu.addAction("Quit", self.window.request_quit)
         menu.aboutToHide.connect(menu.deleteLater)
         menu.popup(point)
 
+    def reload_avatar(self):
+        if self.widget is not None:
+            self._position = self.position()
+            self._release_widget()
+        self.set_enabled(self.window.show_avatar.isChecked())
+
     @Slot()
     def shutdown(self):
         self._shutdown = True
         if self.widget is not None:
-            self.widget.hide()
-            self.widget.deleteLater()
-            self.widget = None
+            self._release_widget()

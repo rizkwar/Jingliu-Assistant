@@ -1,4 +1,6 @@
 PySide6-Essentials==6.12.0
+PySide6-Addons==6.12.0
+PySide6-WebEngine==6.12.0.140
 httpx==0.28.1
 python-dotenv==1.2.4
 pocket-tts==4.0.1

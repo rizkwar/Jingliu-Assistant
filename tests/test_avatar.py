@@ -163,3 +163,40 @@ class AvatarWindowTests(unittest.TestCase):
         self.assertFalse(widget.isVisible())
         self.assertFalse(widget.timer.isActive())
         self.assertIsNone(self.window.avatar.widget)
+
+    def test_reload_replaces_widget_preserves_position_and_keeps_audio_idle(self):
+        old = self.enable()
+        old.move(120, 130)
+        self.window.avatar.reload_avatar()
+        new = self.window.avatar.widget
+        self.assertIsNot(old, new)
+        self.assertFalse(old.isVisible())
+        self.assertTrue(new.isVisible())
+        self.assertEqual(new.pos(), QPoint(120, 130))
+        self.assertFalse(self.window.microphone.busy)
+        self.assertFalse(self.window.speech.busy)
+
+    def test_bad_assignment_uses_readable_fallback_without_blocking_chat(self):
+        with patch('companion.avatar_assets.assigned_avatar', side_effect=ValueError('bad map')):
+            widget = self.enable()
+        from PySide6.QtWidgets import QLabel
+        self.assertIn('Mesh avatar unavailable', widget.findChild(QLabel).text())
+        self.assertTrue(self.window.isVisible())
+        self.assertTrue(widget.isVisible())
+
+    def test_switching_profiles_replaces_old_renderer_without_starting_audio(self):
+        old = self.enable()
+        self.window.settings = replace(SETTINGS, name='Luna', character_path='other.toml')
+        with patch('companion.avatar_assets.assigned_avatar', return_value=None):
+            self.window.avatar.refresh()
+        self.assertIsNot(self.window.avatar.widget, old)
+        self.assertFalse(old.isVisible())
+        self.assertEqual(self.window.avatar.widget.name, 'Luna')
+        self.assertFalse(self.window.microphone.busy)
+
+    def test_missing_webengine_uses_readable_fallback(self):
+        with patch('companion.avatar_assets.assigned_avatar', return_value='test.mavatar'), \
+                patch.dict('sys.modules', {'companion.mesh_avatar': None}):
+            widget = self.enable()
+        from PySide6.QtWidgets import QLabel
+        self.assertIn('Mesh avatar unavailable', widget.findChild(QLabel).text())
