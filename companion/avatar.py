@@ -2,7 +2,7 @@
 
 import math
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QSignalBlocker, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
@@ -233,9 +233,13 @@ class AvatarController(QObject):
         self.widget = None
         self._shutdown = False
         self._position = (window.settings.avatar_x, window.settings.avatar_y)
+        self._dimensions = (window.settings.avatar_width, window.settings.avatar_height)
         window.show_avatar.toggled.connect(self.set_enabled)
         window.animate_avatar.toggled.connect(self.set_animated)
         window.reset_avatar.clicked.connect(self.reset_position)
+        window.avatar_size.valueChanged.connect(self.set_size)
+        window.avatar_motion.valueChanged.connect(self.set_visual_controls)
+        window.avatar_lip_sensitivity.valueChanged.connect(self.set_visual_controls)
         window.activity_changed.connect(self.set_activity)
         window.closed.connect(self.shutdown)
         if hasattr(window.speech, 'playback_level'):
@@ -250,6 +254,7 @@ class AvatarController(QObject):
 
     def refresh(self):
         self._position = (self.window.settings.avatar_x, self.window.settings.avatar_y)
+        self._dimensions = (self.window.settings.avatar_width, self.window.settings.avatar_height)
         # A profile reload can replace an assignment without restarting the app.
         from .config import PROJECT_ROOT
         mapping = PROJECT_ROOT / 'data/avatars.json'
@@ -271,6 +276,8 @@ class AvatarController(QObject):
                 self.constrain()
         self.set_animated(self.window.animate_avatar.isChecked())
         self.set_enabled(self.window.show_avatar.isChecked())
+        self._apply_dimensions()
+        self.set_visual_controls()
 
     @Slot(bool)
     def set_enabled(self, enabled):
@@ -284,8 +291,11 @@ class AvatarController(QObject):
                 self.widget.hide_requested.connect(self.hide_avatar)
                 self.widget.menu_requested.connect(self.show_menu)
                 self.widget.resized.connect(self.constrain)
+                self.widget.resized.connect(self._resized)
                 self.widget.set_name(self.window.settings.name)
                 self.widget.set_animated(self.window.animate_avatar.isChecked())
+                self._apply_dimensions()
+                self.set_visual_controls()
                 x, y = self._position
                 if x is None or y is None:
                     self.reset_position()
@@ -324,6 +334,32 @@ class AvatarController(QObject):
             self.widget.dispose()
         self.widget.deleteLater()
         self.widget = None
+
+    def dimensions(self):
+        return self._dimensions
+
+    def _apply_dimensions(self):
+        if self.widget is not None and hasattr(self.widget, 'set_visual_controls') and not self.widget.failed:
+            self.widget.resize(*self._dimensions)
+            self.constrain()
+
+    def _resized(self):
+        if self.widget is not None and hasattr(self.widget, 'set_visual_controls') and not self.widget.failed:
+            self._dimensions = (self.widget.width(), self.widget.height())
+            with QSignalBlocker(self.window.avatar_size):
+                self.window.avatar_size.setValue(self.widget.width())
+            self.window.avatar_size_label.setText(f'{self.widget.width()}px')
+
+    @Slot(int)
+    def set_size(self, width):
+        self._dimensions = (width, round(width * 350 / 320))
+        self._apply_dimensions()
+
+    @Slot()
+    def set_visual_controls(self):
+        if self.widget is not None and hasattr(self.widget, 'set_visual_controls'):
+            self.widget.set_visual_controls(self.window.avatar_motion.value(),
+                                            self.window.avatar_lip_sensitivity.value())
 
     @Slot()
     def hide_avatar(self):

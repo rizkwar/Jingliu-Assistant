@@ -31,6 +31,10 @@ class Settings:
     avatar_animated: bool = True
     avatar_x: int | None = None
     avatar_y: int | None = None
+    avatar_width: int = 320
+    avatar_height: int = 350
+    avatar_motion: int = 100
+    avatar_lip_sensitivity: int = 100
     character_path: str = ""
     voice_preview: str = ""
     tts_rate: int = 100

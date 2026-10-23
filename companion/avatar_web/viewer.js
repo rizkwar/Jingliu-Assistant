@@ -7,6 +7,22 @@ const bridge = await new Promise(resolve => new QWebChannel(qt.webChannelTranspo
 let avatar, observer, frame = 0, previous = 0, paused = true, disposed = false, frames = 0;
 let voiceSequence = -1, voiceAt = 0, voiceActive = false;
 let visual, activity = 'ready', activitySequence = -1;
+let visible = false, controlsSequence = -1, movement = 1, sensitivity = 1;
+function render(dt = 0) {
+  if (avatar && visible && !document.hidden && !disposed) {
+    avatar.advance(dt, dt > 0 ? 1/dt : 30); frames++;
+  }
+}
+bridge.visibilityChanged.connect(value => { visible = value; sync(); });
+bridge.controlsChanged.connect((motion, lipSensitivity, sequence) => {
+  if (sequence <= controlsSequence || disposed) return;
+  controlsSequence = sequence;
+  movement = Math.max(0, Math.min(1, motion / 100));
+  sensitivity = Math.max(0.25, Math.min(2, lipSensitivity / 100));
+  if (visual) { visual.intensity = movement; visual.apply(); }
+  avatar?.setSwayGain(0.45 * movement);
+  if (paused) render();
+});
 bridge.activityChanged.connect((state, sequence) => {
   if (sequence <= activitySequence || disposed) return;
   activitySequence = sequence;
@@ -18,30 +34,35 @@ function resetVoice() {
   voiceActive = false;
   avatar.setSpeaking(false); avatar.setVoiceLevel(0); avatar.stopLipSync();
   visual?.apply();
-  if (!disposed) avatar.advance(0);
+  render();
 }
 bridge.voiceChanged.connect((level, sequence, reset) => {
   if (sequence <= voiceSequence || disposed) return;
   voiceSequence = sequence;
-  if (reset || paused || document.hidden) { resetVoice(); return; }
+  if (reset || paused || !visible || document.hidden) { resetVoice(); return; }
   voiceAt = performance.now();
   voiceActive = true;
   visual?.apply();
-  avatar?.setSpeaking(level > 0); avatar?.setVoiceLevel(level);
+  const value = Math.min(1, level * sensitivity);
+  avatar?.setSpeaking(value > 0); avatar?.setVoiceLevel(value);
 });
 function tick(now) {
   frame = 0;
-  if (!avatar || paused || document.hidden || disposed) return;
-  const dt = previous ? Math.max(0.000001, Math.min((now - previous) / 1000, 0.05)) : 1/60;
+  if (!avatar || paused || !visible || document.hidden || disposed) return;
+  // Cap actual draws on high-refresh displays while retaining playback timing.
+  if (previous && now - previous < 1000/30 - 0.5) {
+    frame = requestAnimationFrame(tick); return;
+  }
+  const dt = previous ? Math.max(0.000001, Math.min((now - previous) / 1000, 0.05)) : 1/30;
   previous = now;
   visual.update(dt, now);
   if (voiceActive && now - voiceAt > 250) resetVoice();
-  avatar.advance(dt, 1/dt); frames++;
+  render(dt);
   frame = requestAnimationFrame(tick);
 }
 function sync() {
   cancelAnimationFrame(frame); frame = 0; previous = 0;
-  if (!paused && !document.hidden && avatar && !disposed) frame = requestAnimationFrame(tick);
+  if (!paused && visible && !document.hidden && avatar && !disposed) frame = requestAnimationFrame(tick);
 }
 bridge.pauseChanged.connect(value => { paused = value; if (paused) resetVoice(); sync(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) resetVoice(); sync(); });
@@ -55,15 +76,17 @@ try {
   avatar = await loadMeshAvatar(document.querySelector('canvas'), './avatar.mavatar', {manual:true, fit:'contain'});
   avatar.setAutoMotion(false); avatar.setAutoIdle(false); avatar.setSwayGain(0.45);
   visual = new ConversationVisual(avatar);
+  visual.intensity = movement;
+  avatar.setSwayGain(0.45 * movement);
   visual.request(activity, performance.now());
   visual.apply();
   avatar.stopLipSync(); avatar.setSpeaking(false); avatar.setVoiceLevel(0);
   avatar.setExpression('neutral');
-  avatar.advance(0);
-  observer = new ResizeObserver(() => { if (paused && !disposed) avatar.advance(0); });
+  render();
+  observer = new ResizeObserver(() => { if (paused) render(); });
   observer.observe(document.querySelector('canvas'));
   // Read-only diagnostics for native rendering checks, no animation command API.
-  window.avatarDiagnostics = () => ({frames, paused, activity, visualMode:visual.mode,
+  window.avatarDiagnostics = () => ({frames, paused, visible, movement, sensitivity, activity, visualMode:visual.mode,
     expression:avatar.getExpression().name, parameters:avatar.getParameters(),
     canvas:[document.querySelector('canvas').width, document.querySelector('canvas').height]});
   bridge.report('ready');

@@ -78,8 +78,18 @@ class PreferenceTests(unittest.TestCase):
 
     def test_avatar_preferences_round_trip_with_a_negative_monitor_position(self):
         self.preferences.save(replace(DEFAULTS, avatar_enabled=True, avatar_animated=False,
-                                      avatar_x=-1100, avatar_y=200))
+                                      avatar_x=-1100, avatar_y=200, avatar_width=440, avatar_height=470,
+                                      avatar_motion=20, avatar_lip_sensitivity=160))
         loaded = Preferences(self.path).load(DEFAULTS)
         self.assertTrue(loaded.avatar_enabled)
         self.assertFalse(loaded.avatar_animated)
         self.assertEqual((loaded.avatar_x, loaded.avatar_y), (-1100, 200))
+        self.assertEqual((loaded.avatar_width, loaded.avatar_height, loaded.avatar_motion, loaded.avatar_lip_sensitivity),
+                         (440, 470, 20, 160))
+
+    def test_avatar_controls_reject_out_of_range_or_wrong_types(self):
+        for field, value in [('avatar_width', 219), ('avatar_height', 701),
+                             ('avatar_motion', -1), ('avatar_motion', True),
+                             ('avatar_lip_sensitivity', 201), ('avatar_lip_sensitivity', 24)]:
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                self.preferences.save(replace(DEFAULTS, **{field:value}))

@@ -355,6 +355,26 @@ class CompanionWindow(QMainWindow):
         self.animate_avatar = QCheckBox("Animate avatar")
         self.animate_avatar.setChecked(settings.avatar_animated)
         settings_layout.addWidget(self.animate_avatar)
+        for field, label, lower, upper, value, unit in (
+            ('avatar_size', 'Avatar size', 220, 640, settings.avatar_width, 'px'),
+            ('avatar_motion', 'Movement intensity', 0, 100, settings.avatar_motion, '%'),
+            ('avatar_lip_sensitivity', 'Lip-sync sensitivity', 25, 200, settings.avatar_lip_sensitivity, '%'),
+        ):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(lower, upper)
+            slider.setValue(value)
+            slider.setAccessibleName(label)
+            slider.setToolTip('Controls the mesh portrait. Save defaults to keep this setting.')
+            amount = QLabel(f'{value}{unit}')
+            amount.setMinimumWidth(55)
+            slider.valueChanged.connect(lambda value, amount=amount, unit=unit: amount.setText(f'{value}{unit}'))
+            row.addWidget(slider, 1)
+            row.addWidget(amount)
+            setattr(self, field, slider)
+            setattr(self, field + '_label', amount)
+            settings_layout.addLayout(row)
         self.preference_status = QLabel("Character selection is saved automatically. Save defaults keeps further voice and app adjustments. API keys stay in .env.")
         self.preference_status.setObjectName("hint")
         self.preference_status.setWordWrap(True)
@@ -738,6 +758,9 @@ class CompanionWindow(QMainWindow):
         self.close_to_tray.setChecked(settings.close_to_tray)
         self.show_avatar.setChecked(settings.avatar_enabled)
         self.animate_avatar.setChecked(settings.avatar_animated)
+        self.avatar_size.setValue(settings.avatar_width)
+        self.avatar_motion.setValue(settings.avatar_motion)
+        self.avatar_lip_sensitivity.setValue(settings.avatar_lip_sensitivity)
         self.mic_device.clear()
         self.mic_device.addItem("Windows default microphone", None)
         if settings.stt_microphone:
@@ -871,6 +894,8 @@ class CompanionWindow(QMainWindow):
             memory_enabled=self.use_memories.isChecked(), close_to_tray=self.close_to_tray.isChecked(),
             avatar_enabled=self.show_avatar.isChecked(), avatar_animated=self.animate_avatar.isChecked(),
             avatar_x=self.avatar.position()[0], avatar_y=self.avatar.position()[1],
+            avatar_width=self.avatar.dimensions()[0], avatar_height=self.avatar.dimensions()[1],
+            avatar_motion=self.avatar_motion.value(), avatar_lip_sensitivity=self.avatar_lip_sensitivity.value(),
         )
 
     @Slot()

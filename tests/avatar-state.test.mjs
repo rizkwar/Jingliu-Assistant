@@ -78,3 +78,17 @@ test('speaking style never calls speech or lip-sync methods and drops its talk g
   visual.update(.02, 450);
   assert.equal(calls.talkGain, 0);
 });
+
+test('zero movement pins head/body/gaze while retaining facial expressions and lip-sync isolation', () => {
+  const {visual, calls} = fixture();
+  visual.intensity = 0;
+  visual.request('speaking', 0);
+  visual.update(.1, 200);
+  const [pose, weight] = calls.parameters.at(-1);
+  assert.equal(weight, 1);
+  assert.equal(calls.talkGain, 0);
+  for (const [key, value] of Object.entries(pose)) {
+    if (/^(angle|bodyAngle|gaze)/.test(key)) assert.equal(Math.abs(value), 0);
+  }
+  assert.ok(!Object.keys(pose).some(key => key.startsWith('mouth')));
+});

@@ -153,6 +153,18 @@ class AvatarWindowTests(unittest.TestCase):
         self.assertFalse(widget.timer.isActive())
         self.assertIn("Luna", widget.toolTip())
 
+    def test_visual_controls_persist_when_avatar_is_not_created(self):
+        self.window.avatar_size.setValue(480)
+        self.window.avatar_motion.setValue(25)
+        self.window.avatar_lip_sensitivity.setValue(160)
+        self.window._save_preferences()
+        with patch('companion.ui.load_settings', return_value=SETTINGS):
+            self.window._reload_settings()
+        self.assertIsNone(self.window.avatar.widget)
+        self.assertEqual(self.window.avatar.dimensions(), (480, 525))
+        self.assertEqual(self.window.avatar_motion.value(), 25)
+        self.assertEqual(self.window.avatar_lip_sensitivity.value(), 160)
+
     def test_context_menu_stop_and_suspend_use_existing_controls(self):
         widget = self.enable()
         self.window.avatar.show_menu(widget.pos())

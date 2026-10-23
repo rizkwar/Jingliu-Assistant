@@ -3,7 +3,7 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-## Jingliu desktop avatar (Stage 6)
+## Jingliu desktop avatar (Stage 7 complete)
 
 The approved v5 portrait now displays in the assistant's floating desktop window,
 with idle blinking, breathing and hair motion. Open **Start Mira.cmd**, then
@@ -17,6 +17,16 @@ To check lip-sync, leave **Animate avatar** enabled and click **Preview voice**
 at a nonzero volume, then try **Stop** during speech. See the
 [Stage 5 guide](docs/avatar-stage5.md) for timing, tests and limitations.
 See the [Stage 6 guide](docs/avatar-stage6.md) for conversation cues and checks.
+In Settings, scroll to **Avatar size**, **Movement intensity**, and **Lip-sync
+sensitivity**; changes apply immediately, and **Save defaults** keeps them.
+The resize grip's actual dimensions are saved too. Hidden avatars stop drawing;
+visible rendering is capped near 30 FPS.
+
+See the [Stage 7 guide](docs/avatar-stage7.md) for measured resource use,
+verification, and replacing the rig with your own character. The native run
+observed about **9.1% whole-machine CPU while visibly idle**, **19.5% during local
+speech**, and **0.6% while hidden** on this 16-thread machine, including the loaded
+TTS process. These are short measurements, not performance guarantees.
 
 See the [Stage 4 guide](docs/avatar-stage4.md) for setup, local character
 assignments, fallback behavior and native verification. A fresh environment needs
@@ -607,5 +617,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: add restrained avatar conversation expressions
+feat: add avatar controls and verify performance
 ```

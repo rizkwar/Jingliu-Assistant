@@ -26,6 +26,7 @@ export class ConversationVisual {
     this.requested = 'idle';
     this.since = 0;
     this.pose = {...VISUALS.idle.pose};
+    this.intensity = 1;
     this.avatar.setExpression('neutral');
     this.avatar.setTalkGain(0);
   }
@@ -48,13 +49,17 @@ export class ConversationVisual {
     const target = VISUALS[this.mode];
     const blend = 1 - Math.exp(-Math.max(0, dt) * 5);
     for (const key of Object.keys(this.pose)) this.pose[key] += (target.pose[key] - this.pose[key]) * blend;
-    this.avatar.setTalkGain(target.talkGain);
+    this.avatar.setTalkGain(target.talkGain * this.intensity);
     this.apply();
   }
 
   apply() {
     // Retain a little of the runtime's natural idle motion and blinking. No mouth
     // parameter or expression with an open mouth can override playback lip-sync.
-    this.avatar.setParameters(this.pose, 0.75);
+    const pose = {...this.pose, bodyAngleX:0, bodyAngleZ:0};
+    for (const key of Object.keys(pose)) {
+      if (key.startsWith('angle') || key.startsWith('gaze')) pose[key] *= this.intensity;
+    }
+    this.avatar.setParameters(pose, 1 - this.intensity * 0.25);
   }
 }

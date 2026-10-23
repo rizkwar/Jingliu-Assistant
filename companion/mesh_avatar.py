@@ -26,6 +26,8 @@ class RendererBridge(QObject):
     pauseChanged = Signal(bool)
     voiceChanged = Signal(float, int, bool)
     activityChanged = Signal(str, int)
+    controlsChanged = Signal(int, int, int)
+    visibilityChanged = Signal(bool)
     status = Signal(str)
 
     @Slot(str)
@@ -43,9 +45,12 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._disposed = False
         self._voice_sequence = 0
         self._activity_sequence = 0
+        self._controls_sequence = 0
+        self._motion = 100
+        self._sensitivity = 100
         self.clearMask()
         self.setMinimumSize(220, 240)
-        self.setMaximumSize(720, 760)
+        self.setMaximumSize(640, 700)
         self.resize(320, 350)
         self.timer.stop()  # The native mascot's timer never drives the mesh.
         layout = QVBoxLayout(self)
@@ -107,6 +112,7 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.ready = True
             self.notice.hide()
             self._publish_activity()
+            self.set_visual_controls(self._motion, self._sensitivity)
             self._sync_timer()
         else:
             self.failed = True
@@ -131,6 +137,7 @@ class MeshDesktopAvatar(DesktopAvatar):
         self.timer.stop()
         if self.failed:
             DesktopAvatar._sync_timer(self)
+        self.bridge.visibilityChanged.emit(self.isVisible())
         self.bridge.pauseChanged.emit(not (self.isVisible() and self.animated and self.ready
                                           and self.state not in {'suspended', 'closing'}))
 
@@ -149,9 +156,17 @@ class MeshDesktopAvatar(DesktopAvatar):
 
     def hideEvent(self, event):
         if hasattr(self, 'bridge'):
+            self.bridge.visibilityChanged.emit(False)
             self.reset_voice()
         super().hideEvent(event)
         self._sync_timer()
+
+    def set_visual_controls(self, motion, sensitivity):
+        self._motion = max(0, min(100, motion))
+        self._sensitivity = max(25, min(200, sensitivity))
+        self._controls_sequence += 1
+        if self.ready and not self.failed and not self._disposed:
+            self.bridge.controlsChanged.emit(self._motion, self._sensitivity, self._controls_sequence)
 
     def set_voice_level(self, level):
         if self.failed:
