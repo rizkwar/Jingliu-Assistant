@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jingliu — head motion study</title><link rel="stylesheet" href="/style.css">
+<script type="module" src="/study.js"></script></head>
+<body><main>
+  <header><p class="eyebrow">JINGLIU / MOTION STUDY / CHECKPOINT 2</p>
+  <h1>A glance, then a turn.</h1><p>A separate experiment with the approved portrait and current renderer.</p></header>
+  <section class="portraits" aria-label="Motion comparison">
+    <article><h2>Current assistant</h2><canvas id="baseline" aria-label="Current assistant animation"></canvas></article>
+    <article><h2>Head and gaze experiment</h2><canvas id="experiment" aria-label="Experimental coordinated head movement"></canvas></article>
+  </section>
+  <p id="status" role="status">Loading local avatar…</p>
+  <progress id="progress" value="0" max="1" aria-label="Sequence progress"></progress>
+  <div class="controls">
+    <button id="replay" disabled>Replay sequence</button><button id="pause" disabled aria-pressed="false">Pause</button>
+    <label><input id="speech" type="checkbox"> Silent speech test</label>
+    <label><input id="checker" type="checkbox"> Check edges</label>
+  </div>
+  <p class="note">Eyes lead the head; shoulders follow more slowly. The sequence ends at rest.
+    The speech test uses synthetic levels and produces no sound. Cursor attention is a later checkpoint.</p>
+  <p class="note">The half-closed eye drawing contains its iris, so that expression currently has less gaze movement.
+    This study helps decide what needs repair before integration.</p>
+  <footer>No microphone or model requests. <a href="/license.txt">Mesh Avatar runtime license</a></footer>
+</main></body></html>

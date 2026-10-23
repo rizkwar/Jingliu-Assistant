@@ -3,10 +3,11 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-The natural-animation upgrade is at **checkpoint 1: inspection complete**.
-See the [motion inspection and proposed experiment](docs/avatar-motion-checkpoint1.md)
-for the current limitations, baseline recording locations, rig/tool assessment
-and next preview. The running avatar still uses its existing animation.
+The natural-animation upgrade is at **checkpoint 2: separate preview ready**.
+Double-click **Preview Head Motion.cmd** to compare the current animation with
+gentle coordinated turns and gaze. See the [preview notes](docs/avatar-motion-checkpoint2.md)
+and [initial inspection](docs/avatar-motion-checkpoint1.md). The running assistant
+still uses its existing animation while the experiment is reviewed.
 
 ## Response model and HD avatar
 
