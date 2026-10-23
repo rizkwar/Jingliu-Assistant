@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jingliu · Avatar preview</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/viewer.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">MIRA COMPANION / AVATAR STUDY</p><h1>Jingliu</h1></div>
+      <p class="badge">Approved portrait <strong>v5</strong></p>
+    </header>
+    <section class="layout" aria-label="Avatar review">
+      <div class="stage" id="stage">
+        <div class="stage-heading"><span class="dot"></span><span id="status" role="status">Loading avatar…</span></div>
+        <canvas id="avatar" aria-label="Animated Jingliu portrait"></canvas>
+      </div>
+      <aside>
+        <p class="eyebrow">RIG REVIEW · STAGE 3</p>
+        <h2>A little more alive.</h2>
+        <p class="intro">Check her eyes, hair, and head movement before bringing her into the companion.</p>
+        <div class="controls" id="controls">
+          <button data-action="idle" class="primary">Return to idle</button>
+          <div class="pair"><button data-action="blink">Blink</button><button data-action="smile">Gentle smile</button></div>
+          <div class="pair"><button data-action="left">Turn left</button><button data-action="right">Turn right</button></div>
+          <button data-action="mouth">Silent mouth test</button>
+          <div class="pair"><button id="pause" data-action="pause" aria-pressed="false">Pause</button><button id="background" data-action="background" aria-pressed="false">Check transparency</button></div>
+        </div>
+        <p class="mode" id="mode" aria-live="polite">Preparing the local rig.</p>
+        <p class="note">This preview is separate from your assistant. The mouth test has no audio; speech synchronization comes later.</p>
+        <a class="download" href="/avatar.mavatar" download="jingliu-playback.mavatar">Save avatar file <span aria-hidden="true">↗</span></a>
+      </aside>
+    </section>
+    <footer><span>Mesh Avatar Studio · locally rendered</span><a href="/runtime-license.txt">Runtime license</a></footer>
+  </main>
+</body>
+</html>

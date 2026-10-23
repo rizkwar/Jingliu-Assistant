@@ -3,6 +3,17 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
+## Jingliu mesh avatar preview (Stage 3)
+
+The approved v5 portrait has a separately prepared animated rig. Double-click
+**`Preview Jingliu Avatar.cmd`** to open its local browser preview, with blink,
+head-turn and silent mouth tests. The assistant still uses its existing mascot;
+native integration and speech synchronization come in later stages.
+
+See the [Stage 3 guide](docs/avatar-stage3.md) for the local exports, visual review,
+test results and Studio editing instructions. Artwork and rig files remain local
+and Git-ignored under `.cache/mesh-avatar-studio/projects/jingliu/`.
+
 ## Step 14: create and switch characters
 
 Implemented:
