@@ -4,7 +4,7 @@
 <title>Jingliu — head motion study</title><link rel="stylesheet" href="/style.css">
 <script type="module" src="/study.js"></script></head>
 <body><main>
-  <header><p class="eyebrow">JINGLIU / MOTION STUDY / CHECKPOINT 2</p>
+  <header><p class="eyebrow">JINGLIU / IDLE AND ATTENTION STUDY</p>
   <h1>A glance, then a turn.</h1><p>A separate experiment with the approved portrait and current renderer.</p></header>
   <section class="portraits" aria-label="Motion comparison">
     <article><h2>Current assistant</h2><canvas id="baseline" aria-label="Current assistant animation"></canvas></article>
@@ -13,12 +13,22 @@
   <p id="status" role="status">Loading local avatar…</p>
   <progress id="progress" value="0" max="1" aria-label="Sequence progress"></progress>
   <div class="controls">
-    <button id="replay" disabled>Replay sequence</button><button id="pause" disabled aria-pressed="false">Pause</button>
+    <button id="replay" disabled>Restart idle</button><button id="pause" disabled aria-pressed="false">Pause</button>
     <label><input id="speech" type="checkbox"> Silent speech test</label>
     <label><input id="checker" type="checkbox"> Check edges</label>
+    <label><input id="review" type="checkbox"> Rig inspection</label>
+    <label><input id="idle" type="checkbox" checked> Free idle</label>
+    <label><input id="cursor" type="checkbox" checked> Cursor attention</label>
   </div>
-  <p class="note">Eyes lead the head; shoulders follow more slowly. The sequence ends at rest.
-    The speech test uses synthetic levels and produces no sound. Cursor attention is a later checkpoint.</p>
+  <div class="tuning">
+    <label>Movement <input id="motion" type="range" min="0" max="100" value="100"><output id="motion-value">100%</output></label>
+    <label>Gaze <input id="gaze" type="range" min="0" max="100" value="100"><output id="gaze-value">100%</output></label>
+    <label>Hair response <input id="hair" type="range" min="20" max="80" value="45"><output id="hair-value">45%</output></label>
+  </div>
+  <p class="note">Move the cursor around this page. She may notice it briefly, then look away; the same motion will not keep tugging her head.
+    Cursor attention works within the preview page. Desktop-wide tracking comes with assistant integration.</p>
+  <p class="note">Turn off Free idle for the finite head sequence, or select Rig inspection. The speech test uses synthetic levels and produces no sound.
+    Lower Hair response makes the existing springs firmer; it does not remove the built-in breeze.</p>
   <p class="note">The half-closed eye drawing contains its iris, so that expression currently has less gaze movement.
     This study helps decide what needs repair before integration.</p>
   <footer>No microphone or model requests. <a href="/license.txt">Mesh Avatar runtime license</a></footer>

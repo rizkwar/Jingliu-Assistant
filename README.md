@@ -3,11 +3,14 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-The natural-animation upgrade is at **checkpoint 2: separate preview ready**.
-Double-click **Preview Head Motion.cmd** to compare the current animation with
-gentle coordinated turns and gaze. See the [preview notes](docs/avatar-motion-checkpoint2.md)
-and [initial inspection](docs/avatar-motion-checkpoint1.md). The running assistant
-still uses its existing animation while the experiment is reviewed.
+The natural-animation upgrade is at **checkpoint 4: idle and cursor preview ready**.
+Double-click **Preview Head Motion.cmd** for varied idle movement and occasional
+glances toward the cursor within that page. It includes a cursor-attention switch
+and movement, gaze and hair-response controls. See the
+[idle and attention notes](docs/avatar-motion-checkpoint4.md),
+[rig review](docs/avatar-motion-checkpoint3.md) and
+[initial inspection](docs/avatar-motion-checkpoint1.md). The running assistant
+still uses its existing animation until checkpoint 5 integration.
 
 ## Response model and HD avatar
 

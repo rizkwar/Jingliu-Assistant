@@ -21,18 +21,24 @@ export const DURATION = SEQUENCE.reduce((sum, step) => sum+step.travel+step.hold
 const ease = value => {const x=Math.max(0,Math.min(1,value));return x*x*x*(10+x*(-15+6*x));};
 
 export class HeadTurnStudy {
-  constructor() { this.reset(); }
+  constructor(sequence=SEQUENCE) {
+    this.sequence=sequence;
+    this.duration=sequence.reduce((sum,step)=>sum+step.travel+step.hold,0);
+    this.reset();
+  }
   reset() {this.time=0;this.bodyX=0;this.bodyZ=0;this.head={...REST};}
   update(seconds) {
     const dt=Number.isFinite(seconds) ? Math.max(0,Math.min(.1,seconds)) : 0;
-    this.time=Math.min(DURATION,this.time+dt);
-    let local=this.time, from=REST, step=SEQUENCE.at(-1);
-    for (const item of SEQUENCE) {
+    this.time=Math.min(this.duration,this.time+dt);
+    let local=this.time, from=REST, step=this.sequence.at(-1);
+    for (const item of this.sequence) {
       step=item;
       if(local<=item.travel+item.hold) break;
       local-=item.travel+item.hold;
       from=item.pose;
     }
+    this.current=step;
+    this.phaseTime=local;
     for(const key of Object.keys(REST)) {
       // A short eye lead, without changing eyelids or the iris clipping shader.
       const duration=key.startsWith('gaze') ? .45 : step.travel;
@@ -40,7 +46,7 @@ export class HeadTurnStudy {
     }
     this.bodyX+=(this.head.angleX*.1-this.bodyX)*(1-Math.exp(-2.2*dt));
     this.bodyZ+=(this.head.angleZ*.14-this.bodyZ)*(1-Math.exp(-1.8*dt));
-    return {label:step.label, expression:step.expression ?? 'neutral', finished:this.time>=DURATION,
+    return {label:step.label, expression:step.expression ?? 'neutral', finished:this.time>=this.duration,
       pose:{...this.head,bodyAngleX:this.bodyX,bodyAngleZ:this.bodyZ}};
   }
 }
