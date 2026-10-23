@@ -18,7 +18,7 @@ const context=capture.getContext('2d');
 function compose() {
   context.fillStyle='#142033';context.fillRect(0,0,960,544);
   context.fillStyle='#e6edfa';context.font='16px sans-serif';
-  context.fillText('Current assistant',20,26);context.fillText('Head and gaze experiment',500,26);
+  context.fillText('Earlier assistant baseline',20,26);context.fillText('Head and gaze study',500,26);
   canvases.forEach((canvas,i)=>{
     const scale=Math.min(480/canvas.width,480/canvas.height);
     const width=canvas.width*scale,height=canvas.height*scale;

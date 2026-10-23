@@ -1,7 +1,7 @@
 import os
 import unittest
 from dataclasses import replace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -9,7 +9,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication, QMenu
 
-from companion.avatar import activity_state, visible_position
+from companion.avatar import DesktopAvatar, activity_state, visible_position
 from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
 from qt_test_support import application
@@ -157,6 +157,9 @@ class AvatarWindowTests(unittest.TestCase):
         self.window.avatar_size.setValue(480)
         self.window.avatar_motion.setValue(25)
         self.window.avatar_lip_sensitivity.setValue(160)
+        self.window.avatar_cursor_attention.setChecked(False)
+        self.window.avatar_gaze.setValue(35)
+        self.window.avatar_hair.setValue(70)
         self.window._save_preferences()
         with patch('companion.ui.load_settings', return_value=SETTINGS):
             self.window._reload_settings()
@@ -164,6 +167,29 @@ class AvatarWindowTests(unittest.TestCase):
         self.assertEqual(self.window.avatar.dimensions(), (480, 525))
         self.assertEqual(self.window.avatar_motion.value(), 25)
         self.assertEqual(self.window.avatar_lip_sensitivity.value(), 160)
+        self.assertFalse(self.window.avatar_cursor_attention.isChecked())
+        self.assertEqual(self.window.avatar_gaze.value(), 35)
+        self.assertEqual(self.window.avatar_hair.value(), 70)
+
+    def test_attention_controls_apply_immediately_and_after_avatar_reload(self):
+        def create_widget():
+            widget = DesktopAvatar()
+            widget.set_attention_controls = Mock()
+            return widget
+
+        with patch.object(self.window.avatar, '_create_widget', side_effect=create_widget):
+            widget = self.enable()
+            widget.set_attention_controls.assert_called_with(True, 100, 45)
+            self.window.avatar_gaze.setValue(35)
+            widget.set_attention_controls.assert_called_with(True, 35, 45)
+            self.window.avatar_hair.setValue(70)
+            widget.set_attention_controls.assert_called_with(True, 35, 70)
+            self.window.avatar_cursor_attention.setChecked(False)
+            widget.set_attention_controls.assert_called_with(False, 35, 70)
+            self.window.avatar.reload_avatar()
+            replacement = self.window.avatar.widget
+            self.assertIsNot(widget, replacement)
+            replacement.set_attention_controls.assert_called_with(False, 35, 70)
 
     def test_context_menu_stop_and_suspend_use_existing_controls(self):
         widget = self.enable()

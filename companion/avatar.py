@@ -241,6 +241,9 @@ class AvatarController(QObject):
         window.avatar_motion.valueChanged.connect(self.set_visual_controls)
         window.avatar_lip_sensitivity.valueChanged.connect(self.set_visual_controls)
         window.avatar_hd.toggled.connect(self.set_hd)
+        window.avatar_cursor_attention.toggled.connect(self.set_attention_controls)
+        window.avatar_gaze.valueChanged.connect(self.set_attention_controls)
+        window.avatar_hair.valueChanged.connect(self.set_attention_controls)
         window.activity_changed.connect(self.set_activity)
         window.closed.connect(self.shutdown)
         if hasattr(window.speech, 'playback_level'):
@@ -279,6 +282,7 @@ class AvatarController(QObject):
         self.set_enabled(self.window.show_avatar.isChecked())
         self._apply_dimensions()
         self.set_visual_controls()
+        self.set_attention_controls()
 
     @Slot(bool)
     def set_enabled(self, enabled):
@@ -297,6 +301,7 @@ class AvatarController(QObject):
                 self.widget.set_animated(self.window.animate_avatar.isChecked())
                 self._apply_dimensions()
                 self.set_visual_controls()
+                self.set_attention_controls()
                 x, y = self._position
                 if x is None or y is None:
                     self.reset_position()
@@ -366,6 +371,12 @@ class AvatarController(QObject):
     def set_hd(self):
         if self.widget is not None and hasattr(self.widget, 'set_hd'):
             self.widget.set_hd(self.window.avatar_hd.isChecked())
+
+    @Slot()
+    def set_attention_controls(self):
+        if self.widget is not None and hasattr(self.widget, 'set_attention_controls'):
+            self.widget.set_attention_controls(self.window.avatar_cursor_attention.isChecked(),
+                                               self.window.avatar_gaze.value(), self.window.avatar_hair.value())
 
     @Slot()
     def hide_avatar(self):

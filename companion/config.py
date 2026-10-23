@@ -36,6 +36,9 @@ class Settings:
     avatar_motion: int = 100
     avatar_lip_sensitivity: int = 100
     avatar_hd: bool = True
+    avatar_cursor_attention: bool = True
+    avatar_gaze: int = 100
+    avatar_hair: int = 45
     character_path: str = ""
     voice_preview: str = ""
     tts_rate: int = 100

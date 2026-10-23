@@ -10,9 +10,10 @@ const web=resolve(root,'companion/avatar_web'),study=resolve(root,'scripts/head-
 const port=8766,origin=`http://127.0.0.1:${port}`;
 const routes=new Map([
   ['/',[resolve(study,'index.html'),'text/html; charset=utf-8']],
-  ...['study.js','motion.js','rig-review.js','idle-attention.js','stable-step.js'].map(name=>['/'+name,[resolve(study,name),'text/javascript; charset=utf-8']]),
+  ...['study.js','motion.js','rig-review.js','idle-attention.js'].map(name=>['/'+name,[resolve(study,name),'text/javascript; charset=utf-8']]),
   ['/style.css',[resolve(study,'style.css'),'text/css; charset=utf-8']],
-  ...['conversation-state.js','render-quality.js'].map(name=>['/'+name,[resolve(web,name),'text/javascript; charset=utf-8']]),
+  ['/companion/avatar_web/idle-attention.js',[resolve(web,'idle-attention.js'),'text/javascript; charset=utf-8']],
+  ...['conversation-state.js','render-quality.js','stable-step.js'].map(name=>['/'+name,[resolve(web,name),'text/javascript; charset=utf-8']]),
   ['/mesh-avatar.js',[resolve(web,'vendor/mesh-avatar.js'),'text/javascript; charset=utf-8']],
   ['/license.txt',[resolve(web,'vendor/LICENSE'),'text/plain; charset=utf-8']],
   ['/avatar.mavatar',[resolve(root,'.cache/mesh-avatar-studio/projects/jingliu/exports/jingliu-playback.mavatar'),'application/octet-stream']],
@@ -32,7 +33,7 @@ try {
   });
   server.on('error',error=>{console.error(error.code==='EADDRINUSE'?'Preview port 8766 is in use. Close the earlier preview.':'Could not start the local preview.');process.exitCode=1;});
   server.listen(port,'127.0.0.1',()=>{
-    console.log(`Head motion study: ${origin}`);console.log('Close this console to stop. Speech tests are silent; the assistant is unchanged.');
+    console.log(`Head motion study: ${origin}`);console.log('Close this console to stop. Speech tests are silent; this preview does not change assistant settings.');
     if(process.argv.includes('--open')&&process.platform==='win32')execFile('powershell.exe',['-NoProfile','-NonInteractive','-Command',`Start-Process '${origin}'`],{windowsHide:true},()=>{});
   });
   for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{server.close();server.closeAllConnections();});

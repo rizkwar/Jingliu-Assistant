@@ -25,6 +25,7 @@ FIELDS = {
     "avatar_width": int, "avatar_height": int,
     "avatar_motion": int, "avatar_lip_sensitivity": int,
     "avatar_hd": bool,
+    "avatar_cursor_attention": bool, "avatar_gaze": int, "avatar_hair": int,
 }
 
 
@@ -56,7 +57,8 @@ def validate(values):
         raise ValueError("Speech pause must be from 600 to 2,500 milliseconds.")
     x, y = clean.get("avatar_x"), clean.get("avatar_y")
     for key, lower, upper in [('avatar_width', 220, 640), ('avatar_height', 240, 700),
-                              ('avatar_motion', 0, 100), ('avatar_lip_sensitivity', 25, 200)]:
+                              ('avatar_motion', 0, 100), ('avatar_lip_sensitivity', 25, 200),
+                              ('avatar_gaze', 0, 100), ('avatar_hair', 20, 80)]:
         if key in clean and not lower <= clean[key] <= upper:
             raise ValueError(f'Saved {key} must be from {lower} to {upper}.')
     if (x is None) != (y is None) or any(value is not None and abs(value) > 1000000 for value in (x, y)):

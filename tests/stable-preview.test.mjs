@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {advanceFrame} from '../scripts/head-motion-study/stable-step.js';
+import {advanceFrame} from '../companion/avatar_web/stable-step.js';
 import {previewRuntime} from '../scripts/head-motion-study/preview-runtime.mjs';
 
 test('lagged frames keep runtime-style explicit springs stable while drawing once',()=>{
@@ -29,11 +29,12 @@ test('long stalls and invalid elapsed time cannot replay an unbounded backlog',(
     assert.ok(calls.at(-1).total<=.1);
   }
 });
-test('preview adapter is pinned, optional, and leaves the production file untouched',()=>{
+test('preview adapter accepts the pinned stable runtime without changing its code',()=>{
   const path=new URL('../companion/avatar_web/vendor/mesh-avatar.js',import.meta.url);
   const before=readFileSync(path),after=previewRuntime(before);
   assert.match(after.toString(),/advanceStable\(M\)/);
   assert.match(after.toString(),/advance\(M, R = 60\)/);
+  assert.equal(after.toString(),before.toString().replace(/\r\n/g,'\n'));
   assert.deepEqual(readFileSync(path),before);
   assert.throws(()=>previewRuntime(Buffer.from('unexpected update')),/runtime adapter/);
 });

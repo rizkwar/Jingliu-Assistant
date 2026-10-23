@@ -1,6 +1,6 @@
 """Transparent local mesh renderer, with activity cues and playback lip-sync."""
 from PySide6.QtCore import QFile, QIODevice, QObject, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import QLabel, QSizeGrip, QVBoxLayout
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile,
@@ -27,6 +27,8 @@ class RendererBridge(QObject):
     voiceChanged = Signal(float, int, bool)
     activityChanged = Signal(str, int)
     controlsChanged = Signal(int, int, int)
+    attentionChanged = Signal(bool, int, int, int)
+    cursorChanged = Signal(float, float, bool, int)
     visibilityChanged = Signal(bool)
     qualityChanged = Signal(bool)
     status = Signal(str)
@@ -50,6 +52,15 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._motion = 100
         self._sensitivity = 100
         self._hd = True
+        self._cursor_attention = True
+        self._gaze = 100
+        self._hair = 45
+        self._attention_sequence = 0
+        self._cursor_sequence = 0
+        self._cursor_sample = None
+        self.cursor_timer = QTimer(self)
+        self.cursor_timer.setInterval(100)  # Local logical coordinates; no input hook.
+        self.cursor_timer.timeout.connect(self._sample_cursor)
         self.clearMask()
         self.setMinimumSize(220, 240)
         self.setMaximumSize(640, 700)
@@ -116,6 +127,7 @@ class MeshDesktopAvatar(DesktopAvatar):
             self._publish_activity()
             self.set_visual_controls(self._motion, self._sensitivity)
             self.set_hd(self._hd)
+            self.set_attention_controls(self._cursor_attention, self._gaze, self._hair)
             self._sync_timer()
         else:
             self.failed = True
@@ -138,6 +150,17 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.timer.stop()
             return
         self.timer.stop()
+        if hasattr(self, 'cursor_timer'):
+            active = (self.ready and not self.failed and not self._disposed and self.isVisible()
+                      and self.animated and self._cursor_attention and self._motion > 0
+                      and self.state == 'ready')
+            if active:
+                self.cursor_timer.start()
+                # First sample runs on the next timer turn, after visibility,
+                # pause and activity signals have reached the renderer.
+            else:
+                self.cursor_timer.stop()
+                self._clear_cursor()
         if self.failed:
             DesktopAvatar._sync_timer(self)
         self.bridge.visibilityChanged.emit(self.isVisible())
@@ -170,6 +193,41 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._controls_sequence += 1
         if self.ready and not self.failed and not self._disposed:
             self.bridge.controlsChanged.emit(self._motion, self._sensitivity, self._controls_sequence)
+        self._sync_timer()
+
+    def set_attention_controls(self, enabled, gaze, hair):
+        self._cursor_attention = bool(enabled)
+        self._gaze = max(0, min(100, gaze))
+        self._hair = max(20, min(80, hair))
+        self._attention_sequence += 1
+        if self.ready and not self.failed and not self._disposed:
+            self.bridge.attentionChanged.emit(self._cursor_attention, self._gaze, self._hair,
+                                               self._attention_sequence)
+        self._sync_timer()
+
+    def _clear_cursor(self):
+        if self._cursor_sample is not None:
+            self._cursor_sample = None
+            self._cursor_sequence += 1
+            self.bridge.cursorChanged.emit(0., 0., False, self._cursor_sequence)
+
+    def _sample_cursor(self):
+        if not self.cursor_timer.isActive():
+            return
+        # QCursor and QWidget geometry share Qt's logical desktop coordinates,
+        # including negative monitor origins. Map into the view before crossing
+        # the bridge; JS uses the canvas's CSS coordinates, never device pixels.
+        point = self.view.mapFromGlobal(QCursor.pos())
+        if self._press is not None:  # Don't chase the hand that drags this window.
+            self._clear_cursor()
+            return
+        sample = (point.x(), point.y(), self.view.width(), self.view.height())
+        if sample != self._cursor_sample:
+            self._cursor_sample = sample
+            self._cursor_sequence += 1
+            self.bridge.cursorChanged.emit(point.x() / max(1, self.view.width()),
+                                           point.y() / max(1, self.view.height()), True,
+                                           self._cursor_sequence)
 
     def set_hd(self, enabled):
         self._hd = bool(enabled)
@@ -193,6 +251,8 @@ class MeshDesktopAvatar(DesktopAvatar):
         if self._disposed:
             return
         self._disposed = True
+        self.cursor_timer.stop()
+        self._clear_cursor()
         self.reset_voice()
         self.timeout.stop()
         self.bridge.pauseChanged.emit(True)

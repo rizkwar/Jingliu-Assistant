@@ -79,18 +79,32 @@ class PreferenceTests(unittest.TestCase):
     def test_avatar_preferences_round_trip_with_a_negative_monitor_position(self):
         self.preferences.save(replace(DEFAULTS, avatar_enabled=True, avatar_animated=False,
                                       avatar_x=-1100, avatar_y=200, avatar_width=440, avatar_height=470,
-                                      avatar_motion=20, avatar_lip_sensitivity=160))
+                                      avatar_motion=20, avatar_lip_sensitivity=160,
+                                      avatar_cursor_attention=False, avatar_gaze=35, avatar_hair=70))
         loaded = Preferences(self.path).load(DEFAULTS)
         self.assertTrue(loaded.avatar_enabled)
         self.assertFalse(loaded.avatar_animated)
         self.assertEqual((loaded.avatar_x, loaded.avatar_y), (-1100, 200))
         self.assertEqual((loaded.avatar_width, loaded.avatar_height, loaded.avatar_motion, loaded.avatar_lip_sensitivity),
                          (440, 470, 20, 160))
+        self.assertEqual((loaded.avatar_cursor_attention, loaded.avatar_gaze, loaded.avatar_hair),
+                         (False, 35, 70))
+
+    def test_older_preferences_keep_new_attention_defaults(self):
+        self.path.parent.mkdir()
+        self.path.write_text(json.dumps({"version": 1, "settings": {"avatar_motion": 40}}), encoding="utf-8")
+        loaded = self.preferences.load(DEFAULTS)
+        self.assertEqual((loaded.avatar_cursor_attention, loaded.avatar_gaze, loaded.avatar_hair),
+                         (True, 100, 45))
+        self.assertEqual(loaded.avatar_motion, 40)
 
     def test_avatar_controls_reject_out_of_range_or_wrong_types(self):
         for field, value in [('avatar_width', 219), ('avatar_height', 701),
                              ('avatar_motion', -1), ('avatar_motion', True),
-                             ('avatar_lip_sensitivity', 201), ('avatar_lip_sensitivity', 24)]:
+                             ('avatar_lip_sensitivity', 201), ('avatar_lip_sensitivity', 24),
+                             ('avatar_cursor_attention', 1), ('avatar_gaze', -1),
+                             ('avatar_gaze', 101), ('avatar_gaze', True),
+                             ('avatar_hair', 19), ('avatar_hair', 81), ('avatar_hair', False)]:
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 self.preferences.save(replace(DEFAULTS, **{field:value}))
 

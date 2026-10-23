@@ -1,3 +1,4 @@
+import {advanceFrame} from './stable-step.js';
 import {drawingSize} from './render-quality.js';
 /*! fflate
 MIT License
@@ -1880,8 +1881,9 @@ async function Jn(n, e) {
     const W = q.apply(R, M);
     return J = W, W;
   }
-  function E(M) {
+  function E(M, draw = true, visualDt = M) {
     const R = A(M), W = H.step(R, M), Q = U.pos, ne = U.rest;
+    if (!draw) return;
     for (let K = 0; K < O.length; K++)
       m(ne[K * 2], ne[K * 2 + 1], O[K], R, W, g), Q[K * 2] = g[0], Q[K * 2 + 1] = g[1];
     const ee = (K) => $ ? 1 : K;
@@ -1894,7 +1896,7 @@ async function Jn(n, e) {
         m(Lt, b(K.e, K.part, Lt, mn, Pe, Tt), K.W[Se], R, W, g), Rt[Se * 2] = g[0], Rt[Se * 2 + 1] = g[1];
       }
     }
-    const he = $?.update(R, W, M, Fn(q.name, L.mode === "manual" ? null : L.expr));
+    const he = $?.update(R, W, visualDt, Fn(q.name, L.mode === "manual" ? null : L.expr));
     if (he) for (const K of C) he.eyes[K.eye] && (K.layer.alpha = 0);
     const oe = X.pos, ke = X.rest, fn = i(R);
     for (let K = 0; K < D.length; K++)
@@ -2005,6 +2007,10 @@ async function Jn(n, e) {
       if (!z)
         if (M === 0) E(0);
         else for (let W = 0; W < Math.round(M * R); W++) E(1 / R);
+    },
+    /** Bounded spring steps with a single mesh draw per elapsed frame. */
+    advanceStable(M) {
+      if (!z) advanceFrame(M, (dt, draw, total) => E(dt, draw, total));
     },
     /** Update motion and lip sync without drawing a hidden preview. */
     advanceParameters(M) {

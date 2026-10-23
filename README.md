@@ -3,14 +3,16 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
-The natural-animation upgrade is at **checkpoint 4: idle and cursor preview ready**.
-Double-click **Preview Head Motion.cmd** for varied idle movement and occasional
-glances toward the cursor within that page. It includes a cursor-attention switch
-and movement, gaze and hair-response controls. See the
-[idle and attention notes](docs/avatar-motion-checkpoint4.md),
-[rig review](docs/avatar-motion-checkpoint3.md) and
-[initial inspection](docs/avatar-motion-checkpoint1.md). The running assistant
-still uses its existing animation until checkpoint 5 integration.
+The natural-animation upgrade is at **checkpoint 5: integrated into the assistant**.
+Open **Start Mira.cmd**, enable **Show desktop avatar** and **Animate avatar** in
+Settings, then move the cursor while she is idle. She occasionally glances toward
+it, returns to rest, and varies small head turns with pauses. Listening and
+thinking keep her focused; actual voice playback adds subtle nods. Settings now
+include **Occasionally look toward my cursor**, **Gaze intensity** and **Hair
+response**. Click **Save defaults** to keep your choices.
+See the [integration and verification guide](docs/avatar-motion-checkpoint5.md).
+**Preview Head Motion.cmd** remains a separate comparison and rig-review tool;
+its pointer tracking stays within the preview page.
 
 ## Response model and HD avatar
 
@@ -38,13 +40,14 @@ To check lip-sync, leave **Animate avatar** enabled and click **Preview voice**
 at a nonzero volume, then try **Stop** during speech. See the
 [Stage 5 guide](docs/avatar-stage5.md) for timing, tests and limitations.
 See the [Stage 6 guide](docs/avatar-stage6.md) for conversation cues and checks.
-In Settings, scroll to **Avatar size**, **Movement intensity**, and **Lip-sync
-sensitivity**; changes apply immediately, and **Save defaults** keeps them.
+In Settings, scroll to **Avatar size**, **Movement intensity**, **Lip-sync
+sensitivity**, **Gaze intensity** and **Hair response**; changes apply immediately
+(motion controls ease smoothly), and **Save defaults** keeps them.
 The resize grip's actual dimensions are saved too. Hidden avatars stop drawing;
 waiting uses about 20 FPS, while listening, thinking and speaking use up to 30 FPS.
-HD resolution stays the same. See [idle performance](docs/avatar-performance.md)
-for the measured comparison (about 9.5% to 5.3% whole-machine CPU in short HD idle
-samples on this machine) and its limits.
+HD resolution stays the same. See the current
+[motion integration measurements](docs/avatar-motion-checkpoint5.md) and the earlier
+[idle performance comparison](docs/avatar-performance.md) for their test conditions.
 
 See the [Stage 7 guide](docs/avatar-stage7.md) for measured resource use,
 verification, and replacing the rig with your own character. The earlier balanced-renderer run
@@ -641,5 +644,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-feat: add Codex subscription model selection and HD avatar rendering
+feat: integrate natural avatar motion and desktop cursor attention
 ```

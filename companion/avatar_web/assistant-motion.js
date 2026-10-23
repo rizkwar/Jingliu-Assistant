@@ -1,0 +1,76 @@
+import {IdleAttention} from './idle-attention.js';
+import {visualMode} from './conversation-state.js';
+
+const clamp=(x,low,high)=>Math.max(low,Math.min(high,x));
+const unit=x=>Number.isFinite(x)?clamp(x,0,1):0;
+const STYLES={
+  idle:{amount:1,y:-.5,z:0,brow:0},
+  listening:{amount:.08,y:-1.5,z:-1.2,brow:.06},
+  thinking:{amount:.1,y:-1.8,z:.8,brow:0},
+  speaking:{amount:.32,y:-.6,z:0,brow:0},
+  attention:{amount:0,y:-1,z:0,brow:0},
+  paused:{amount:0,y:0,z:0,brow:0},
+};
+
+// A single owner for head/body/gaze. The runtime still owns eyes, breath, hair
+// physics and playback lip-sync. No dialogue, emotion tags or model calls here.
+export class AssistantMotion {
+  constructor(avatar,random=Math.random){
+    this.avatar=avatar;this.idle=new IdleAttention(random);
+    this.mode=this.requested='idle';this.since=0;
+    this.intensity=1;this.gaze=1;this.hair=.45;this.cursorEnabled=true;
+    this.settings={motion:1,gaze:1,hair:.45};this.amount=1;
+    this.pose={angleX:0,angleY:-.5,angleZ:0,bodyAngleX:0,bodyAngleZ:0,gazeX:0,gazeY:0,browY:0};
+    this.level=0;this.nod=0;this.expression='neutral';
+    avatar.setExpression('neutral');avatar.setTalkGain(0);
+  }
+  request(state,now){
+    const next=visualMode(state);
+    if(next!==this.requested){this.requested=next;this.since=now;}
+    // Stop idle cursor attention immediately when a conversation needs focus.
+    this.idle.setCursorEnabled(this.cursorEnabled&&next==='idle');
+  }
+  setControls(motion,gaze,hair,cursor){
+    this.settings={motion:unit(motion),gaze:unit(gaze),hair:clamp(Number.isFinite(hair)?hair:.45,.2,.8)};
+    this.cursorEnabled=Boolean(cursor);
+    this.idle.setCursorEnabled(this.cursorEnabled&&this.requested==='idle');
+  }
+  setCursor(target){this.idle.setCursor(this.cursorEnabled&&this.requested==='idle'?target:null);}
+  clearCursor(){this.idle.setCursor(null);}
+  setVoice(level){this.level=unit(level);}
+  resetVoice(){this.level=0;this.nod=0;}
+  suspend(){this.clearCursor();this.resetVoice();}
+  update(seconds,now){
+    const dt=Number.isFinite(seconds)?clamp(seconds,0,.1):0;
+    if(this.mode!==this.requested&&now-this.since>=180)this.mode=this.requested;
+    const style=STYLES[this.mode],blend=1-Math.exp(-dt*4);
+    for(const [key,value] of Object.entries(this.settings)){
+      const name=key==='motion'?'intensity':key;
+      this[name]+=(value-this[name])*blend;
+      if(Math.abs(value-this[name])<.0001)this[name]=value;
+    }
+    this.amount+=(style.amount-this.amount)*(1-Math.exp(-dt*3));
+    const idle=this.idle.update(dt).pose;
+    const target={...idle};
+    for(const key of Object.keys(target))target[key]*=this.amount;
+    const nodTarget=this.mode==='speaking'?this.level*1.4:0;
+    this.nod+=(nodTarget-this.nod)*(1-Math.exp(-dt*(nodTarget>this.nod?7:3)));
+    target.angleY+=style.y-this.nod;target.angleZ+=style.z;target.browY=style.brow;
+    // Opaque half-eye patches include their irises. Keep them centered while
+    // thinking; listening, speaking and cursor attention use the open-eye rig.
+    if(this.mode==='thinking'){target.gazeX=0;target.gazeY=0;}
+    const expression=this.mode==='thinking'?'halfLidded':'neutral';
+    if(expression!==this.expression){this.expression=expression;this.avatar.setExpression(expression);}
+    for(const key of Object.keys(this.pose))this.pose[key]+=(target[key]-this.pose[key])*(1-Math.exp(-dt*5));
+    this.apply();
+  }
+  apply(){
+    const pose={...this.pose};
+    const limits={angleX:12,angleY:4,angleZ:8,bodyAngleX:1.5,bodyAngleZ:1.2,gazeX:.6,gazeY:.3};
+    for(const [key,limit] of Object.entries(limits))pose[key]=clamp(pose[key],-limit,limit)*this.intensity*(key.startsWith('gaze')?this.gaze:1);
+    this.avatar.setTalkGain(0);this.avatar.setSwayGain(this.hair);
+    this.avatar.setParameters(pose,1);
+  }
+  snapshot(){return {mode:this.mode,requested:this.requested,expression:this.expression,
+    movement:this.intensity,gaze:this.gaze,hair:this.hair,nod:this.nod,attention:this.idle.snapshot()};}
+}

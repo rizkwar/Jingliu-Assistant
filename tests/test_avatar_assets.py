@@ -26,7 +26,7 @@ class AvatarAssetTests(unittest.TestCase):
             root = Path(folder)
             web = root / 'companion/avatar_web'
             (web / 'vendor').mkdir(parents=True)
-            for name in ['index.html', 'viewer.js', 'conversation-state.js', 'render-quality.js', 'render-cadence.js', 'style.css', 'vendor/mesh-avatar.js']:
+            for name in ['index.html', 'viewer.js', 'conversation-state.js', 'render-quality.js', 'render-cadence.js', 'assistant-motion.js', 'idle-attention.js', 'stable-step.js', 'style.css', 'vendor/mesh-avatar.js']:
                 (web / name).write_text('test', encoding='utf-8')
             model = root / 'portrait.mavatar'
             model.write_bytes(b'avatar')

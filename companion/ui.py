@@ -363,10 +363,18 @@ class CompanionWindow(QMainWindow):
         self.avatar_hd.setChecked(settings.avatar_hd)
         self.avatar_hd.setToolTip('Sharper portrait rendering. Turn off to reduce graphics load.')
         settings_layout.addWidget(self.avatar_hd)
+        self.avatar_cursor_attention = QCheckBox('Occasionally look toward my cursor')
+        self.avatar_cursor_attention.setChecked(settings.avatar_cursor_attention)
+        self.avatar_cursor_attention.setToolTip(
+            'Brief desktop cursor glances with pauses between them. Cursor positions stay on this computer. '
+            'Save defaults to keep this setting.')
+        settings_layout.addWidget(self.avatar_cursor_attention)
         for field, label, lower, upper, value, unit in (
             ('avatar_size', 'Avatar size', 220, 640, settings.avatar_width, 'px'),
             ('avatar_motion', 'Movement intensity', 0, 100, settings.avatar_motion, '%'),
             ('avatar_lip_sensitivity', 'Lip-sync sensitivity', 25, 200, settings.avatar_lip_sensitivity, '%'),
+            ('avatar_gaze', 'Gaze intensity', 0, 100, settings.avatar_gaze, '%'),
+            ('avatar_hair', 'Hair response', 20, 80, settings.avatar_hair, '%'),
         ):
             row = QHBoxLayout()
             row.addWidget(QLabel(label))
@@ -375,6 +383,12 @@ class CompanionWindow(QMainWindow):
             slider.setValue(value)
             slider.setAccessibleName(label)
             slider.setToolTip('Controls the mesh portrait. Save defaults to keep this setting.')
+            if field == 'avatar_gaze':
+                slider.setToolTip('Eye movement strength during idle and cursor glances. '
+                                  '0% keeps the gaze centered. Save defaults to keep this setting.')
+            elif field == 'avatar_hair':
+                slider.setToolTip('Lower values keep hair firmer; higher values allow more follow-through. '
+                                  'Save defaults to keep this setting.')
             amount = QLabel(f'{value}{unit}')
             amount.setMinimumWidth(55)
             slider.valueChanged.connect(lambda value, amount=amount, unit=unit: amount.setText(f'{value}{unit}'))
@@ -779,6 +793,9 @@ class CompanionWindow(QMainWindow):
         self.avatar_size.setValue(settings.avatar_width)
         self.avatar_motion.setValue(settings.avatar_motion)
         self.avatar_lip_sensitivity.setValue(settings.avatar_lip_sensitivity)
+        self.avatar_cursor_attention.setChecked(settings.avatar_cursor_attention)
+        self.avatar_gaze.setValue(settings.avatar_gaze)
+        self.avatar_hair.setValue(settings.avatar_hair)
         self.mic_device.clear()
         self.mic_device.addItem("Windows default microphone", None)
         if settings.stt_microphone:
@@ -916,6 +933,8 @@ class CompanionWindow(QMainWindow):
             avatar_width=self.avatar.dimensions()[0], avatar_height=self.avatar.dimensions()[1],
             avatar_motion=self.avatar_motion.value(), avatar_lip_sensitivity=self.avatar_lip_sensitivity.value(),
             avatar_hd=self.avatar_hd.isChecked(),
+            avatar_cursor_attention=self.avatar_cursor_attention.isChecked(),
+            avatar_gaze=self.avatar_gaze.value(), avatar_hair=self.avatar_hair.value(),
         )
 
     @Slot()
