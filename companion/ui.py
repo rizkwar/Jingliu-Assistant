@@ -1,12 +1,14 @@
 from dataclasses import replace
 import sqlite3
 from pathlib import Path
+import tempfile
+import time
 
 from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QKeyEvent, QTextCharFormat, QTextCursor, QColor
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QImage, QKeyEvent
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QTextBrowser, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
+    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .config import PROJECT_ROOT, Settings, VOICES, active_character_voice, load_settings
@@ -27,35 +29,63 @@ from .avatar_models import AvatarModels
 from .connection_ui import ConnectionPanel
 from .prompts import reply_prompt
 from .reference_voice import inspect_reference, VoiceSetupError
+from . import attachments
+from .chat_view import AttachmentCard, ChatView
+from .theme import ACTIVITY_COLORS, ICONS, STYLE, NightSky, glyph_icon, icon_button, moon_icon, repolish
 
 
-STYLE = """
-QWidget { background: #151820; color: #e9eaf0; font-family: 'Segoe UI'; font-size: 14px; }
-QLabel#eyebrow { color: #a7a2e0; font-size: 11px; font-weight: 600; }
-QLabel#title { font-size: 30px; font-weight: 600; }
-QLabel#subtitle, QLabel#hint { color: #929bad; font-size: 12px; }
-QLabel#status { color: #b9b2fc; padding: 7px 12px; background: #29263c; border-radius: 10px; }
-QTextBrowser { background: #1b1f2a; border: 1px solid #303646; border-radius: 12px; padding: 16px; }
-QPlainTextEdit { background: #1b1f2a; border: 1px solid #3c4357; border-radius: 10px; padding: 10px; }
-QPlainTextEdit:focus { border-color: #a99df5; }
-QComboBox { background: #292e3c; border: 1px solid #3c4357; border-radius: 6px; padding: 6px 10px; }
-QComboBox QAbstractItemView { background: #292e3c; selection-background-color: #454055; }
-QSlider::groove:horizontal { height: 4px; background: #3c4357; border-radius: 2px; }
-QSlider::handle:horizontal { background: #b7a9ff; width: 13px; margin: -5px 0; border-radius: 6px; }
-QProgressBar { background: #292e3c; border: none; border-radius: 3px; max-height: 6px; }
-QProgressBar::chunk { background: #8fc7b2; border-radius: 3px; }
-QPushButton { background: #292e3c; border: 1px solid #3c4357; border-radius: 8px; padding: 8px 14px; }
-QPushButton:hover { background: #363d50; }
-QPushButton:checked { background: #454055; border-color: #b7a9ff; color: #dfd6ff; }
-QPushButton:disabled { color: #636d80; border-color: #303646; }
-QPushButton#send { background: #b7a9ff; color: #191627; border: none; font-weight: 600; }
-QPushButton#send:hover { background: #cbbfff; }
-QPushButton#send:disabled { background: #454055; color: #8c839e; }
-"""
+# Calm, everyday states that should not displace the default footer hint.
+IDLE_NOTES = {"", "Microphone off", "Voice loads on first use", "Voice ready", "Voice stopped", "Hands-free off"}
+SEALS = {"jingliu": "镜流"}
+
+
+class Note(QLabel):
+    """A status message shown in the shared footer line instead of a row of its own."""
+    updated = Signal(str)
+
+    def setText(self, text):
+        super().setText(text)
+        self.updated.emit(text)
 
 
 class MessageInput(QPlainTextEdit):
     submitted = Signal()
+    files_added = Signal(list)
+
+    def canInsertFromMimeData(self, source):
+        return source.hasImage() or any(url.isLocalFile() for url in source.urls()) or super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source):
+        # Pasted or dropped files and screenshots become attachments, not file paths in the text.
+        files = [url.toLocalFile() for url in source.urls() if url.isLocalFile()]
+        if files:
+            self.files_added.emit(files)
+        elif source.hasImage():
+            image = QImage(source.imageData())
+            folder = Path(tempfile.mkdtemp(prefix="companion-paste-"))
+            path = folder / f"pasted-{time.strftime('%Y%m%d-%H%M%S')}.png"
+            if not image.isNull() and image.save(str(path), "PNG"):
+                self.files_added.emit([str(path)])
+        else:
+            super().insertFromMimeData(source)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.document().contentsChanged.connect(self._fit)
+        self._fit()
+
+    def _fit(self):
+        # Grow with the draft from one line up to six, then scroll inside the box.
+        lines = max(1, int(self.document().size().height()))
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded if lines > 6
+                                        else Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        line = self.fontMetrics().lineSpacing()
+        self.setFixedHeight(min(6, lines) * line + 2 * int(self.document().documentMargin()) + 10)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()  # Wrapping changes with width.
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
@@ -130,81 +160,128 @@ class CompanionWindow(QMainWindow):
         self._scroll_timer.setSingleShot(True)
         self._scroll_timer.timeout.connect(self._scroll_to_latest)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
-        self.resize(740, 800)
-        self.setMinimumSize(600, 660)
+        self.setWindowIcon(moon_icon())
+        self.resize(780, 860)
+        self.setMinimumSize(460, 560)
         self.setStyleSheet(STYLE)
 
-        root = QWidget()
+        root = NightSky()
         self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(26, 24, 26, 22)
-        layout.setSpacing(10)
-        eyebrow = QLabel("YOUR DESKTOP COMPANION")
-        eyebrow.setObjectName("eyebrow")
-        layout.addWidget(eyebrow)
+        centring = QHBoxLayout(root)
+        centring.setContentsMargins(0, 0, 0, 0)
+        column = QWidget()
+        column.setObjectName("column")
+        column.setMaximumWidth(900)  # Keep lines readable on a maximized window.
+        centring.addStretch(1)
+        centring.addWidget(column, 100)
+        centring.addStretch(1)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(22, 18, 22, 12)
+        layout.setSpacing(12)
+
         heading = QHBoxLayout()
+        heading.setSpacing(12)
+        emblem = QLabel(ICONS["moon"])
+        emblem.setObjectName("emblem")
+        emblem.setFixedSize(44, 44)
+        emblem.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        heading.addWidget(emblem)
+        names = QVBoxLayout()
+        names.setSpacing(0)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(10)
         self.title = QLabel(settings.name)
         self.title.setObjectName("title")
-        heading.addWidget(self.title)
-        heading.addStretch()
-        self.status = QLabel("Ready")
-        self.status.setObjectName("status")
-        heading.addWidget(self.status)
-        layout.addLayout(heading)
+        title_row.addWidget(self.title)
+        self.seal = QLabel(SEALS.get(settings.name.lower(), ""))
+        self.seal.setObjectName("seal")
+        title_row.addWidget(self.seal)
+        title_row.addStretch()
+        names.addLayout(title_row)
         self.conversation_title = QLabel("New conversation")
         self.conversation_title.setObjectName("subtitle")
-        layout.addWidget(self.conversation_title)
-        self.context_hint = QLabel()
-        self.context_hint.setObjectName("hint")
-        self.context_hint.setWordWrap(True)
-        layout.addWidget(self.context_hint)
+        self.conversation_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        names.addWidget(self.conversation_title)
+        heading.addLayout(names, 1)
+        pill = QFrame()
+        pill.setObjectName("pill")
+        self.status_pill = pill
+        pill_row = QHBoxLayout(pill)
+        pill_row.setContentsMargins(10, 4, 12, 4)
+        pill_row.setSpacing(7)
+        self.status_dot = QLabel("●")
+        pill_row.addWidget(self.status_dot)
+        self.status = QLabel("Ready")
+        self.status.setObjectName("status")
+        pill_row.addWidget(self.status)
+        heading.addWidget(pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.speak_toggle = icon_button("speaker", "Speak replies aloud", checkable=True)
+        self.new_chat = icon_button("new", "New conversation · the current one stays in History")
+        self.more_button = icon_button("more", "History, memories and settings")
+        for button in (self.speak_toggle, self.new_chat, self.more_button):
+            heading.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(heading)
+        self.context_hint = Note(self)
+        self.context_hint.hide()  # Its summary state is shown on the Context menu item.
 
-        toolbar = QHBoxLayout()
-        self.new_chat = QPushButton("New")
-        self.new_chat.setToolTip("Start a new conversation; keep the current one in History")
+        menu = QMenu(self)
+        self.history_button = menu.addAction(glyph_icon("history"), "History")
+        self.memory_button = menu.addAction(glyph_icon("memories"), "Memories")
+        self.context_button = menu.addAction(glyph_icon("context"), "Context and summary")
+        self.context_button.setToolTip("Inspect or summarize older exchanges in this conversation")
+        menu.addSeparator()
+        self.settings_button = menu.addAction(glyph_icon("settings"), "Settings")
+        self.suspend_button = menu.addAction(glyph_icon("pause"), "Suspend")
+        menu.addSeparator()
+        menu.addAction("Quit", self.request_quit)
+        menu.setToolTipsVisible(True)
+        self.more_button.setMenu(menu)
         self.reload = QPushButton("Reload .env + character")
         self.reload.setToolTip("Reload connection and character; keep saved app preferences")
-        self.settings_button = QPushButton("Settings")
-        self.settings_button.clicked.connect(self.open_settings)
-        self.history_button = QPushButton("History")
-        self.memory_button = QPushButton("Memories")
-        self.context_button = QPushButton("Context")
-        self.context_button.setToolTip("Inspect or summarize older exchanges in this conversation")
-        self.context_button.clicked.connect(self._open_summary)
-        self.history_button.clicked.connect(self._open_history)
-        self.memory_button.clicked.connect(self._open_memories)
+        self.settings_button.triggered.connect(self.open_settings)
+        self.context_button.triggered.connect(self._open_summary)
+        self.history_button.triggered.connect(self._open_history)
+        self.memory_button.triggered.connect(self._open_memories)
+        self.suspend_button.triggered.connect(self.toggle_suspended)
         self.new_chat.clicked.connect(self._new_conversation)
         self.reload.clicked.connect(self._reload_settings)
-        toolbar.addWidget(self.new_chat)
-        toolbar.addWidget(self.history_button)
-        toolbar.addWidget(self.memory_button)
-        toolbar.addWidget(self.context_button)
-        toolbar.addStretch()
-        toolbar.addWidget(self.settings_button)
-        layout.addLayout(toolbar)
 
         self.settings_dialog = QDialog(self)
-        self.settings_dialog.setWindowTitle("Companion settings")
-        self.settings_dialog.setMinimumWidth(540)
-        self.settings_dialog.resize(600, 780)
+        self.settings_dialog.setWindowTitle("Settings")
+        self.settings_dialog.setWindowIcon(moon_icon())
+        self.settings_dialog.setMinimumWidth(520)
+        self.settings_dialog.resize(600, 720)
         settings_outer = QVBoxLayout(self.settings_dialog)
-        settings_outer.setContentsMargins(22, 22, 22, 22)
-        settings_scroll = QScrollArea()
-        settings_scroll.setWidgetResizable(True)
-        settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        settings_body = QWidget()
-        settings_layout = QVBoxLayout(settings_body)
-        settings_layout.setContentsMargins(0, 0, 10, 0)
-        settings_scroll.setWidget(settings_body)
-        settings_outer.addWidget(settings_scroll, 1)
-        settings_layout.setSpacing(14)
-        settings_hint = QLabel("Changes apply now. Save defaults to keep them after restarting.")
-        settings_hint.setObjectName("hint")
-        settings_hint.setWordWrap(True)
-        settings_layout.addWidget(settings_hint)
+        settings_outer.setContentsMargins(20, 16, 20, 18)
+        settings_outer.setSpacing(12)
+        self.settings_tabs = QTabWidget()
+        self.settings_tabs.setDocumentMode(True)
+        settings_outer.addWidget(self.settings_tabs, 1)
+
+        def page(title):
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            body = QWidget()
+            body_layout = QVBoxLayout(body)
+            body_layout.setContentsMargins(4, 14, 12, 8)
+            body_layout.setSpacing(12)
+            scroll.setWidget(body)
+            self.settings_tabs.addTab(scroll, title)
+            return body_layout
+
+        def section(target, text):
+            label = QLabel(text.upper())
+            label.setObjectName("section")
+            target.addWidget(label)
+
+        companion_page, voice_page, avatar_page, app_page = (page(title) for title in ("Companion", "Voice", "Avatar", "App"))
+        settings_layout = companion_page
+        section(settings_layout, "Response model")
         self.connection = ConnectionPanel(settings)
         settings_layout.addWidget(self.connection)
         self.connection.changed.connect(self._connection_changed)
+        section(settings_layout, "Character")
         character_row = QHBoxLayout()
         self.character_label = QLabel()
         self.character_label.setWordWrap(True)
@@ -229,6 +306,9 @@ class CompanionWindow(QMainWindow):
         settings_layout.addLayout(character_buttons)
         self._refresh_character_label()
         self._refresh_characters()
+        settings_layout.addStretch()
+        settings_layout = voice_page
+        section(settings_layout, "Voice")
         voice_row = QHBoxLayout()
         self.auto_speak = QCheckBox("Speak replies")
         self.auto_speak.setChecked(settings.tts_enabled)
@@ -291,10 +371,9 @@ class CompanionWindow(QMainWindow):
         self.replay.clicked.connect(self._read_last_reply)
         audio_row.addWidget(self.replay)
         settings_layout.addLayout(audio_row)
-        self.voice_status = QLabel("Voice loads on first use")
-        self.voice_status.setObjectName("hint")
-        self.voice_status.setWordWrap(True)
-        layout.addWidget(self.voice_status)
+        self.voice_status = Note(self)
+        self.voice_status.hide()
+        self.voice_status.setText("Voice loads on first use")
         self.speech.changed.connect(self._voice_changed)
         self.speech.failed.connect(self._voice_failed)
         self.speech.spoken.connect(self._phrase_spoken)
@@ -303,6 +382,7 @@ class CompanionWindow(QMainWindow):
         self.volume.valueChanged.connect(self._volume_changed)
         self.delivery_rate.valueChanged.connect(self._delivery_changed)
 
+        section(settings_layout, "Microphone")
         mic_row = QHBoxLayout()
         self.mic_device = QComboBox()
         self.mic_device.setMinimumWidth(100)
@@ -339,6 +419,9 @@ class CompanionWindow(QMainWindow):
         self.speech_pause.setCurrentIndex(self.speech_pause.findData(settings.stt_pause_ms))
         pause_row.addWidget(self.speech_pause)
         settings_layout.addLayout(pause_row)
+        settings_layout.addStretch()
+        settings_layout = app_page
+        section(settings_layout, "Memory")
         self.use_memories = QCheckBox("Include relevant saved memories in online replies")
         self.use_memories.setChecked(settings.memory_enabled)
         self.use_memories.toggled.connect(self._memory_toggled)
@@ -347,9 +430,21 @@ class CompanionWindow(QMainWindow):
         memory_hint.setObjectName("hint")
         memory_hint.setWordWrap(True)
         settings_layout.addWidget(memory_hint)
+        section(settings_layout, "Window")
         self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
         self.close_to_tray.setChecked(settings.close_to_tray)
         settings_layout.addWidget(self.close_to_tray)
+        section(settings_layout, "Configuration")
+        reload_row = QHBoxLayout()
+        reload_hint = QLabel("Re-read .env and the character profile after editing them by hand.")
+        reload_hint.setObjectName("hint")
+        reload_hint.setWordWrap(True)
+        reload_row.addWidget(reload_hint, 1)
+        reload_row.addWidget(self.reload)
+        settings_layout.addLayout(reload_row)
+        settings_layout.addStretch()
+        settings_layout = avatar_page
+        section(settings_layout, "Desktop avatar")
         avatar_row = QHBoxLayout()
         self.show_avatar = QCheckBox("Show desktop avatar")
         self.show_avatar.setChecked(settings.avatar_enabled)
@@ -422,7 +517,9 @@ class CompanionWindow(QMainWindow):
             ('avatar_hair', 'Hair response', 20, 80, settings.avatar_hair, '%'),
         ):
             row = QHBoxLayout()
-            row.addWidget(QLabel(label))
+            name = QLabel(label)
+            name.setMinimumWidth(160)
+            row.addWidget(name)
             slider = QSlider(Qt.Orientation.Horizontal)
             slider.setRange(lower, upper)
             slider.setValue(value)
@@ -457,108 +554,242 @@ class CompanionWindow(QMainWindow):
         self.avatar_preview_status.setObjectName('hint')
         self.avatar_preview_status.setWordWrap(True)
         settings_layout.addWidget(self.avatar_preview_status)
-        self.preference_status = QLabel("Character selection is saved automatically. Save defaults keeps further voice and app adjustments. API keys stay in .env.")
+        settings_layout.addStretch()
+        self.preference_status = QLabel("Changes apply now. Your model and character are remembered automatically; "
+                                        "Save defaults keeps everything else after restarting.")
         self.preference_status.setObjectName("hint")
         self.preference_status.setWordWrap(True)
-        settings_layout.addWidget(self.preference_status)
+        settings_outer.addWidget(self.preference_status)
         settings_actions = QHBoxLayout()
-        settings_actions.addWidget(self.reload)
         settings_actions.addStretch()
         self.save_defaults = QPushButton("Save defaults")
         self.save_defaults.clicked.connect(self._save_preferences)
         settings_actions.addWidget(self.save_defaults)
         done = QPushButton("Done")
+        done.setObjectName("primary")
         done.clicked.connect(self.settings_dialog.hide)
         settings_actions.addWidget(done)
         settings_outer.addLayout(settings_actions)
 
-        talk_row = QHBoxLayout()
-        self.record_button = QPushButton("Hold to talk")
-        self.record_button.setToolTip("Hold to record, release to transcribe. Maximum 60 seconds.")
+        self.transcript = ChatView()
+        self.transcript.suggestion.connect(self._use_suggestion)
+        layout.addWidget(self.transcript, 1)
+
+        self.composer = QFrame()
+        self.composer.setObjectName("composer")
+        composer_layout = QVBoxLayout(self.composer)
+        composer_layout.setContentsMargins(16, 12, 10, 10)
+        composer_layout.setSpacing(6)
+        self._pending_files: list[str] = []
+        self.attachment_tray = QWidget()
+        self.attachment_row = QHBoxLayout(self.attachment_tray)
+        self.attachment_row.setContentsMargins(0, 0, 0, 4)
+        self.attachment_row.setSpacing(8)
+        self.attachment_row.addStretch()
+        self.attachment_tray.hide()
+        composer_layout.addWidget(self.attachment_tray)
+        self.input = MessageInput()
+        self.input.setObjectName("input")
+        self.input.setPlaceholderText(f"Message {settings.name}…")
+        self.input.submitted.connect(self._send)
+        self.input.files_added.connect(self._add_attachments)
+        self.input.installEventFilter(self)
+        composer_layout.addWidget(self.input)
+        tools = QHBoxLayout()
+        tools.setSpacing(4)
+        self.attach_button = icon_button("attach", "Attach images or files · you can also paste or drag them in")
+        self.attach_button.clicked.connect(self._choose_attachments)
+        tools.addWidget(self.attach_button)
+        self.record_button = icon_button("mic", "Hold to talk · or press Ctrl+Alt+Space · up to 60 seconds")
         self.record_button.pressed.connect(self._begin_recording)
         self.record_button.released.connect(self._finish_recording)
-        talk_row.addWidget(self.record_button)
-        self.hands_free = QPushButton("Hands-free")
-        self.hands_free.setCheckable(True)
-        self.hands_free.setToolTip("Listen for a turn, pause during replies, then listen again. Starts off each session.")
+        tools.addWidget(self.record_button)
+        self.hands_free = icon_button(
+            "handsfree", "Hands-free: listen for a turn, pause during replies, then listen again", checkable=True)
         self.hands_free.toggled.connect(self._handsfree_toggled)
-        talk_row.addWidget(self.hands_free)
+        tools.addWidget(self.hands_free)
         self.mic_level = QProgressBar()
         self.mic_level.setRange(0, 100)
         self.mic_level.setValue(0)
         self.mic_level.setTextVisible(False)
-        self.mic_level.setMaximumWidth(100)
-        talk_row.addWidget(self.mic_level)
-        talk_row.addStretch()
-        self.suspend_button = QPushButton("Suspend")
-        self.suspend_button.clicked.connect(self.toggle_suspended)
-        talk_row.addWidget(self.suspend_button)
-        layout.addLayout(talk_row)
-        self.mic_hint = QLabel("Hold to talk · Ctrl+Alt+Space toggles recording · 60-second limit")
-        self.mic_hint.setObjectName("hint")
-        self.mic_hint.setWordWrap(True)
+        self.mic_level.setFixedWidth(90)
+        self.mic_level.hide()
+        tools.addSpacing(6)
+        tools.addWidget(self.mic_level, 0, Qt.AlignmentFlag.AlignVCenter)
+        tools.addStretch()
+        self.stop_button = icon_button("stop", "Stop the reply, voice or recording")
+        repolish(self.stop_button, danger=True)
+        self.stop_button.setEnabled(False)
+        self.stop_button.hide()
+        self.stop_button.clicked.connect(self._stop)
+        tools.addWidget(self.stop_button)
+        self.send_button = icon_button("send", "Send · Enter (Shift+Enter for a new line)", name="send")
+        self.send_button.clicked.connect(self._send)
+        tools.addWidget(self.send_button)
+        composer_layout.addLayout(tools)
+        layout.addWidget(self.composer)
+        self.setAcceptDrops(True)
+        self.drop_hint = QWidget(self.centralWidget())
+        self.drop_hint.setObjectName("dropHint")
+        self.drop_hint.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.drop_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        drop_layout = QVBoxLayout(self.drop_hint)
+        drop_text = QLabel(f"Drop images or files to share with {settings.name}")
+        drop_text.setObjectName("dropText")
+        drop_layout.addWidget(drop_text, 0, Qt.AlignmentFlag.AlignCenter)
+        self.drop_hint.hide()
+
+        self.footer = QLabel()
+        self.footer.setObjectName("footer")
+        self.footer.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.footer)
+        self._fresh_note, self._fresh_until = "", 0.0
+        self._footer_timer = QTimer(self)
+        self._footer_timer.setSingleShot(True)
+        self._footer_timer.timeout.connect(self._refresh_footer)
+        self.mic_hint = Note(self)
+        self.mic_hint.hide()
+        self.mic_status = Note(self)
+        self.mic_status.hide()
+        self.privacy = Note(self)
+        self.privacy.hide()
+        for note in (self.mic_hint, self.mic_status, self.privacy, self.voice_status):
+            note.updated.connect(self._note_updated)
+        self.mic_hint.setText("Enter to send · Hold the mic or press Ctrl+Alt+Space to talk")
         self._manual_mic_hint = self.mic_hint.text()
-        layout.addWidget(self.mic_hint)
-        self.mic_status = QLabel("Microphone off")
-        self.mic_status.setObjectName("hint")
-        self.mic_status.setWordWrap(True)
-        layout.addWidget(self.mic_status)
+        self.mic_status.setText("Microphone off")
+        self.privacy.setText(self._privacy_text())
         self.microphone.changed.connect(self._mic_changed)
         self.microphone.transcribed.connect(self._on_transcribed)
         self.microphone.failed.connect(self._mic_failed)
         self.microphone.devices.connect(self._mic_devices)
         self.microphone.level.connect(self.mic_level.setValue)
-        self.transcript = QTextBrowser()
-        self.transcript.setOpenLinks(False)
-        self.transcript.setUndoRedoEnabled(False)
-        layout.addWidget(self.transcript, 1)
-        self.input = MessageInput()
-        self.input.setPlaceholderText("What's on your mind?")
-        self.input.setFixedHeight(104)
-        self.input.submitted.connect(self._send)
-        layout.addWidget(self.input)
-        controls = QHBoxLayout()
-        hint = QLabel("Enter to send · Shift+Enter for a new line")
-        hint.setObjectName("hint")
-        controls.addWidget(hint)
-        controls.addStretch()
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.setEnabled(False)
-        self.stop_button.clicked.connect(self._stop)
-        controls.addWidget(self.stop_button)
-        self.send_button = QPushButton("Send")
-        self.send_button.setObjectName("send")
-        self.send_button.clicked.connect(self._send)
-        controls.addWidget(self.send_button)
-        layout.addLayout(controls)
-        self.privacy = QLabel(self._privacy_text())
-        self.privacy.setObjectName("hint")
-        self.privacy.setWordWrap(True)
-        layout.addWidget(self.privacy)
+
+        self.speak_toggle.setChecked(settings.tts_enabled)
+        self._speak_glyph(settings.tts_enabled)
+        self.speak_toggle.toggled.connect(self.auto_speak.setChecked)
+        self.auto_speak.toggled.connect(self.speak_toggle.setChecked)
+        self.auto_speak.toggled.connect(self._speak_glyph)
         self._restore_conversation(self._conversation_id)
         self.avatar = AvatarController(self)
         self.input.setFocus()
 
-    def _write(self, text: str, color: str = "#e9eaf0", bold: bool = False) -> QTextCursor:
-        cursor = self.transcript.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor(color))
-        fmt.setFontWeight(QFont.Weight.DemiBold if bold else QFont.Weight.Normal)
-        cursor.insertText(text, fmt)
-        self.transcript.setTextCursor(cursor)
-        self.transcript.ensureCursorVisible()
-        return cursor
+    def eventFilter(self, watched, event):
+        if watched is self.input and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+            repolish(self.composer, focused=event.type() == QEvent.Type.FocusIn)
+        return super().eventFilter(watched, event)
+
+    def _speak_glyph(self, enabled):
+        self.speak_toggle.setText(ICONS["speaker" if enabled else "muted"])
+        self.speak_toggle.setToolTip("Speaking replies aloud · click to mute" if enabled else "Replies are muted · click to speak them")
+
+    @Slot(str)
+    def _use_suggestion(self, text):
+        if self._worker or self.microphone.busy or self.suspended:
+            return
+        self.input.setPlainText(text)
+        self._send()
+
+    @Slot()
+    def _choose_attachments(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, "Share images or files", str(Path.home()), attachments.FILE_FILTER)
+        self._add_attachments(paths)
+
+    @Slot(list)
+    def _add_attachments(self, paths):
+        problems = []
+        for path in paths:
+            path = str(Path(path))
+            if path in self._pending_files:
+                continue
+            if len(self._pending_files) >= attachments.MAX_FILES:
+                problems.append(f"Attach up to {attachments.MAX_FILES} files per message.")
+                break
+            try:
+                attachments.classify(path)
+            except (OSError, attachments.AttachmentError) as exc:
+                problems.append(str(exc))
+                continue
+            self._pending_files.append(path)
+        self._render_attachments()
+        if problems:
+            self._flash(" ".join(problems))
+        self.input.setFocus()
+
+    @Slot(str)
+    def _remove_attachment(self, path):
+        if path in self._pending_files:
+            self._pending_files.remove(path)
+        self._render_attachments()
+
+    def _render_attachments(self):
+        while self.attachment_row.count() > 1:
+            widget = self.attachment_row.takeAt(0).widget()
+            if widget is not None:
+                widget.hide()
+                widget.deleteLater()
+        for path in self._pending_files:
+            kind = "file"
+            try:
+                kind, _ = attachments.classify(path)
+            except (OSError, attachments.AttachmentError):
+                pass
+            card = AttachmentCard({"name": Path(path).name, "kind": kind, "path": path}, thumbnail=40, removable=True)
+            card.removed.connect(self._remove_attachment)
+            self.attachment_row.insertWidget(self.attachment_row.count() - 1, card)
+        self.attachment_tray.setVisible(bool(self._pending_files))
+
+    def _flash(self, text):
+        self._fresh_note, self._fresh_until = text, time.monotonic() + 8
+        self._footer_timer.start(8000)
+        self._refresh_footer()
+
+    def _dropped_files(self, event):
+        return [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+
+    def dragEnterEvent(self, event):
+        if self._dropped_files(event) and not self.suspended:
+            event.acceptProposedAction()
+            self.drop_hint.setGeometry(self.centralWidget().rect().adjusted(14, 14, -14, -14))
+            self.drop_hint.raise_()
+            self.drop_hint.show()
+
+    def dragLeaveEvent(self, event):
+        self.drop_hint.hide()
+
+    def dropEvent(self, event):
+        self.drop_hint.hide()
+        files = self._dropped_files(event)
+        if files:
+            event.acceptProposedAction()
+            self._add_attachments(files)
+
+    @Slot(str)
+    def _note_updated(self, text):
+        if text not in IDLE_NOTES and text != self._privacy_text() and self.sender() is not self.mic_hint:
+            self._fresh_note, self._fresh_until = text, time.monotonic() + 8
+            self._footer_timer.start(8000)
+        self._refresh_footer()
+
+    def _refresh_footer(self):
+        if not hasattr(self, "footer"):
+            return
+        if self.microphone.busy or self.hands_free.isChecked():
+            text = self.mic_status.text()
+        elif self._fresh_note and time.monotonic() < self._fresh_until:
+            text = self._fresh_note
+        elif self.speech.busy and self.voice_status.text() not in IDLE_NOTES:
+            text = self.voice_status.text()
+        else:
+            text = self.mic_hint.text()
+        self.footer.setText(text)
+        self.footer.setToolTip(self.privacy.text())
 
     def _welcome(self) -> None:
-        self._write("Start a conversation\n", "#c4baff", True)
-        self._write(
-            f"Type a message to {self.settings.name}. Recent messages stay in context "
-            "and are saved locally. Use /remember to save a preference across conversations.\n\n", "#a4adbf"
-        )
+        self.transcript.show_welcome(self.settings.name)
         if self.settings.missing_key():
             self.status.setText("Add API key")
-            self._write("Setup: add your OpenRouter key to .env, then open Settings and reload .env.\n", "#d6be8c")
+            self.transcript.add_note("Setup: add your OpenRouter key to .env, then open Settings and reload .env.", "warning")
         else:
             self.status.setText("Ready")
 
@@ -577,9 +808,10 @@ class CompanionWindow(QMainWindow):
     @Slot()
     def _send(self) -> None:
         text = self.input.toPlainText().strip()
-        if self._closing or self.suspended or self._worker or self.microphone.busy or not text:
+        files = list(self._pending_files)
+        if self._closing or self.suspended or self._worker or self.microphone.busy or not (text or files):
             return
-        if self._local_command(text):
+        if not files and self._local_command(text):
             return
         try:
             self.settings.validate_connection()
@@ -596,14 +828,23 @@ class CompanionWindow(QMainWindow):
         if self._active_turn and not self._save_active_turn():
             return
         try:
+            stored = attachments.store(files) if files else []
+        except (OSError, attachments.AttachmentError) as exc:
+            self._flash(f"Could not attach: {exc}" if isinstance(exc, attachments.AttachmentError)
+                        else "An attachment could not be copied. Check the file and try again.")
+            return
+        try:
             turns = self.store.context_turns(self._conversation_id)
             summary = self.store.summary(self._conversation_id)
             recent_topics = "\n".join(message["content"] for message in self._messages[-4:] if message["role"] == "user")
             memories = self.store.relevant_memories(recent_topics[-4000:] + "\n" + text) if self.use_memories.isChecked() else []
-            turn = self.store.start_turn(self._conversation_id, text)
+            turn = self.store.start_turn(self._conversation_id, text, stored)
         except sqlite3.Error:
+            attachments.remove_files(stored)
             self.privacy.setText("Could not save this message. No request was sent. Please try again.")
             return
+        self._pending_files.clear()
+        self._render_attachments()
         self._active_turn = turn
         self._reply_status, self._reply_notice = "pending", ""
         self._spoken_phrases = []
@@ -611,13 +852,13 @@ class CompanionWindow(QMainWindow):
         self._voice_message = None
         self._voice_message_id = None
         self._pending_transcription = ""
-        self._messages.append({"role": "user", "content": text})
-        context = [*recent_messages(turns), {"role": "user", "content": text}]
+        self._messages.append({"role": "user", "content": "\n".join(part for part in (text, attachments.note(stored)) if part)})
+        # Only this turn carries the files themselves; history keeps a short note about them.
+        context = [*recent_messages(turns), {"role": "user", "content": text, "attachments": stored}]
         self.input.clear()
         self._reply = ""
-        self._write("\nYou\n", "#91c9d4", True)
-        self._write(text + "\n\n")
-        self._write(self.settings.name + "\n", "#c4baff", True)
+        self.transcript.add_message("user", "You", text, attachments=stored)
+        self.transcript.begin_reply(self.settings.name)
         prompt = reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None)
         self._worker_kind = "reply"
         worker = ReplyWorker(replace(self.settings, system_prompt=prompt), context, self)
@@ -644,6 +885,7 @@ class CompanionWindow(QMainWindow):
         busy = self._worker is not None or self.microphone.busy or self.suspended
         self.send_button.setEnabled(not busy)
         self.input.setEnabled(not self.microphone.busy)
+        self.attach_button.setEnabled(not self.suspended and not self.microphone.busy)
         self._refresh_stop_button()
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
@@ -672,6 +914,7 @@ class CompanionWindow(QMainWindow):
                                       '_preview_active', False))
         self.stop_button.setEnabled(self._worker is not None or self.microphone.busy or self.speech.busy
                                     or self.hands_free.isChecked() or preview_active)
+        self.stop_button.setVisible(self.stop_button.isEnabled())
 
     def _refresh_activity(self) -> None:
         state = activity_state(
@@ -683,6 +926,19 @@ class CompanionWindow(QMainWindow):
         if state != self.activity:
             self.activity = state
             self.activity_changed.emit(state)
+        self.status_dot.setStyleSheet(f"color: {ACTIVITY_COLORS.get(state, ACTIVITY_COLORS['ready'])}; font-size: 9px;")
+        self.status_pill.setToolTip(self._model_label())
+        self._refresh_footer()
+
+    def _model_label(self) -> str:
+        provider = self.settings.llm_provider
+        if provider == "claude":
+            from .claude_backend import CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL
+            model = self.settings.claude_model or DEFAULT_CLAUDE_MODEL
+            return "Replying with " + dict((key, name) for name, key in CLAUDE_MODELS).get(model, model)
+        if provider == "codex":
+            return "Replying with ChatGPT via Codex" + (f" · {self.settings.codex_model}" if self.settings.codex_model else "")
+        return "Replying with OpenRouter · " + self.settings.model
 
     @Slot(str, str)
     def _on_chunk(self, turn_id: str, text: str) -> None:
@@ -699,7 +955,7 @@ class CompanionWindow(QMainWindow):
         self.status.setText("Replying…")
         self._reply += text
         self._refresh_activity()
-        self._write(text)
+        self.transcript.append_reply(text)
         if not self._save_timer.isActive():
             self._save_timer.start()
         if self._streaming_voice:
@@ -738,12 +994,8 @@ class CompanionWindow(QMainWindow):
             self._messages.pop()  # Do not carry an unanswered failed turn into the next request.
         self._save_timer.stop()
         self._save_active_turn()
-        if worker.error:
-            self._write("\n\n" + worker.error + "\n", "#ecb2af")
-        elif interrupted:
-            self._write("\n[Reply stopped]\n", "#a4adbf")
-        else:
-            self._write("\n")
+        self.transcript.end_reply(notice="Reply stopped" if interrupted and not worker.error else "",
+                                  error=worker.error)
         self._worker = None
         worker.deleteLater()
         if worker.error:
@@ -831,7 +1083,7 @@ class CompanionWindow(QMainWindow):
         self._apply_settings(settings, retry_voice=True)
         if conversation != self._conversation_id:
             self._restore_conversation(conversation)
-        self._write("\nSettings reloaded.\n", "#a4adbf")
+        self.transcript.add_note("Settings reloaded.")
         self.preference_status.setText("Reloaded .env and the character profile, with saved app preferences.")
 
     def _apply_settings(self, settings, *, retry_voice=False):
@@ -875,6 +1127,8 @@ class CompanionWindow(QMainWindow):
             self.mic_device.addItem(settings.stt_microphone, settings.stt_microphone)
             self.mic_device.setCurrentIndex(1)
         self.title.setText(settings.name)
+        self.seal.setText(SEALS.get(settings.name.lower(), ""))
+        self.input.setPlaceholderText(f"Message {settings.name}…")
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
         self.status.setText("Add API key" if settings.missing_key() else "Ready")
         self._activity_error = False
@@ -1159,6 +1413,7 @@ class CompanionWindow(QMainWindow):
             self.microphone.shutdown()
             self.speech.shutdown()
         self.suspend_button.setText("Resume" if self.suspended else "Suspend")
+        self.suspend_button.setIcon(glyph_icon("play" if self.suspended else "pause"))
         self._set_busy(self._worker is not None)
         self.suspended_changed.emit(self.suspended)
 
@@ -1473,7 +1728,12 @@ class CompanionWindow(QMainWindow):
         self.mic_status.setText(labels.get(state, "Microphone off"))
         if self._handsfree_capture and state == "recording":
             self.mic_status.setText(f"Speech detected… A {self.speech_pause.currentData() / 1000:g}-second pause finishes this turn.")
-        self.record_button.setText("Finish recording" if not self._handsfree_capture and state in {"opening", "recording"} else "Hold to talk")
+        manual = not self._handsfree_capture and state in {"opening", "recording"}
+        self.record_button.setToolTip("Release to finish · or press Ctrl+Alt+Space" if manual
+                                      else "Hold to talk · or press Ctrl+Alt+Space · up to 60 seconds")
+        self.record_button.setText(ICONS["mic_live" if state in {"opening", "recording", "listening"} else "mic"])
+        repolish(self.record_button, live=state in {"opening", "recording", "listening"})
+        self.mic_level.setVisible(state in {"opening", "recording", "listening"})
         self._refresh_controls()
         if state != "idle":
             self.status.setText("Listening…" if state in {"opening", "listening", "recording"} else "Transcribing…")
@@ -1564,14 +1824,11 @@ class CompanionWindow(QMainWindow):
         self._messages = context
         for row in rows:
             name = "You" if row["role"] == "user" else self.settings.name
-            color = "#91c9d4" if row["role"] == "user" else "#c4baff"
-            self._write("\n" + name + "\n", color, True)
-            self._write(row["display"] + "\n")
             notice = row["notice"]
             if row["status"] == "pending":
                 notice = "Interrupted during a previous session"
-            if notice:
-                self._write("[" + notice + "]\n", "#a4adbf")
+            self.transcript.add_message(row["role"], name, row["display"], notice or "",
+                                        attachments=attachments.loads(row.get("attachments", "")))
             if row["role"] == "assistant" and row["display"] and row["status"] != "local":
                 self._last_reply = row["display"]
                 self._last_reply_id = row["id"]
@@ -1604,6 +1861,8 @@ class CompanionWindow(QMainWindow):
         if pending:
             state += f" · {pending} older {'exchange' if pending == 1 else 'exchanges'} to summarize in Context"
         self.context_hint.setText(state)
+        self.context_button.setText(f"Context · {pending} older to summarize" if pending else "Context and summary")
+        self.context_button.setToolTip(state)
 
     @Slot()
     def _open_summary(self) -> None:
@@ -1767,7 +2026,7 @@ class CompanionWindow(QMainWindow):
                 deleted = self.store.delete_memory(int(argument))
                 response = "Deleted that saved memory. Conversation messages are kept separately." if deleted else "No saved memory has that number."
         except ValueError as exc:
-            self._write("\n" + str(exc) + "\n", "#d6be8c")
+            self.transcript.add_note(str(exc), "warning")
             return True
         except sqlite3.Error:
             self.privacy.setText("The memory command could not be saved. Please try again.")
@@ -1777,9 +2036,7 @@ class CompanionWindow(QMainWindow):
         except sqlite3.Error:
             self.privacy.setText("Memory changed, but its confirmation could not be saved to History.")
         self.input.clear()
-        self._write("\nYou\n", "#91c9d4", True)
-        self._write(text + "\n\n")
-        self._write(self.settings.name + "\n", "#c4baff", True)
-        self._write(response + "\n")
+        self.transcript.add_message("user", "You", text)
+        self.transcript.add_message("assistant", self.settings.name, response)
         return True
 

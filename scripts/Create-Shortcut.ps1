@@ -1,6 +1,12 @@
-param([string]$Destination = [Environment]::GetFolderPath('Desktop'))
+param(
+    [string]$Destination = [Environment]::GetFolderPath('Desktop'),
+    [string]$Name = 'Jingliu',
+    # The per-user Start menu is what Windows Search and the Start menu's app list index.
+    [switch]$StartMenu
+)
 
 $ErrorActionPreference = 'Stop'
+if ($StartMenu) { $Destination = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs' }
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $pythonWindowed = Join-Path $projectRoot '.venv\Scripts\pythonw.exe'
 $launchScript = Join-Path $projectRoot 'launch_mira.pyw'
@@ -10,7 +16,7 @@ try {
     if (-not (Test-Path -LiteralPath $pythonWindowed -PathType Leaf)) { throw 'Run Setup Mira.cmd before creating the shortcut.' }
     if (-not (Test-Path -LiteralPath $launchScript -PathType Leaf)) { throw 'launch_mira.pyw is missing. Restore the project files.' }
     if (-not $Destination -or -not (Test-Path -LiteralPath $Destination -PathType Container)) { throw 'The shortcut destination folder does not exist.' }
-    $shortcutPath = Join-Path $Destination 'Mira Desktop Companion.lnk'
+    $shortcutPath = Join-Path $Destination ($Name + '.lnk')
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($shortcutPath)
     $arguments = '"' + $launchScript + '"'
@@ -21,8 +27,8 @@ try {
     $shortcut.TargetPath = $pythonWindowed
     $shortcut.Arguments = $arguments
     $shortcut.WorkingDirectory = $projectRoot
-    $shortcut.Description = 'Open the desktop companion from this project folder'
-    $shortcut.IconLocation = (Join-Path $projectRoot 'assets\mira.ico') + ',0'
+    $shortcut.Description = 'Jingliu, your desktop companion'
+    $shortcut.IconLocation = (Join-Path $projectRoot 'assets\jingliu.ico') + ',0'
     $shortcut.Save()
     Write-Host ('Shortcut ready: ' + $shortcutPath)
     Write-Host 'Keep this project folder in place. If you move it, recreate the shortcut.'

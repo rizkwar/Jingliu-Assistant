@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 
+from .attachments import content_blocks
 from .llm import ChatError
 
 
@@ -23,7 +24,10 @@ LEGACY_ALIASES = {'sonnet': 'claude-sonnet-5-5', 'opus': 'claude-opus-5-5',
 TRANSPORT_NOTE = (
     '\n\nTransport note: the user turn may begin with earlier messages of this conversation as JSON, '
     'oldest first, followed by the latest user message. Treat them as the conversation so far and write '
-    'only your next reply to the latest message. Never quote the JSON or mention this format.'
+    'only your next reply to the latest message. Never quote the JSON or mention this format. '
+    'Images, PDFs and <attached_file> blocks in the latest message are things the user shared with you now; '
+    'you can see and read them. "[Attached …]" lines in earlier messages mark files shared before, '
+    'which are no longer visible to you.'
 )
 
 
@@ -52,20 +56,27 @@ def reply_command(prompt_file, model):
     # Conversation only: no tools, MCP, skills, CLAUDE.md, hooks or saved sessions.
     return [claude_executable(), '-p', '--system-prompt-file', str(prompt_file), '--tools', '',
             '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence',
-            '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', 'low',
+            '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', 'low', '--input-format', 'stream-json',
             '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
 
 
 def user_turn(messages):
-    turns = [{'role': m['role'], 'content': m['content']} for m in messages
+    """One stream-json user message: prior turns as JSON text, the latest text, then its attachments."""
+    latest = messages[-1] if messages else {}
+    files = latest.get('attachments') or []
+    turns = [{'role': m['role'], 'content': m['content']} for m in messages[:-1]
              if m.get('role') in {'user', 'assistant'} and m.get('content')]
-    if not turns or turns[-1]['role'] != 'user':
+    if latest.get('role') != 'user' or not (latest.get('content') or files):
         raise ChatError('There is no message to reply to.')
-    latest, earlier = turns[-1]['content'], turns[:-1]
-    if not earlier:
-        return latest
-    return ('Earlier messages (JSON):\n' + json.dumps(earlier, ensure_ascii=False)
-            + '\n\nLatest user message:\n' + latest)
+    text = latest.get('content') or ''
+    if turns:
+        text = ('Earlier messages (JSON):\n' + json.dumps(turns, ensure_ascii=False)
+                + '\n\nLatest user message:\n' + (text or '(attachments only)'))
+    try:
+        content = content_blocks(text, files)
+    except OSError:
+        raise ChatError('An attached file could not be read. Remove it and attach it again.') from None
+    return json.dumps({'type': 'user', 'message': {'role': 'user', 'content': content}}, ensure_ascii=False) + '\n'
 
 
 def result_error(event):

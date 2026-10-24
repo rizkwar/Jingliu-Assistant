@@ -35,7 +35,7 @@ def api_error(status: int | None, payload: object) -> ChatError:
         401: "OpenRouter rejected the API key. Check OPENROUTER_API_KEY in .env.",
         402: "OpenRouter reported insufficient credits or an account limit.",
         403: "OpenRouter denied this request. Check your account's model and privacy settings.",
-        404: "This model is unavailable. Check OPENROUTER_MODEL in .env.",
+        404: "This model is unavailable, or it can't read the attached images or files. Check OPENROUTER_MODEL in .env.",
         429: "OpenRouter's rate limit was reached. Wait a little, then try again.",
         502: "The model provider had a problem. Try again shortly.",
         503: "No provider is available for this model right now. Try again shortly.",
@@ -48,6 +48,24 @@ def api_error(status: int | None, payload: object) -> ChatError:
         if isinstance(error, dict) and isinstance(error.get("message"), str):
             detail = error["message"][:400]
     return ChatError(detail or f"OpenRouter returned an unexpected response (status {status}).")
+
+
+def openrouter_message(message):
+    """OpenAI-style content parts for a message with attachments; plain messages pass through."""
+    files = message.get("attachments")
+    if not files:
+        return {"role": message["role"], "content": message["content"]}
+    from .attachments import encoded, read_text
+    parts = [{"type": "text", "text": message.get("content") or "(See the attached files.)"}]
+    for item in files:
+        if item["kind"] == "image":
+            parts.append({"type": "image_url", "image_url": {"url": f"data:{item['mime']};base64,{encoded(item)}"}})
+        elif item["kind"] == "pdf":
+            parts.append({"type": "file", "file": {"filename": item["name"],
+                                                   "file_data": f"data:application/pdf;base64,{encoded(item)}"}})
+        else:
+            parts.append({"type": "text", "text": read_text(item)})
+    return {"role": message["role"], "content": parts}
 
 
 async def stream_reply(
@@ -66,9 +84,13 @@ async def stream_reply(
         async for text in stream_claude(settings, messages):
             yield text
         return
+    try:
+        turns = [openrouter_message(message) for message in messages]
+    except OSError as exc:
+        raise ChatError("An attached file could not be read. Remove it and attach it again.") from exc
     payload = {
         "model": settings.model,
-        "messages": [{"role": "system", "content": settings.system_prompt}, *messages],
+        "messages": [{"role": "system", "content": settings.system_prompt}, *turns],
         "stream": True,
         "max_tokens": 4096,
         "temperature": 0.7,

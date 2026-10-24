@@ -7,12 +7,13 @@ import re
 import sqlite3
 from uuid import uuid4
 
+from . import attachments
 from .config import PROJECT_ROOT
 from .continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 STOP_WORDS = set("a an and are as at be been but by can do for from have how i in is it me my of on or that the this to was we what with you your".split())
 
 
@@ -69,6 +70,10 @@ class Store:
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(conversations)")}
             if "character_key" not in columns:
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN character_key TEXT NOT NULL DEFAULT ''")
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(messages)")}
+            if "attachments" not in columns:
+                # JSON list of locally stored copies; the files live under data/attachments.
+                self.connection.execute("ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT ''")
             self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def close(self):
@@ -103,8 +108,12 @@ class Store:
         return conversation_id
 
     def delete_conversation(self, conversation_id):
+        stored = [item for row in self.connection.execute(
+            "SELECT attachments FROM messages WHERE conversation_id=? AND attachments!=''", (conversation_id,))
+            for item in attachments.loads(row["attachments"])]
         with self.connection:
             self.connection.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
+        attachments.remove_files(stored)
 
     def touch_conversation(self, conversation_id):
         with self.connection:
@@ -168,18 +177,21 @@ class Store:
         with self.connection:
             self.connection.execute("DELETE FROM conversation_summaries WHERE conversation_id=?", (conversation_id,))
 
-    def start_turn(self, conversation_id, text):
+    def start_turn(self, conversation_id, text, files=()):
         timestamp = now()
+        # Later turns see a short note about attachments instead of their contents.
+        context = "\n".join(part for part in (text, attachments.note(files)) if part)
         with self.connection:
             user = self.connection.execute(
-                "INSERT INTO messages(conversation_id,role,display,context,status,created_at) VALUES (?,'user',?,?,'complete',?)",
-                (conversation_id, text, text, timestamp),
+                "INSERT INTO messages(conversation_id,role,display,context,status,created_at,attachments) "
+                "VALUES (?,'user',?,?,'complete',?,?)",
+                (conversation_id, text, context, timestamp, attachments.dumps(files)),
             ).lastrowid
             assistant = self.connection.execute(
                 "INSERT INTO messages(conversation_id,role,display,status,created_at) VALUES (?,'assistant','','pending',?)",
                 (conversation_id, timestamp),
             ).lastrowid
-            title = " ".join(text.split())[:64]
+            title = " ".join((text or ", ".join(item["name"] for item in files)).split())[:64]
             self.connection.execute(
                 "UPDATE conversations SET title=CASE WHEN title='New conversation' THEN ? ELSE title END, updated_at=? WHERE id=?",
                 (title, timestamp, conversation_id),

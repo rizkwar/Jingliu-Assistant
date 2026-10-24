@@ -14,7 +14,6 @@ class ConnectionPanel(QWidget):
         self.worker = None
         self.models = []
         layout = QVBoxLayout(self); layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel('Response model'))
         self.provider = QComboBox()
         self.provider.addItem('OpenRouter (API key)', 'openrouter')
         self.provider.addItem('Claude subscription via Claude Code', 'claude')

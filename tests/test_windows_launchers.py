@@ -120,7 +120,7 @@ class WindowsLauncherTests(unittest.TestCase):
     def test_shortcut_target_is_direct_and_foreign_shortcut_is_not_overwritten(self):
         result = self.powershell(self.root / "scripts" / "Create-Shortcut.ps1", "-Destination", self.root)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        shortcut = self.root / "Mira Desktop Companion.lnk"
+        shortcut = self.root / "Jingliu.lnk"
         self.assertTrue(shortcut.exists())
         inspector = self.root / "inspect.ps1"
         inspector.write_text('''param([string]$Link,[string]$OutputFile,[switch]$Foreign)

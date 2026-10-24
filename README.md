@@ -3,6 +3,32 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
+**Moonlit window design:** the chat window uses a Jingliu-inspired night-and-frost
+theme with message bubbles and formatted replies (bold, lists, code). Where the
+older guides below name a button:
+
+| Older name | Now |
+| --- | --- |
+| **New** | **+** in the top-right corner |
+| **History**, **Memories**, **Context**, **Settings**, **Suspend** | the **⋯** menu |
+| **Hold to talk** | the microphone in the message box (it turns red while listening) |
+| **Hands-free** | the headset button next to the microphone |
+| **Speak replies** | the speaker button in the header (also in Settings → Voice) |
+| **Stop** | the red stop button, shown only while something can be stopped |
+
+**Share images and files:** click the paperclip, paste a screenshot (Ctrl+V),
+or drag files onto the window. Up to six per message: images (PNG, JPG, GIF,
+WebP, BMP), PDFs, and text or code files. She sees them with that message;
+later messages keep a short "[Attached …]" note, so they are not resent each
+turn. Copies are kept locally in `data/attachments/` (Git-ignored) so they still
+show in History, and deleting a conversation deletes them too. Large images are
+downscaled first. With Claude, images and PDFs are read directly. OpenRouter
+needs a vision-capable model. Codex accepts images and text files, not PDFs.
+
+Status messages share one line under the message box. Settings is split into
+**Companion**, **Voice**, **Avatar** and **App** tabs. **Reload .env + character**
+is under **App**.
+
 The natural-animation upgrade is at **checkpoint 5: integrated into the assistant**.
 Open **Start Mira.cmd**, enable **Show desktop avatar** and **Animate avatar** in
 Settings, then move the cursor while she is idle. She occasionally glances toward
@@ -202,8 +228,10 @@ For a new installation:
 3. Add your OpenRouter key to `.env` locally, then double-click **Start Mira.cmd**.
    Setup copies `.env.example` only when `.env` is missing. It preserves an
    existing `.env`, your `data` folder, preferences, and model caches.
-4. Optionally double-click **Create Desktop Shortcut.cmd**. The shortcut opens
-   the companion directly without a console window. Start Mira.cmd may briefly show one.
+4. Optionally double-click **Add Jingliu to Start Menu.cmd**, then type
+   "Jingliu" in Windows Search or the Start menu to open her, or pin her from there.
+   **Create Desktop Shortcut.cmd** adds the same **Jingliu** shortcut to the desktop.
+   Both open the companion directly without a console window. Start Mira.cmd may briefly show one.
 
 Quit the companion before rerunning setup to repair or update dependencies. Setup refuses
 to delete a broken or incomplete `.venv`; rename that folder and rerun setup.

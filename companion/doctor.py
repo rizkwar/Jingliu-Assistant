@@ -123,8 +123,10 @@ def run_checks(root=ROOT, engines=False):
                 schema = connection.execute("PRAGMA user_version").fetchone()[0]
             finally:
                 connection.close()
-            checks.append(Check("error" if schema > 3 else "ok", "Conversation database",
-                                "Requires a newer app version." if schema > 3 else "Schema is compatible. No messages were read or changed."))
+            from .storage import SCHEMA_VERSION  # The store's own version, so upgrades never trip this check.
+            checks.append(Check("error" if schema > SCHEMA_VERSION else "ok", "Conversation database",
+                                "Requires a newer app version." if schema > SCHEMA_VERSION
+                                else "Schema is compatible. No messages were read or changed."))
         except sqlite3.Error:
             checks.append(Check("warning", "Conversation database", "Could not read the schema. Quit the companion and check again."))
     if engines and not missing_core:

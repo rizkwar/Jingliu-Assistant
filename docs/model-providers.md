@@ -93,8 +93,10 @@ checks passed for discovery, selection, saved choice, unchanged character and
 conversation, and immediate-close cancellation. Protocol tests cover final-only
 streaming, profile/context delivery, cancellation, failures and API-fallback refusal.
 
-**A live subscription reply and browser sign-in are not yet verified:** this
-assistant's isolated profile has not been signed in. Use the sign-in button for
-that account-dependent check. No model request was charged during verification.
+**Live subscription replies are verified** (Codex CLI 0.155.1, signed-in
+profile, default model): an in-character reply, and an image plus text file
+read in one turn (about 6 seconds each). Images are sent as `localImage` inputs,
+checked against the app-server protocol schema exported by that Codex version.
+PDFs are refused with a message suggesting Claude, before any request is sent.
 
 Suggested commit: `feat: add Codex subscription model selection`

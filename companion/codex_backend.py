@@ -155,10 +155,21 @@ async def stream_codex(settings, messages):
                   'Do not quote the JSON or explain the transport. Never output reasoning or tool commentary.',
                   'personality':'none', 'environments':[], 'dynamicTools':[], 'allowProviderModelFallback':False}
         if settings.codex_model: params['model'] = settings.codex_model
+        files = (messages[-1].get('attachments') or []) if messages else []
+        if any(item['kind'] == 'pdf' for item in files):
+            raise ChatError('PDFs are not supported with Codex here. Switch to Claude in Settings to share PDFs.')
+        history = [{'role':m['role'], 'content':m['content']} for m in messages]
+        try:
+            from .attachments import read_text
+            for item in files:
+                if item['kind'] == 'text': history[-1]['content'] += '\n\n' + read_text(item)
+        except OSError:
+            raise ChatError('An attached file could not be read. Remove it and attach it again.') from None
         response = await connection.rpc('thread/start', params)
         thread = response['thread']['id']
+        images = [{'type':'localImage', 'path':item['path']} for item in files if item['kind'] == 'image']
         await connection.rpc('turn/start', {'threadId':thread, 'input':[{'type':'text',
-            'text':json.dumps(messages, ensure_ascii=False), 'text_elements':[]}],
+            'text':json.dumps(history, ensure_ascii=False), 'text_elements':[]}, *images],
             'sandboxPolicy':{'type':'readOnly','networkAccess':False}})
         phases, streamed = {}, set()
         got_text = False

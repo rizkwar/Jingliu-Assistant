@@ -1,23 +1,14 @@
 """System tray integration; the window owns activity and graceful shutdown."""
 
-from PySide6.QtCore import QObject, Qt, Slot
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QObject, Slot
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+from .theme import moon_icon
 
 
 def companion_icon() -> QIcon:
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor("#b7a9ff"))
-    painter.drawEllipse(3, 3, 58, 58)
-    painter.setBrush(QColor("#191627"))
-    painter.drawEllipse(17, 25, 8, 12)
-    painter.drawEllipse(39, 25, 8, 12)
-    painter.end()
-    return QIcon(pixmap)
+    return moon_icon(64)
 
 
 class TrayController(QObject):

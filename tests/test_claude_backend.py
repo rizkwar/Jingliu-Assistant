@@ -71,9 +71,12 @@ class ClaudeBackendTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.prompt.startswith(SETTINGS.system_prompt))
         self.assertIn('Stable Jingliu character profile.', self.prompt)
         self.assertIn('Do not narrate actions', self.prompt)
-        sent = self.process.stdin.written.decode()
-        self.assertIn(json.dumps(history[:2], ensure_ascii=False), sent)
-        self.assertTrue(sent.endswith('Latest user message:\nContinue.'))
+        sent = json.loads(self.process.stdin.written.decode())
+        self.assertEqual(sent['type'], 'user')
+        text = sent['message']['content'][0]['text']
+        self.assertIn(json.dumps(history[:2], ensure_ascii=False), text)
+        self.assertTrue(text.endswith('Latest user message:\nContinue.'))
+        self.assertEqual(self.command[self.command.index('--input-format') + 1], 'stream-json')
         self.assertTrue(self.process.stdin.closed)
         for flag in ('--safe-mode', '--strict-mcp-config', '--no-session-persistence', '--disable-slash-commands'):
             self.assertIn(flag, self.command)
@@ -83,7 +86,29 @@ class ClaudeBackendTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_message_is_sent_plainly(self):
         await self.collect([delta('Yes.'), result()])
-        self.assertEqual(self.process.stdin.written.decode(), 'Hello')
+        sent = json.loads(self.process.stdin.written.decode())
+        self.assertEqual(sent['message']['content'], [{'type': 'text', 'text': 'Hello'}])
+
+    async def test_attachments_become_image_document_and_text_blocks(self):
+        import base64, tempfile
+        folder = Path(tempfile.mkdtemp())
+        (folder / 'a.png').write_bytes(b'png-bytes')
+        (folder / 'b.pdf').write_bytes(b'%PDF-1.4')
+        (folder / 'c.txt').write_text('notes <here>', encoding='utf-8')
+        files = [{'name': 'a.png', 'kind': 'image', 'mime': 'image/png', 'path': str(folder / 'a.png')},
+                 {'name': 'b.pdf', 'kind': 'pdf', 'mime': 'application/pdf', 'path': str(folder / 'b.pdf')},
+                 {'name': 'c.txt', 'kind': 'text', 'mime': 'text/plain', 'path': str(folder / 'c.txt')}]
+        await self.collect([delta('I see them.'), result()],
+                           messages=[{'role': 'user', 'content': '', 'attachments': files}])
+        content = json.loads(self.process.stdin.written.decode())['message']['content']
+        self.assertEqual([block['type'] for block in content], ['text', 'image', 'document', 'text'])
+        self.assertEqual(content[1]['source']['data'], base64.b64encode(b'png-bytes').decode())
+        self.assertEqual(content[2]['source']['media_type'], 'application/pdf')
+        self.assertIn('<attached_file name="c.txt">\nnotes <here>', content[3]['text'])
+        self.assertIn('Images, PDFs', self.prompt)
+        (folder / 'a.png').unlink()
+        with self.assertRaisesRegex(ChatError, 'could not be read'):
+            await self.collect([], messages=[{'role': 'user', 'content': 'Look', 'attachments': files}])
 
     async def test_failures_are_readable(self):
         cases = [([result(is_error=True, subtype='error', result='Not logged in · Please run /login')], 'not signed in'),

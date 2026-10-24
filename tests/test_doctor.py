@@ -90,6 +90,11 @@ class DoctorTests(unittest.TestCase):
         self.assertNotIn("a private conversation", str(checks))
         with closing(sqlite3.connect(path)) as db:
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            from companion.storage import SCHEMA_VERSION
+            db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")  # The current version must always pass.
+        result = next(item for item in run_checks(self.root) if item.name == "Conversation database")
+        self.assertEqual(result.status, "ok")
+        with closing(sqlite3.connect(path)) as db:
             db.execute("PRAGMA user_version=99")
         result = next(item for item in run_checks(self.root) if item.name == "Conversation database")
         self.assertEqual(result.status, "error")

@@ -30,7 +30,18 @@ def record_failure(stage, exception=None, root=ROOT):
         pass  # The message box still works if the project is read-only.
 
 
+def taskbar_identity():
+    # Its own taskbar group and icon, instead of being grouped under Python.
+    if sys.platform == "win32":
+        import ctypes
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Jingliu.DesktopCompanion")
+        except (AttributeError, OSError):
+            pass
+
+
 def launch():
+    taskbar_identity()
     try:
         from .doctor import run_checks
         errors = [check for check in run_checks() if check.status == "error"]
