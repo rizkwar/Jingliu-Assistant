@@ -29,7 +29,11 @@ class DoctorTests(unittest.TestCase):
     def test_missing_key_is_only_a_warning_and_report_contains_no_secrets(self):
         checks = run_checks(self.root)
         self.assertFalse(any(item.status == "error" for item in checks))
-        self.assertEqual(next(item for item in checks if item.name == "API configuration").status, "warning")
+        # The default Claude subscription needs no key.
+        self.assertEqual(next(item for item in checks if item.name == "API configuration").status, "ok")
+        (self.root / "data").mkdir(exist_ok=True)
+        (self.root / "data" / "preferences.json").write_text(json.dumps({"version": 1, "settings": {"llm_provider": "openrouter"}}))
+        self.assertEqual(next(item for item in run_checks(self.root) if item.name == "API configuration").status, "warning")
         (self.root / ".env").write_text("OPENROUTER_API_KEY=private-key-value\n")
         report = json.dumps([asdict(item) for item in run_checks(self.root)])
         self.assertNotIn("private-key-value", report)

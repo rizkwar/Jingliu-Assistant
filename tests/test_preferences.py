@@ -110,6 +110,13 @@ class PreferenceTests(unittest.TestCase):
 
     def test_provider_choice_and_hd_quality_persist_without_changing_personality_or_keys(self):
         self.preferences.save(replace(DEFAULTS,llm_provider='codex',codex_model='chosen-model',avatar_hd=False))
+        self.preferences.remember(replace(DEFAULTS,llm_provider='claude',claude_model='claude-sonnet-5-5',tts_volume=5),
+                                  ('llm_provider','claude_model'))
+        remembered=self.preferences.load(DEFAULTS)
+        self.assertEqual((remembered.llm_provider,remembered.claude_model),('claude','claude-sonnet-5-5'))
+        self.assertFalse(remembered.avatar_hd)  # Earlier saved choices are kept...
+        self.assertNotEqual(remembered.tts_volume,5)  # ...and unsaved ones are not written.
+        self.preferences.save(replace(DEFAULTS,llm_provider='codex',codex_model='chosen-model',avatar_hd=False))
         loaded=Preferences(self.path).load(DEFAULTS)
         self.assertEqual((loaded.llm_provider,loaded.codex_model,loaded.avatar_hd),('codex','chosen-model',False))
         self.assertEqual(loaded.system_prompt,DEFAULTS.system_prompt)

@@ -556,7 +556,7 @@ class CompanionWindow(QMainWindow):
             f"Type a message to {self.settings.name}. Recent messages stay in context "
             "and are saved locally. Use /remember to save a preference across conversations.\n\n", "#a4adbf"
         )
-        if self.settings.llm_provider == 'openrouter' and not self.settings.api_key:
+        if self.settings.missing_key():
             self.status.setText("Add API key")
             self._write("Setup: add your OpenRouter key to .env, then open Settings and reload .env.\n", "#d6be8c")
         else:
@@ -567,7 +567,12 @@ class CompanionWindow(QMainWindow):
         self._end_handsfree()
         self._interrupt_speech()
         self.settings = replace(self.settings, **self.connection.values())
-        self.status.setText('Ready' if self.settings.llm_provider == 'codex' or self.settings.api_key else 'Add API key')
+        self.status.setText('Add API key' if self.settings.missing_key() else 'Ready')
+        try:
+            # The response model is remembered immediately; other settings still wait for Save defaults.
+            self.preferences.remember(self.settings, ('llm_provider', 'openrouter_model', 'codex_model', 'claude_model'))
+        except (OSError, ValueError):
+            pass  # E.g. a half-typed OpenRouter ID; the choice still applies to this session.
 
     @Slot()
     def _send(self) -> None:
@@ -871,7 +876,7 @@ class CompanionWindow(QMainWindow):
             self.mic_device.setCurrentIndex(1)
         self.title.setText(settings.name)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
-        self.status.setText("Ready" if settings.api_key or settings.llm_provider == 'codex' else "Add API key")
+        self.status.setText("Add API key" if settings.missing_key() else "Ready")
         self._activity_error = False
         self._refresh_controls()
         self._refresh_activity()
@@ -900,7 +905,7 @@ class CompanionWindow(QMainWindow):
                 self.avatar_blindfold.setChecked(bool(selected.get('blindfold', False)))
                 self.avatar_model_status.setText(
                     ('Experimental Live2D rig. ' + selected.get('credit', '') if live2d else
-                     'Current AI portrait. Choose another visual model to experiment.')
+                     selected.get('credit', 'Current AI portrait. Choose another visual model to experiment.'))
                     + ' Model selection is saved for this character; voice and conversations stay the same.')
             except (OSError, ValueError) as exc:
                 self.avatar_model.addItem('Current avatar', 'current')

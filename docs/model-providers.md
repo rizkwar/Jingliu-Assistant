@@ -1,7 +1,39 @@
 # Choose a model without changing your character
 
-Open **Settings → Response model**. Choose **OpenRouter (API key)** or **ChatGPT
-subscription via Codex**. Click **Save defaults** to keep the choice after restart.
+Open **Settings → Response model**. Choose **OpenRouter (API key)**, **Claude
+subscription via Claude Code** or **ChatGPT subscription via Codex**. Click
+**Save defaults** to keep the choice after restart.
+
+## Claude subscription setup
+
+1. Install [Claude Code](https://code.claude.com/) and sign in with your Claude
+   Pro/Max account, or click **Sign in to Claude** in Settings: it opens Claude
+   Code's own sign-in window and waits until you finish in the browser.
+2. **Claude subscription via Claude Code** with **Claude Sonnet 5.5** is the
+   default for a new setup. Opus 5.5, Haiku 5.5 and Fable 5.1 are also listed;
+   each choice is a pinned model version, not a moving "latest" alias.
+3. **Check Claude sign-in** confirms the sign-in and plan type.
+
+The response provider and model are remembered as soon as you change them, for
+every provider: no Save defaults click is needed for this choice, and other
+unsaved settings are not written along with it.
+
+No API key is needed. The app removes `ANTHROPIC_API_KEY`, auth tokens and other
+keys from the CLI's environment, so replies always use your subscription limits
+and never API billing. Claude Code keeps its own sign-in; the app reads only the
+signed-in state and plan type, never your email or organization.
+
+Each reply starts a fresh `claude -p` run in an empty temporary folder.
+**Claude Code's coding persona is replaced:** the character profile and the
+conversation contract are the entire system prompt, plus one note on how prior
+messages are delivered. Tools, MCP servers, skills, slash commands, CLAUDE.md,
+hooks and plugins are off (`--tools ""`, `--safe-mode`, `--strict-mcp-config`),
+and sessions are not saved. Only reply text reaches chat and TTS; thinking runs
+at low effort and is never shown or spoken. A tool attempt stops the turn.
+Errors such as plan limits never switch to another provider.
+
+Live checks (Pro plan, Opus 5.5 and Sonnet 5.5): first text arrived after about
+3–5 seconds, in character, with prior messages carried over correctly.
 
 ## Subscription setup
 

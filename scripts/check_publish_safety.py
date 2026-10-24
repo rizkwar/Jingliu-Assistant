@@ -135,7 +135,7 @@ def main():
         if args.compare_local_env:
             from dotenv import dotenv_values
             values = dotenv_values(".env")
-            names = ("OPENROUTER_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "GITHUB_TOKEN")
+            names = ("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "GITHUB_TOKEN")
             local_values = tuple(values[name].encode() for name in names if len(values.get(name) or "") >= 8)
         checked, issues = audit(args.history, local_values)
     except (subprocess.CalledProcessError, ValueError, ImportError, OSError):

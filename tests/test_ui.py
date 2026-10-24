@@ -186,6 +186,13 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.window.settings.tts_reference,before.tts_reference)
         self.assertEqual(self.window._conversation_id,conversation)
         self.assertIs(self.window._messages,messages)
+        self.window.connection.provider.setCurrentIndex(self.window.connection.provider.findData('claude'))
+        self.assertEqual(self.window.settings.llm_provider,'claude')
+        self.assertEqual(self.window.settings.claude_model,'claude-sonnet-5-5')
+        self.assertEqual(self.window.connection.model.currentText(),'Claude Sonnet 5.5')
+        self.assertEqual(self.window.status.text(),'Ready')
+        self.assertEqual(self.window.settings.system_prompt,before.system_prompt)
+        self.assertEqual(self.window._conversation_id,conversation)
         self.window.connection.provider.setCurrentIndex(0)
         self.assertEqual(self.window.settings.llm_provider,'openrouter')
 

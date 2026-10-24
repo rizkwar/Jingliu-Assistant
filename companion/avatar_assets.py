@@ -46,6 +46,12 @@ class AvatarAssets:
                   'renderer.json': (json.dumps({'kind': kind}).encode(), 'application/json')}
         if kind == 'mesh':
             paths['avatar.mavatar'] = (Path(avatar), 'application/octet-stream')
+        elif kind == 'layered':
+            from .layered_assets import layered_bundle
+            for name in ('layered-avatar.js', 'layered-rig.js', 'live2d-rig.js', 'rig-preview.js'):
+                paths[name] = (web / name, 'text/javascript; charset=utf-8')
+            for name, body in layered_bundle(avatar).items():
+                assets['model/' + name] = (body, 'image/png' if name.endswith('.png') else 'application/json')
         elif kind == 'live2d':
             from .avatar_models import live2d_bundle
             for name in ('live2d-avatar.js', 'live2d-rig.js', 'live2d-physics.js', 'rig-preview.js'):

@@ -61,6 +61,11 @@ async def stream_reply(
         async for text in stream_codex(settings, messages):
             yield text
         return
+    if settings.llm_provider == 'claude':
+        from .claude_backend import stream_claude
+        async for text in stream_claude(settings, messages):
+            yield text
+        return
     payload = {
         "model": settings.model,
         "messages": [{"role": "system", "content": settings.system_prompt}, *messages],

@@ -22,6 +22,35 @@ Personality, voice and memories stay with the same character. More local Live2D
 models can be added to the selector. See the
 [experimental Live2D guide](docs/experimental-live2d.md) for setup, controls and credits.
 
+**AI portrait rig experiment:** choose **AI v5 layered rig (experimental)** in
+the same selector to try the approved AI avatar with separate head/neck, hair
+and earring surfaces, depth-based turns and hair follow-through. Use **Preview
+movement** to compare. This is a bounded 2.5D experiment; fine part edges still
+need art cleanup. See the [AI layered rig guide](docs/ai-layered-rig.md).
+
+**Avatar artwork tools:** PhotoCraft's local MCP server can edit artwork copies
+and layered PSDs in a dedicated authoring folder. See the
+[PhotoCraft MCP setup](docs/photocraft-mcp.md) for connection and verification.
+The [layer-preparation checkpoint](docs/jingliu-layer-preparation.md) now has an
+editable v5 master, a 23-part PSD and real comparison/part previews. This artwork
+is prepared separately from the avatar currently running in the assistant.
+The [local rig MCP](docs/avatar-rig-mcp.md) adds compact inspection, keyform edits,
+rig generation, validation and pose-sheet previews for saved Inochi files.
+The [standalone head-rig checkpoint](docs/jingliu-head-rig.md) includes the revised
+23-part rig, twelve inspection poses and instructions for testing it in Creator.
+The [eye-rig checkpoint](docs/jingliu-eye-rig.md) extends it to 29 parts with
+separate irises/lids, independent blinking and clipped gaze. It includes an
+editable PSD and twelve close-up poses, still separate from the running assistant.
+The [mouth-rig checkpoint](docs/jingliu-mouth-rig.md) adds separate lips, teeth,
+tongue, opening/form controls and subtle jaw movement, with rest-image preservation.
+The [idle-motion checkpoint](docs/jingliu-idle-motion.md) adds automatic blink
+tracks, small head pauses and native hair physics, with short MP4 review clips.
+Double-click **Preview Jingliu Rig.cmd** for the separate
+[interactive rig viewer](docs/jingliu-interactive-viewer.md): manual head/eye/mouth
+controls, animation playback, hair-physics comparison and individual part views.
+It implements a validated inspection subset of the saved rig and remains
+separate from the running assistant.
+
 **Motion polish:** Settings now has **Calm**, **Natural**, and **Lively** presets,
 plus a silent **Preview movement** button. Manual slider changes show **Custom**.
 The preview ends on its own or stops when conversation, playback, hiding or
@@ -29,9 +58,12 @@ pausing needs priority. See [avatar polish](docs/avatar-polish.md) for details.
 
 ## Response model and HD avatar
 
-In **Settings → Response model**, choose **OpenRouter** or **ChatGPT subscription
-via Codex**. For Codex, click **Sign in to ChatGPT**, then **Check connection /
-models** and choose a model. **Save defaults** keeps the selection. Character,
+In **Settings → Response model**, choose **OpenRouter**, **Claude subscription via
+Claude Code** or **ChatGPT subscription via Codex**. For Claude, sign in to the
+Claude Code CLI (or click **Sign in to Claude**); **Claude Sonnet 5.5** is the
+default and no API key is used. Your provider and model choice is remembered
+automatically. For Codex, click
+**Sign in to ChatGPT**, then **Check connection / models** and choose a model. **Save defaults** keeps the selection. Character,
 voice, avatar and the current conversation stay in place when switching models.
 See [model providers](docs/model-providers.md) for setup, limits and verification.
 
@@ -666,5 +698,5 @@ Voice activity detection uses its [bundled Silero VAD implementation](https://gi
 Suggested commit for this step:
 
 ```text
-fix: stabilize Live2D ribbon physics
+feat: add experimental layered depth rig for AI Jingliu
 ```

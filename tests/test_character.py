@@ -93,7 +93,7 @@ class CharacterTests(unittest.TestCase):
         store.close()
         reopened = Store(database)
         self.addCleanup(reopened.close)
-        settings = replace(load_settings(self.root), api_key="test-key")
+        settings = replace(load_settings(self.root), api_key="test-key", llm_provider="openrouter")
         requests = []
         def handler(request):
             requests.append(json.loads(request.content))

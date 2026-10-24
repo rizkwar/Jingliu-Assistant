@@ -91,8 +91,8 @@ def run_checks(root=ROOT, engines=False):
         try:
             settings.validate_connection()
             checks.append(Check('ok', 'API configuration',
-                'Codex selected. Sign-in is checked from Settings; no inference was requested.'
-                if settings.llm_provider == 'codex' else 'Key and model ID configured. No online request was made.'))
+                'Subscription provider selected. Sign-in is checked from Settings; no inference was requested.'
+                if settings.llm_provider in {'codex', 'claude'} else 'Key and model ID configured. No online request was made.'))
         except ValueError:
             checks.append(Check('warning', 'API configuration',
                 'Choose a provider and model in Settings; OpenRouter credentials belong in .env. Offline features remain available.'))

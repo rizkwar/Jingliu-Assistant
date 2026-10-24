@@ -132,6 +132,9 @@ try {
     avatar=await loadLive2DAvatar(canvas,'./model/model3.json');
     avatar.setFraming(framing);
     avatar.setAppearance(appearance);
+  }else if(config.kind==='layered'){
+    const {loadLayeredAvatar}=await import('./layered-avatar.js');
+    avatar=await loadLayeredAvatar(canvas,'./model/layered.json');
   }else if(config.kind==='mesh'){
     avatar=await loadMeshAvatar(canvas, './avatar.mavatar', {manual:true, fit:'contain'});
   }else throw new Error('Unknown renderer');
@@ -154,7 +157,9 @@ try {
     targetFps:cadence.frameRate(),
     expression:avatar.getExpression().name, parameters:avatar.getParameters(),
     canvas:[document.querySelector('canvas').width, document.querySelector('canvas').height]});
+  window.avatarLayerPreviews=()=>avatar.inspectLayers?.()??[];
   bridge.report('ready');
-} catch {
+} catch(error) {
+  console.error('Avatar load failed:',error.message);
   bridge.report('error');
 }

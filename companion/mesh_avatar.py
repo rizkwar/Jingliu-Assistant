@@ -165,6 +165,9 @@ class MeshDesktopAvatar(DesktopAvatar):
                 'Live2D unavailable. Choose AI portrait in Settings to restore it.\n'
                 'Check the model and run Setup Live2D.cmd.\nSee docs/experimental-live2d.md.'
                 if self.kind == 'live2d' else
+                'Layered avatar unavailable. Choose AI portrait in Settings to restore it.\n'
+                'Rebuild the local art files. See docs/ai-layered-rig.md.'
+                if self.kind == 'layered' else
                 'Avatar unavailable. Using the simple mascot.\nCheck local files / graphics support.\nSee docs/avatar-stage4.md.')
             self.notice.show()
             # Leave space above the error message for the native mascot.

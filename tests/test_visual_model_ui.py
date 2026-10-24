@@ -70,3 +70,17 @@ class VisualModelUiTests(unittest.TestCase):
         self.window.settings = original
         self.window._refresh_avatar_models()
         self.assertEqual(self.window.avatar_model.currentData(), self.model['id'])
+
+    def test_layered_choice_preserves_voice_personality_and_chat(self):
+        from test_layered_assets import fixture as layered_fixture
+        layered = self.models.import_layered(self.profile, layered_fixture(self.root / 'layered-source'))
+        settings = self.window.settings
+        conversation = self.window._conversation_id
+        self.window._refresh_avatar_models()
+        self.window.avatar_model.setCurrentIndex(self.window.avatar_model.findData(layered['id']))
+        self.assertEqual(self.models.selected(self.profile)['kind'], 'layered')
+        self.assertEqual(self.window.settings, settings)
+        self.assertEqual(self.window._conversation_id, conversation)
+        self.assertFalse(self.window.avatar_framing.isEnabled())
+        self.assertFalse(self.window.avatar_blindfold.isVisible())
+        self.assertIn('2.5D', self.window.avatar_model_status.text())

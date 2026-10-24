@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Jingliu · Rig inspection</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header><div><span class="eyebrow">JINGLIU / AI PORTRAIT V5</span><h1>Motion lab<span class="pill">Standalone</span></h1></div><p>Explore the saved rig.<br>Pose, play, compare.</p></header>
+  <main>
+    <aside aria-label="Rig controls">
+      <section><h2>Playback</h2>
+        <label for="clip">Animation</label><select id="clip" disabled><option value="">Manual controls</option></select>
+        <div class="buttons"><button id="play" disabled>Play</button><button id="pause" disabled>Pause</button><button id="reset" disabled>Reset to rest</button></div>
+        <label for="timeline">Position <output id="time">0.00 s</output></label><input id="timeline" type="range" min="0" max="1" step="0.0166667" value="0" disabled>
+        <label class="check"><input id="physics" type="checkbox" checked disabled> Hair follow-through</label>
+        <button id="reset-physics" class="quiet" disabled>Settle hair now</button>
+      </section>
+      <section><h2>Pose controls</h2><p class="hint" id="pose-hint">Choose Manual controls to pose the head, eyes and mouth.</p><div id="parameters"></div></section>
+      <section><h2>Inspection</h2>
+        <label for="part">Visible part</label><select id="part" disabled><option value="">Whole model</option></select>
+        <label for="zoom">Zoom <output id="zoom-value">100%</output></label><input id="zoom" type="range" min="0.75" max="1.75" step="0.05" value="1" disabled>
+      </section>
+      <p class="footnote">Uses the saved meshes, clipping masks and animation tracks. This viewer implements their supported subset; compare native behavior in Inochi Creator. All tests here are silent.</p>
+    </aside>
+    <div class="workspace">
+      <div class="stage" id="stage"><canvas id="avatar" aria-label="Animated Jingliu rig preview"></canvas><div id="loading">Preparing the saved rig…</div>
+        <div id="error" role="alert" hidden><h2>Preview unavailable</h2><p id="error-message"></p><button id="retry">Reload viewer</button></div>
+      </div>
+      <div class="status-bar"><span id="status" role="status">Loading…</span><span id="stats"></span></div>
+      <p class="stage-note">Hair is driven by one shared pendulum. Fine fringe and lash edges remain a work in progress.</p>
+    </div>
+  </main>
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

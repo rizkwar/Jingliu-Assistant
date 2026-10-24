@@ -1,0 +1,2 @@
+# Optional authoring tooling only; keep separate from the companion environment.
+mcp==1.26.0

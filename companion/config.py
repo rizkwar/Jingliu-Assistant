@@ -51,15 +51,21 @@ class Settings:
     llm_provider: str = 'openrouter'
     openrouter_model: str = ''
     codex_model: str = ''
+    claude_model: str = ''
+
+    def missing_key(self) -> bool:
+        """Only OpenRouter needs a key in .env; subscriptions sign in through their CLI."""
+        return self.llm_provider == 'openrouter' and not self.api_key
 
     def validate_connection(self) -> None:
-        if self.llm_provider == 'codex':
-            import re
-            if self.codex_model and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}', self.codex_model):
-                raise ValueError('Choose a valid Codex model from Settings.')
+        import re
+        if self.llm_provider in {'codex', 'claude'}:
+            model = self.codex_model if self.llm_provider == 'codex' else self.claude_model
+            if model and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}', model):
+                raise ValueError('Choose a valid model from Settings.')
             return
         if self.llm_provider != 'openrouter':
-            raise ValueError('Choose OpenRouter or ChatGPT subscription via Codex in Settings.')
+            raise ValueError('Choose OpenRouter, Claude subscription, or ChatGPT subscription via Codex in Settings.')
         if not self.api_key or self.api_key == "your_key_here":
             raise ValueError(
                 "Add your OpenRouter key to OPENROUTER_API_KEY in .env, "
@@ -122,6 +128,9 @@ def load_settings(root: Path = PROJECT_ROOT) -> Settings:
         character_reference=character.reference,
         tts_reference=str((root / reference).resolve()) if reference else "",
         hf_token=(values.get("HF_TOKEN") or "").strip(),
+        # Saved preferences override this default once another provider is chosen.
+        llm_provider='claude',
+        claude_model='claude-sonnet-5-5',
     )
 
 

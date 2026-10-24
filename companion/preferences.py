@@ -12,7 +12,7 @@ from .voice_settings import validate_rate
 
 
 FIELDS = {
-    'llm_provider': str, 'openrouter_model': str, 'codex_model': str,
+    'llm_provider': str, 'openrouter_model': str, 'codex_model': str, 'claude_model': str,
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
     "tts_rate": int,
     "tts_reference": str,
@@ -36,9 +36,9 @@ def validate(values):
     if any(type(value) not in (FIELDS[key] if isinstance(FIELDS[key], tuple) else (FIELDS[key],))
            for key, value in clean.items()):
         raise ValueError("Saved preferences contain an invalid value type.")
-    if clean.get('llm_provider', 'openrouter') not in {'openrouter', 'codex'}:
+    if clean.get('llm_provider', 'openrouter') not in {'openrouter', 'codex', 'claude'}:
         raise ValueError('Saved model provider is invalid.')
-    for key in ('openrouter_model', 'codex_model'):
+    for key in ('openrouter_model', 'codex_model', 'claude_model'):
         if len(clean.get(key, '')) > 160 or any(c.isspace() for c in clean.get(key, '')):
             raise ValueError('Saved model ID is invalid.')
     if "tts_voice" in clean and clean["tts_voice"] not in (*VOICES, "reference"):
@@ -114,20 +114,38 @@ class Preferences:
             if item is not None and item.character_path:
                 voices[character_key(item.character_path)] = {
                     key: getattr(item, key) for key in ("tts_voice", "tts_reference", "tts_rate")}
-        if self.path is not None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = None
-            try:
-                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
-                                                 prefix="preferences-", suffix=".tmp", delete=False) as output:
-                    temporary = Path(output.name)
-                    json.dump({"version": 1, "settings": values, "character_voices": voices}, output, indent=2)
-                    output.write("\n")
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(temporary, self.path)
-            finally:
-                if temporary is not None:
-                    temporary.unlink(missing_ok=True)
+        self._write(values, voices)
         self._values = values
         self._voices = voices
+
+    def remember(self, settings: Settings, keys) -> None:
+        """Persist only these fields, keeping every other saved preference unchanged."""
+        values = dict(self._values)
+        if self.path is not None and self.path.exists():
+            try:
+                document = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(document, dict) and document.get("version") == 1:
+                    values = validate(document.get("settings"))
+            except (UnicodeError, json.JSONDecodeError):
+                pass  # A damaged file is replaced, as Save defaults would.
+        values.update(validate({key: getattr(settings, key) for key in keys}))
+        self._write(values, self._voices)
+        self._values = values
+
+    def _write(self, values, voices) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
+                                             prefix="preferences-", suffix=".tmp", delete=False) as output:
+                temporary = Path(output.name)
+                json.dump({"version": 1, "settings": values, "character_voices": voices}, output, indent=2)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)

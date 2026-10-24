@@ -190,11 +190,12 @@ class AvatarModels:
         if not isinstance(models, list) or len(models) > 64:
             raise ValueError('Invalid avatar model list.')
         for model in models:
-            if (not isinstance(model, dict) or model.get('kind') != 'live2d'
+            if (not isinstance(model, dict) or model.get('kind') not in {'live2d', 'layered'}
                     or not isinstance(model.get('name'), str) or not 1 <= len(model['name']) <= 120
-                    or not isinstance(model.get('id'), str) or len(model['id']) != 23
-                    or not model['id'].startswith('live2d-')
-                    or any(c not in '0123456789abcdef' for c in model['id'][7:])):
+                    or not isinstance(model.get('id'), str)
+                    or not model['id'].startswith(model['kind'] + '-')
+                    or len(model['id']) != len(model['kind']) + 17
+                    or any(c not in '0123456789abcdef' for c in model['id'][len(model['kind']) + 1:])):
                 raise ValueError('Invalid avatar model entry.')
             if model.get('framing', 'portrait') not in {'portrait', 'full'}:
                 raise ValueError('Invalid model framing.')
@@ -248,10 +249,38 @@ class AvatarModels:
         raise ValueError('This model has no configured blindfold control.')
 
     def model_path(self, model):
-        path = (self.directory / model['id'] / 'model3.json').resolve()
+        filename = 'layered.json' if model['kind'] == 'layered' else 'model3.json'
+        path = (self.directory / model['id'] / filename).resolve()
         if not path.is_relative_to(self.directory.resolve()):
             raise ValueError('Invalid installed model path.')
         return path
+
+    def import_layered(self, profile, source, name='AI layered rig (experimental)'):
+        from .layered_assets import layered_bundle
+        if not profile or not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
+            raise ValueError('Choose a character and a short model name.')
+        resources = layered_bundle(source)
+        fingerprint = hashlib.sha256()
+        for filename, body in sorted(resources.items()):
+            fingerprint.update(filename.encode())
+            fingerprint.update(body)
+        model_id = 'layered-' + fingerprint.hexdigest()[:16]
+        target = self.directory / model_id
+        if not target.resolve().is_relative_to(self.directory.resolve()):
+            raise ValueError('Invalid local model destination.')
+        for filename, body in resources.items():
+            path = target / filename
+            if not path.resolve().is_relative_to(target.resolve()):
+                raise ValueError('Invalid model resource destination.')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(body)
+        document = self._load()
+        record = document['characters'].setdefault(character_key(profile), {'models': [], 'selected': 'current'})
+        model = {'id': model_id, 'name': name.strip(), 'kind': 'layered',
+                 'credit': 'AI v5 artwork with separate head, neck, hair and earring layers. Experimental 2.5D depth rig.'}
+        record['models'] = [m for m in self.models(profile)[1:] if m['id'] != model_id] + [model]
+        self._save(document)
+        return model
 
     def import_live2d(self, profile, source, name='Live2D rig (experimental)', *, credit='', blindfold_parameter=''):
         if not profile:

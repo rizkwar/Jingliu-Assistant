@@ -333,9 +333,9 @@ class AvatarController(QObject):
         except (OSError, ValueError):
             model = {'kind': 'mesh'}  # A damaged experimental index must not block the original avatar.
         try:
-            if model['kind'] == 'live2d':
+            if model['kind'] in {'live2d', 'layered'}:
                 from .mesh_avatar import MeshDesktopAvatar
-                widget = MeshDesktopAvatar(self.window.avatar_models.model_path(model), kind='live2d',
+                widget = MeshDesktopAvatar(self.window.avatar_models.model_path(model), kind=model['kind'],
                                            appearance=model.get('appearance', {}))
                 widget.set_framing(model.get('framing', 'portrait'))
                 return widget
