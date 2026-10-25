@@ -127,6 +127,15 @@ class Store:
             self.connection.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
         attachments.remove_files(stored)
 
+    def rename_conversation(self, conversation_id, title):
+        """A name chosen by the person. It is kept: automatic titles only replace "New conversation"."""
+        title = " ".join(str(title).split())
+        if not title or len(title) > 120:
+            raise ValueError("A conversation name must contain 1 to 120 characters.")
+        with self.connection:
+            self.connection.execute("UPDATE conversations SET title=? WHERE id=?", (title, conversation_id))
+        return title
+
     def touch_conversation(self, conversation_id):
         with self.connection:
             self.connection.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now(), conversation_id))

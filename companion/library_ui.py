@@ -4,7 +4,7 @@ from datetime import datetime
 import sqlite3
 from .character import character_key
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
@@ -32,13 +32,15 @@ def when(timestamp, today=None):
 
 
 class ConversationRow(QFrame):
-    """One saved conversation: title, when, a glimpse of the last message, and a delete button."""
+    """One saved conversation: title, when, a glimpse of the last message, rename and delete."""
     delete_requested = Signal(str)
+    rename_requested = Signal(str, str)  # conversation id, new name
 
     def __init__(self, conversation, preview, current, parent=None):
         super().__init__(parent)
         self.setObjectName("historyRow")
         self.conversation_id = conversation["id"]
+        self.item = None  # Its list entry, set by the list.
         self.full_title = conversation["title"] or "New conversation"
         row = QHBoxLayout(self)
         row.setContentsMargins(14, 10, 8, 10)
@@ -52,6 +54,15 @@ class ConversationRow(QFrame):
         self.title.setTextFormat(Qt.TextFormat.PlainText)
         self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         top.addWidget(self.title, 1)
+        # Renaming happens in place: Enter (or clicking away) keeps the name, Esc leaves it as it was.
+        self.editor = QLineEdit(self.full_title)
+        self.editor.setObjectName("historyEdit")
+        self.editor.setMaxLength(120)
+        self.editor.hide()
+        self.editor.installEventFilter(self)
+        self.editor.returnPressed.connect(self._finish_rename)
+        self.editor.editingFinished.connect(self._finish_rename)
+        top.addWidget(self.editor, 1)
         if current:
             badge = QLabel("Open now")
             badge.setObjectName("historyBadge")
@@ -72,9 +83,45 @@ class ConversationRow(QFrame):
             self.glimpse.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             text.addWidget(self.glimpse)
         row.addLayout(text, 1)
+        self.rename = icon_button("rename", "Rename this conversation (F2)", "historyRename")
+        self.rename.clicked.connect(self.start_rename)
+        row.addWidget(self.rename, 0, Qt.AlignmentFlag.AlignVCenter)
         self.delete = icon_button("delete", "Delete this conversation", "historyDelete")
         self.delete.clicked.connect(lambda: self.delete_requested.emit(self.conversation_id))
         row.addWidget(self.delete, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def start_rename(self):
+        self.renaming = True
+        self.editor.setText(self.full_title)
+        self.title.hide()
+        self.editor.show()
+        self.reflow()
+        self.editor.setFocus()
+        self.editor.selectAll()
+
+    def _finish_rename(self, keep=True):
+        if not getattr(self, "renaming", False):
+            return  # Enter and then losing focus would otherwise finish twice.
+        self.renaming = False
+        name = " ".join(self.editor.text().split())
+        self.editor.hide()
+        self.title.show()
+        self.reflow()
+        if keep and name and name != self.full_title:
+            self.rename_requested.emit(self.conversation_id, name)
+
+    def reflow(self):
+        """The list gives each row a fixed height: tell it when the edit box changes ours."""
+        self.layout().activate()
+        if self.item is not None:
+            self.item.setSizeHint(self.sizeHint())
+
+    def eventFilter(self, watched, event):
+        # Esc cancels the rename here, instead of closing the whole page.
+        if watched is self.editor and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self._finish_rename(keep=False)
+            return True
+        return super().eventFilter(watched, event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -141,6 +188,7 @@ class HistoryDialog(QDialog):
         buttons.addWidget(self.open_button)
         layout.addLayout(buttons)
         QShortcut(QKeySequence(QKeySequence.StandardKey.Delete), self.items, self._delete)
+        QShortcut(QKeySequence(Qt.Key.Key_F2), self.items, self._rename)
         self.refresh()
 
     def refresh(self, keep=None):
@@ -155,6 +203,8 @@ class HistoryDialog(QDialog):
             row = ConversationRow(conversation, self.store.last_message(conversation["id"]),
                                   conversation["id"] == self.current_id)
             row.delete_requested.connect(self._delete_id)
+            row.rename_requested.connect(self._rename_id)
+            row.item = item
             item.setSizeHint(row.sizeHint())
             self.items.addItem(item)
             self.items.setItemWidget(item, row)
@@ -201,6 +251,7 @@ class HistoryDialog(QDialog):
         self.items.setCurrentItem(item)
         menu = QMenu(self)
         menu.addAction("Open", self._open)
+        menu.addAction("Rename", self._rename)
         menu.addAction("Delete", self._delete)
         menu.exec(self.items.viewport().mapToGlobal(point))
 
@@ -210,6 +261,22 @@ class HistoryDialog(QDialog):
         if item:
             self.selected_id = item.data(Qt.ItemDataRole.UserRole)
             self.accept()
+
+    @Slot()
+    def _rename(self):
+        item = self._selected()
+        if item:
+            self.items.itemWidget(item).start_rename()
+
+    @Slot(str, str)
+    def _rename_id(self, conversation_id, name):
+        try:
+            self.store.rename_conversation(conversation_id, name)
+        except (ValueError, sqlite3.Error):
+            QMessageBox.warning(self, "Could not rename", "The name could not be saved. Please try again.")
+            return
+        # After the editor has finished handling its own signal.
+        QTimer.singleShot(0, self, lambda: self.refresh(keep=conversation_id))
 
     @Slot()
     def _delete(self):

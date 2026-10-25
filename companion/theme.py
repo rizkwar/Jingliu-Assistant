@@ -25,7 +25,7 @@ ICONS = {
     'stop': '', 'settings': '', 'history': '', 'speaker': '', 'muted': '',
     'handsfree': '', 'memories': '', 'context': '', 'pause': '', 'play': '',
     'moon': '', 'attach': '', 'close': '', 'document': '', 'image': '',
-    'delete': '', 'clock': '', 'back': '',
+    'delete': '', 'clock': '', 'back': '', 'rename': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -119,6 +119,10 @@ QLabel#historyBadge {{ font-size: 10px; font-weight: 600; letter-spacing: 1px; c
 QPushButton#historyDelete {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {DIM}; background: transparent;
     border: none; border-radius: 8px; min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; padding: 0; }}
 QPushButton#historyDelete:hover {{ color: {CRIMSON}; background: rgba(226, 86, 110, 0.12); }}
+QPushButton#historyRename {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {DIM}; background: transparent;
+    border: none; border-radius: 8px; min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; padding: 0; }}
+QPushButton#historyRename:hover {{ color: {ICE}; background: rgba(168, 212, 255, 0.10); }}
+QLineEdit#historyEdit {{ font-size: 14px; font-weight: 600; padding: 0 6px; margin: 0; }}
 QPushButton#danger {{ color: #f3a5b3; border-color: rgba(226, 86, 110, 0.35); }}
 QPushButton#danger:hover {{ background: rgba(226, 86, 110, 0.14); color: #ffd0d8; }}
 QPushButton#danger:disabled, QPushButton#primary:disabled {{ color: #4a5a78; background: transparent; border-color: #1c2a45; }}

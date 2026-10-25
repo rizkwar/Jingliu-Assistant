@@ -99,6 +99,38 @@ class LibraryTests(unittest.TestCase):
         self.dialog._open()
         self.assertIsNone(self.dialog.selected_id)
 
+    def test_a_conversation_can_be_renamed_in_place_and_keeps_its_name(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeyEvent
+        from PySide6.QtCore import QEvent as E
+        conversation = self.chat()
+        self.dialog = HistoryDialog(self.store)
+        row = self.dialog.items.itemWidget(self.dialog.items.item(0))
+        row.rename.click()
+        self.assertTrue(row.editor.isVisibleTo(row))
+        row.editor.setText("  Calculus   exam prep ")
+        row.editor.returnPressed.emit()
+        self.app.processEvents()
+        self.assertEqual(self.store.conversation(conversation)["title"], "Calculus exam prep")
+        row = self.dialog.items.itemWidget(self.dialog.items.item(0))
+        self.assertEqual(row.full_title, "Calculus exam prep")
+        # Esc leaves it as it was; an empty name is not saved.
+        row.start_rename()
+        row.editor.setText("Something else")
+        self.app.sendEvent(row.editor, QKeyEvent(E.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+        self.assertFalse(row.editor.isVisibleTo(row))
+        row.start_rename()
+        row.editor.setText("   ")
+        row.editor.returnPressed.emit()
+        self.app.processEvents()
+        self.assertEqual(self.store.conversation(conversation)["title"], "Calculus exam prep")
+        # New messages never replace a name the person chose.
+        turn = self.store.start_turn(conversation, "Another question")
+        self.store.save_turn(turn, "Answer.", "Answer.", "complete")
+        self.assertEqual(self.store.conversation(conversation)["title"], "Calculus exam prep")
+        with self.assertRaises(ValueError):
+            self.store.rename_conversation(conversation, "x" * 121)
+
     def test_dates_read_naturally(self):
         from datetime import date, datetime
         from companion.library_ui import when
