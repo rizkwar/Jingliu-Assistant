@@ -2,9 +2,9 @@
 from pathlib import Path
 import random
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtWidgets import QAbstractSlider, QAbstractSpinBox, QComboBox, QPushButton, QScrollBar, QWidget
 
 
 NIGHT = '#070b15'
@@ -25,6 +25,7 @@ ICONS = {
     'stop': '', 'settings': '', 'history': '', 'speaker': '', 'muted': '',
     'handsfree': '', 'memories': '', 'context': '', 'pause': '', 'play': '',
     'moon': '', 'attach': '', 'close': '', 'document': '', 'image': '',
+    'delete': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -85,6 +86,37 @@ QFrame#assistant {{ background: rgba(18, 29, 52, 0.84); border: 1px solid rgba(1
     border-radius: 16px; border-top-left-radius: 4px; }}
 QFrame#user {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(111, 168, 232, 0.30), stop:1 rgba(80, 120, 190, 0.22));
     border: 1px solid rgba(168, 212, 255, 0.26); border-radius: 16px; border-top-right-radius: 4px; }}
+QFrame#task {{ background: rgba(14, 24, 44, 0.9); border: 1px solid rgba(168, 212, 255, 0.22);
+    border-left: 3px solid {ICE_DEEP}; border-radius: 14px; }}
+QLabel#taskTitle {{ font-size: 14px; color: {FROST}; }}
+QLabel#taskSteps {{ font-size: 12px; color: {MUTED}; font-family: 'Cascadia Mono', 'Consolas'; }}
+QLabel#taskStatus {{ font-size: 12px; font-weight: 600; color: {ICE}; }}
+QLabel#taskStatus[state="approval"] {{ color: {AMBER}; }}
+QLabel#taskStatus[state="done"] {{ color: #7fd1b9; }}
+QLabel#taskStatus[state="failed"] {{ color: #f3b3bd; }}
+QLabel#approvalAction {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 13px; color: {FROST};
+    background: rgba(10, 17, 33, 0.9); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 8px; padding: 10px; }}
+QListWidget#history {{ background: transparent; border: none; padding: 0; outline: none; }}
+QListWidget#history::item {{ background: transparent; border: none; padding: 0; }}
+QFrame#historyRow {{ background: rgba(168, 212, 255, 0.035); border: 1px solid rgba(168, 212, 255, 0.10); border-radius: 12px; }}
+QListWidget#history::item:hover QFrame#historyRow {{ background: rgba(168, 212, 255, 0.07); }}
+QListWidget#history::item:selected {{ background: rgba(111, 168, 232, 0.16); border: 1px solid rgba(168, 212, 255, 0.40); border-radius: 12px; }}
+QLabel#historyTitle {{ font-size: 14px; font-weight: 600; color: {FROST}; }}
+QLabel#historyMeta {{ font-size: 11px; color: {ICE}; letter-spacing: 0.3px; }}
+QLabel#historyPreview {{ font-size: 12px; color: {MUTED}; }}
+QLabel#historyBadge {{ font-size: 10px; font-weight: 600; letter-spacing: 1px; color: {NIGHT}; background: {ICE};
+    border-radius: 8px; padding: 1px 8px; }}
+QPushButton#historyDelete {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {DIM}; background: transparent;
+    border: none; border-radius: 8px; min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; padding: 0; }}
+QPushButton#historyDelete:hover {{ color: {CRIMSON}; background: rgba(226, 86, 110, 0.12); }}
+QPushButton#danger {{ color: #f3a5b3; border-color: rgba(226, 86, 110, 0.35); }}
+QPushButton#danger:hover {{ background: rgba(226, 86, 110, 0.14); color: #ffd0d8; }}
+QPushButton#danger:disabled, QPushButton#primary:disabled {{ color: #4a5a78; background: transparent; border-color: #1c2a45; }}
+QFrame#memoryNote {{ background: rgba(168, 212, 255, 0.06); border: 1px solid rgba(168, 212, 255, 0.16); border-radius: 12px; }}
+QLabel#memoryIcon {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {ICE}; }}
+QLabel#memoryText {{ font-size: 12px; color: #cfe0f6; }}
+QPushButton#memoryUndo {{ background: transparent; border: none; color: {ICE}; font-size: 12px; padding: 2px 8px; }}
+QPushButton#memoryUndo:hover {{ color: {FROST}; text-decoration: underline; }}
 QLabel#speaker {{ color: {ICE}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
 QLabel#body {{ font-size: 15px; selection-background-color: #2f5487; }}
 QLabel#notice {{ color: {MUTED}; font-size: 12px; font-style: italic; }}
@@ -254,6 +286,66 @@ class NightSky(QWidget):
         painter.setPen(QPen(QBrush(stroke), 1.2))
         painter.drawLine(QPointF(-10, height * 0.92), QPointF(width + 10, height * 0.58))
         painter.end()
+
+
+def _colorref(hex_color):
+    color = QColor(hex_color)
+    return color.red() | color.green() << 8 | color.blue() << 16
+
+
+def style_title_bar(window):
+    """Windows 11: a night-navy caption, moonlit text and a frost border, so the
+    system title bar belongs to the window. Older Windows ignores what it lacks."""
+    import sys
+    from PySide6.QtGui import QGuiApplication
+    if sys.platform != "win32" or QGuiApplication.platformName() != "windows":
+        return  # Offscreen rendering and other platforms have no system caption.
+    import ctypes
+    hwnd = ctypes.c_void_p(int(window.winId()))
+    dwm = ctypes.windll.dwmapi
+    for attribute, value in ((20, 1),                          # Immersive dark mode
+                             (35, _colorref(NIGHT_HIGH)),      # Caption colour
+                             (36, _colorref("#cfe3fb")),       # Caption text
+                             (34, _colorref("#22324f"))):      # Border
+        data = ctypes.c_int(value)
+        try:
+            dwm.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(data), ctypes.sizeof(data))
+        except OSError:
+            pass
+
+
+CONTROLS = (QComboBox, QAbstractSlider, QAbstractSpinBox)
+
+
+class WindowChrome(QObject):
+    """Per window: a themed title bar, and a mouse wheel that scrolls the page instead of
+    changing a combo box or slider you are only scrolling past (click one to adjust it)."""
+
+    def watch(self, window):
+        window.installEventFilter(self)
+        if window.isVisible():
+            self._prepare(window)
+
+    def _prepare(self, window):
+        style_title_bar(window)
+        # Scroll bars are sliders too, but the wheel is how a page scrolls: leave them alone.
+        controls = [control for kind in CONTROLS for control in window.findChildren(kind)
+                    if not isinstance(control, QScrollBar)]
+        for control in controls:
+            if control.property("wheelGuard") is None:
+                control.setProperty("wheelGuard", True)
+                # A combo box would otherwise take focus from the wheel itself, then change.
+                control.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+                control.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        kind = event.type()
+        if kind == QEvent.Type.Wheel and isinstance(watched, CONTROLS) and not watched.hasFocus():
+            event.ignore()  # Ignored wheel events continue to the scroll area underneath.
+            return True
+        if kind == QEvent.Type.Show and isinstance(watched, QWidget) and watched.isWindow():
+            self._prepare(watched)
+        return False
 
 
 def display_font(pixels, light=True):

@@ -64,10 +64,59 @@ class PocketSpeaker:
                     report, getattr(report, 'playback', lambda *_: None))
 
 
-def run(input_stream=None, output_stream=None, speaker=None):
+class ChatterboxSpeaker:
+    """The natural voice mode: Resemble AI's Chatterbox, cloned from the character's recording.
+
+    Runs from its own environment (.cache/voice-lab). Settings match the calm, composed
+    delivery chosen in listening tests: exaggeration 0.4, CFG weight 0.4.
+    """
+
+    EXAGGERATION = .4
+    CFG_WEIGHT = .4
+
+    def __init__(self):
+        self.model = None
+        self.reference_key = None
+
+    def prepare(self, voice, report):
+        if voice in VOICES:
+            raise VoiceSetupError("Chatterbox speaks only in the character's own voice. Choose her reference "
+                                  "recording in Settings, or switch the voice engine back to Pocket TTS.")
+        reference = inspect_reference(voice)
+        import torch
+        from chatterbox.tts import ChatterboxTTS
+        if self.model is None:
+            report("loading")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.model = ChatterboxTTS.from_pretrained(device=device)
+            getattr(report, "info", lambda *_: None)(
+                "Chatterbox is using the GPU." if device == "cuda" else
+                "Chatterbox is running on the CPU, so she will start speaking slowly. "
+                "Switch on the NVIDIA GPU and run Setup Chatterbox.cmd for real-time speech.")
+        if self.reference_key != reference.fingerprint:
+            report("preparing")
+            self.model.prepare_conditionals(reference.path, exaggeration=self.EXAGGERATION)
+            self.reference_key = reference.fingerprint
+
+    def speak(self, text, voice, volume, report, rate=100):
+        from .audio_playback import play_chunks
+
+        validate_rate(rate)
+        self.prepare(voice, report)
+        report("preparing")
+        # Chatterbox renders a whole phrase at once; the app already sends one phrase at a time.
+        audio = self.model.generate(text, exaggeration=self.EXAGGERATION, cfg_weight=self.CFG_WEIGHT)
+        play_chunks([audio.squeeze(0).detach().cpu().numpy()], playback_sample_rate(self.model.sr, rate), volume,
+                    report, getattr(report, 'playback', lambda *_: None))
+
+
+ENGINES = {"pocket": PocketSpeaker, "chatterbox": ChatterboxSpeaker}
+
+
+def run(input_stream=None, output_stream=None, speaker=None, engine="pocket"):
     input_stream = input_stream or sys.stdin
     output_stream = output_stream or sys.stdout
-    speaker = speaker or PocketSpeaker()
+    speaker = speaker or ENGINES.get(engine, PocketSpeaker)()
     logging.basicConfig(level=logging.ERROR, stream=sys.stderr)
 
     def emit(job_id, kind, **values):
@@ -83,6 +132,7 @@ def run(input_stream=None, output_stream=None, speaker=None):
             with redirect_stdout(sys.stderr):
                 report = lambda state: emit(job_id, "status", state=state)
                 report.playback = lambda level, at: emit(job_id, "playback", level=level, at=at)
+                report.info = lambda message: emit(job_id, "info", message=message)
                 if command.get("action") == "prepare":
                     speaker.prepare(command["voice"], report)
                 else:
@@ -102,5 +152,5 @@ def run(input_stream=None, output_stream=None, speaker=None):
 
 
 if __name__ == "__main__":
-    run()
+    run(engine=sys.argv[sys.argv.index("--engine") + 1] if "--engine" in sys.argv else "pocket")
 

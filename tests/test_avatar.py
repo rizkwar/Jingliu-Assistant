@@ -250,3 +250,17 @@ class AvatarWindowTests(unittest.TestCase):
             widget = self.enable()
         from PySide6.QtWidgets import QLabel
         self.assertIn('Mesh avatar unavailable', widget.findChild(QLabel).text())
+
+
+class AvatarShapeTests(unittest.TestCase):
+    def test_window_keeps_the_shape_of_her_framing(self):
+        from types import SimpleNamespace
+        from companion.mesh_avatar import MeshDesktopAvatar
+        window = SimpleNamespace(aspect=.78, minimumWidth=lambda: 220, minimumHeight=lambda: 240,
+                                 maximumWidth=lambda: 640, maximumHeight=lambda: 900)
+        fitted = lambda *args, **kwargs: MeshDesktopAvatar.fitted(window, *args, **kwargs)
+        self.assertEqual(fitted(480), (480, 615))       # No empty margin beside her.
+        self.assertEqual(fitted(height=385), (300, 385))  # Dragging the bottom edge follows height.
+        self.assertEqual(fitted(100), (220, 282))       # Never below the minimum.
+        window.aspect = .45                              # Full body: tall and narrow, within the maximum.
+        self.assertEqual(fitted(640), (405, 900))

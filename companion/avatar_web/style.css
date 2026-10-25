@@ -1,2 +1,28 @@
 html,body { margin:0; width:100%; height:100%; overflow:hidden; background:transparent; }
-canvas { display:block; width:100%; height:100%; }
+canvas { display:block; width:100%; height:100%; }/* Sleep: soft letters drift up from beside her head and fade, like breath on a cold night. */
+#zzz { position:absolute; left:0; top:0; width:0; height:0; opacity:0; pointer-events:none;
+  font-family:'Segoe UI Variable Display Light','Segoe UI Light',sans-serif; font-style:italic; font-size:22px;
+  color:#e3f0ff; text-shadow:0 0 6px rgba(150,200,255,.9), 0 0 14px rgba(111,168,232,.6); }
+#zzz span { position:absolute; left:0; bottom:0; opacity:0; animation:drift 4.2s ease-out infinite; }
+#zzz span:nth-child(2) { animation-delay:1.4s; font-size:1.25em; }
+#zzz span:nth-child(3) { animation-delay:2.8s; font-size:1.55em; }
+#zzz.paused span { animation-play-state:paused; }
+@keyframes drift {
+  0% { transform:translate(0,0) rotate(-8deg) scale(.6); opacity:0; }
+  18% { opacity:.95; }
+  70% { opacity:.7; }
+  100% { transform:translate(1.6em,-3.2em) rotate(10deg) scale(1.05); opacity:0; }
+}
+
+/* A finished task: ice crystals scatter from her and melt away. */
+#sparkles { position:absolute; left:0; top:0; width:0; height:0; pointer-events:none; }
+#sparkles span { position:absolute; left:0; top:0; color:#bfe3ff; font-size:var(--size); opacity:0;
+  -webkit-text-stroke:.7px rgba(30,70,140,.75);
+  text-shadow:0 0 4px rgba(90,150,230,.95), 0 0 12px rgba(111,168,232,.9), 0 0 22px rgba(168,212,255,.6);
+  animation:crystal var(--life) cubic-bezier(.2,.7,.3,1) var(--delay) forwards; }
+@keyframes crystal {
+  0% { transform:translate(-50%,-50%) scale(.6) rotate(0deg); opacity:0; }
+  12% { opacity:1; }
+  70% { opacity:.9; }
+  100% { transform:translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1.25) rotate(var(--spin)); opacity:0; }
+}

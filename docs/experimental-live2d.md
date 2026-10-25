@@ -57,6 +57,152 @@ exposes an explicit resource list on loopback, with remote requests blocked.
 Pixi's compatibility plugin keeps JavaScript `unsafe-eval` disabled; the Live2D
 page permits WebAssembly compilation for Cubism Core.
 
+## Life: sleep, reactions and idle moments
+
+The Live2D rig now has a life layer (`companion/avatar_web/avatar-life.js`) on top
+of the head and gaze controller. The model package has no motion files, so every
+animation is procedural. Each one drives the rig's own expression parameters,
+checked by rendering them: eyelids and eye-smile, mouth shape, blush, brows, body
+lift (`Param114`), arms (`Param13`) and shoulders. Offsets go in before physics,
+so her hair and ribbons follow every movement.
+
+| When | What she does |
+| --- | --- |
+| App opens | A small hello: a stretch in the morning, a soft smile and nod in the day, a yawn late at night |
+| Left alone (default 5 minutes) | Grows drowsy at 60%: a yawn, heavy lids, slow blinks, nodding off and catching herself |
+| Then | Falls asleep: eyes closed, head bowed, slow visible breathing, "Zzz" drifting beside her head |
+| You talk, she speaks, or the mic opens | Wakes at once with a small start, ready to listen |
+| You click her, or rest the pointer on her | Wakes gently: eyelids flutter, a small yawn, then a smile |
+| Click her while awake | A blink, a little bounce and a smile; three quick clicks fluster her (blush, pout, looking away) |
+| Idle, awake | Every 20–45 seconds: a content smile, gazing up at the moon, a sigh, a double blink, a stretch or a yawn |
+| Listening / thinking | Small acknowledging nods / glances up and aside while she considers |
+| Speaking | Brows lift on emphasis, with a slight warmth; playback lip-sync always keeps the mouth |
+| Needs attention (error) | A concerned brow and mouth |
+
+### The AI controls her expressions
+
+While the desktop avatar is shown, the reply model may add silent cues such as
+`[[blush]]` where a feeling changes. A streaming filter
+(`companion/avatar_cues.py`) removes them before anything is displayed, spoken
+or saved, including cues split across chunks. Bracketed text that is not a known
+cue, such as code like `matrix[[0]]`, is left alone. If she is speaking aloud,
+each cue fires when her voice reaches it; otherwise it fires at once.
+
+| Cue | Effect |
+| --- | --- |
+| `smile`, `happy` | Warm smile with smiling eyes (happy adds a small nod) |
+| `blush` | Blush, a soft smile, eyes lowered |
+| `shy` | Blush while looking away and down |
+| `laugh` | Closed, smiling eyes and a little bounce |
+| `wink` | A one-eye wink with a small smile and tilt (see below) |
+| `surprised` | Wide eyes, raised brows, a small "oh" and a hop |
+| `sad`, `pout`/`annoyed`, `worried` | Lowered gaze and frown / pout turning away / concerned brows |
+| `think`, `nod`, `shake`, `tilt` | Glance up and aside / nod / head shake / curious tilt |
+| `sigh`, `yawn`, `stretch`, `moon` | The matching idle gestures |
+| `neutral` (or `calm`) | Returns to her usual composed face at once |
+
+Moods last 7–10 seconds, then fade back. A cue also wakes her if she was asleep.
+The instructions ask her to use cues sparingly and in character. In a live check,
+she used one cue for a compliment (shy), a fall (smile) and bad news (calm), and
+none for a technical answer. You can also trigger any of them yourself:
+right-click the avatar → **Expression**.
+
+### Petting
+
+Move the pointer back and forth (or up and down) over her head: no click needed.
+Pressing and dragging still moves the avatar. While you pet her:
+- **How she reacts:** she closes her eyes in a smile, leans toward your hand and
+  bobs gently with each stroke. Her blush builds over about five seconds. When you
+  stop, a content smile lingers.
+- **Cursor:** a palm-down hand appears while you are petting.
+- **Asleep:** petting doesn't wake her (even with the pointer resting on her head).
+  She smiles and blushes in her sleep. If she's drowsy, petting lets her drift off.
+- **What counts:** strokes are counted by direction changes (two within 1.5
+  seconds, each after at least 8 px), so passing the pointer across her once is
+  not petting. Only strokes over her head count: from the top of her hair down to
+  her eyes, measured from her eye positions, so it follows her as she moves.
+
+The Animation tester's **Being petted** button plays a 3.5-second demonstration.
+
+### Working on a task
+
+While she does a computer task, her idle glances and cursor-watching pause and she works.
+The base is a composed, focused face: eyes slightly narrowed, brows drawn in, lips set,
+head a little lowered. Each kind of step has its own motion:
+
+| Step | How she looks |
+| --- | --- |
+| Thinking (start, after a denied step) | A glance up and aside |
+| Reading files, searching, opening pages | Her eyes sweep along a line, flick back and step down, like reading a page |
+| Writing files, typing | Eyes lowered, small rhythmic bursts and tiny nods, an occasional glance up |
+| Running a command | The same rhythm with a slight tilt |
+| Using the screen (screenshots, clicks) | Looking off to the side, with a small nod at each click |
+| Waiting for your approval | She looks at you: brows lifted, head tilted, leaning in a little |
+
+Every 6–12 seconds a small human moment keeps long tasks alive: concentrating harder, a
+quick check-in glance at you with a faint smile, or pressing her lips together. She doesn't
+doze off while working.
+
+A frosted moonlight panel in her window shows the current step, typed out as it happens,
+with a turning crescent and a shimmer line. It turns amber while she waits for you, and
+green when she's done. On success, ice crystals and snowflakes scatter from beside her
+head as she nods with a satisfied smile; on failure she sighs, looks worried, and the panel
+says "Stopped". The Animation tester's **Working on a task** group plays each state.
+
+### A visible blush
+
+Rendering the rig showed that `ParamCheek` changes no pixels at all: the blush is
+painted into the face. A visible blush is therefore added on top: a soft pink glow
+under each eye, placed from the eyes' own drawables so it follows head turns. Its
+strength follows the expression: up to about a third opacity for blush and shy,
+fainter for a smile, and a hint while she sleeps.
+
+### How the one-eye wink works
+
+This rig has no per-eye eyelid. Pixel comparisons of the real model showed that
+`ParamEyeLOpen` closes both eyes and `ParamEyeROpen` changes nothing. The "EYE"
+parameters only nudge an iris or highlight, or (`Param102`) drop both lids. So the
+wink is composited:
+- **Drawn twice:** while winking, the frame is drawn normally, then again with the
+  eyelids closed, using the same pose and physics.
+- **Masked:** the second drawing shows only through a soft elliptical mask over her
+  visible eye (her left; her right is under her fringe).
+- **Tracked:** the mask follows that eye's actual drawables, which were found by
+  comparing open and closed geometry at load, so it stays in place during head turns.
+- **Seamless:** closing the eyes moves nothing outside the eyes, so the blend has no seam.
+- **Cost:** the second drawing only happens during a wink (about one second).
+- **Fallback:** if the eye drawables can't be found, a warning is logged and the
+  avatar keeps working.
+
+### Animation tester
+
+**Settings → Avatar → Animation tester** (or right-click the avatar →
+**Expression → Test all animations…**) has a button for every animation:
+
+- **Expressions:** neutral, smile, blush, shy, sad, pout, worried.
+- **Gestures:** happy, laugh, wink, surprised, nod, head shake, tilt, think, sigh, yawn, stretch, moon gaze.
+- **Reactions:** greeting, poke, flustered.
+- **Sleep cycle:** get drowsy, nod off, fall asleep, wake gently, wake startled. "Wake" replays
+  the full wake-up even if she is already awake.
+
+It needs **Show desktop avatar**, **Animate avatar** and the Live2D visual model,
+and says which one is missing. Tester commands use a separate channel that reply
+cues cannot reach, so the model cannot put her to sleep.
+
+**Settings → Avatar → Doze off when left alone** chooses Never or 2/5/10/20 minutes
+(late at night, 23:00–05:00, she dozes off 30% sooner). The tooltip shows
+"Drowsy" or "Sleeping". Movement intensity scales her body movement; facial
+expressions stay whole. Only the Live2D model has this layer. The AI portrait and
+layered rig are unchanged.
+
+Verification: `node --test tests/*.test.mjs` covers the sleep timeline, wake
+triggers, hover dwell, pokes, lip-sync priority and long seeded runs within rig
+bounds. A native check of the real widget, with a 20-second delay, observed the
+greeting, a yawn into drowsiness, sleep with the "Sleeping" tooltip and the Zzz
+overlay, and a click waking her gently and opening chat, with no renderer
+console errors. Pose sheets of every gesture were rendered from the real rig and
+inspected, and expression values were tuned from those images.
+
 ## Rig controls
 
 The existing posture controller feeds the model's real `ParamAngleX`, `ParamAngleY`,

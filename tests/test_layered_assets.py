@@ -61,7 +61,7 @@ class LayeredAssetsTests(unittest.TestCase):
             root = Path(folder);source = fixture(root / 'source')
             web = root / 'companion/avatar_web';(web / 'vendor').mkdir(parents=True)
             for name in ['index.html', 'viewer.js', 'conversation-state.js', 'render-quality.js', 'render-cadence.js',
-                         'assistant-motion.js', 'motion-preview.js', 'idle-attention.js', 'stable-step.js', 'style.css',
+                         'assistant-motion.js', 'avatar-life.js', 'motion-preview.js', 'idle-attention.js', 'stable-step.js', 'style.css',
                          'vendor/mesh-avatar.js', 'layered-avatar.js', 'layered-rig.js', 'live2d-rig.js', 'rig-preview.js']:
                 (web / name).write_text('fixture')
             (source.parent / 'private.txt').write_text('private fixture')

@@ -14,6 +14,10 @@ from .config import PROJECT_ROOT
 from .speech_text import SpeechSegmenter, spoken_text
 from .voice_settings import validate_rate
 
+# The natural voice engine has its own environment; see scripts/Setup-Chatterbox.ps1.
+CHATTERBOX_PYTHON = PROJECT_ROOT / ".cache" / "voice-lab" / "venv" / "Scripts" / "python.exe"
+ENGINES = ("pocket", "chatterbox")
+
 
 class SpeechController(QObject):
     changed = Signal(str)
@@ -37,14 +41,10 @@ class SpeechController(QObject):
         self._voice = "alba"
         self._volume = 70
         self._rate = 100
+        self.engine = "pocket"
         self.process = QProcess(self)
         self.process.setWorkingDirectory(str(PROJECT_ROOT))
-        # pythonw has no console streams; use the same venv's console executable for pipes.
-        executable = Path(sys.executable)
-        if executable.name.lower() == "pythonw.exe":
-            executable = executable.with_name("python.exe")
-        self.process.setProgram(str(executable))
-        self.process.setArguments(["-u", "-m", "companion.speech_process"])
+        self._configure_program()
         env = QProcessEnvironment.systemEnvironment()
         env.remove("OPENROUTER_API_KEY")
         env.insert("HF_HOME", str(PROJECT_ROOT / ".cache" / "huggingface"))
@@ -78,6 +78,34 @@ class SpeechController(QObject):
     def _report(self, text, state):
         self.state = state
         self.changed.emit(text)
+
+    def _configure_program(self):
+        if self.engine == "chatterbox":
+            self.process.setProgram(str(CHATTERBOX_PYTHON))
+        else:
+            # pythonw has no console streams; use the same venv's console executable for pipes.
+            executable = Path(sys.executable)
+            if executable.name.lower() == "pythonw.exe":
+                executable = executable.with_name("python.exe")
+            self.process.setProgram(str(executable))
+        self.process.setArguments(["-u", "-m", "companion.speech_process", "--engine", self.engine])
+
+    def set_engine(self, engine):
+        """Pocket TTS (fast, CPU) or Chatterbox (more natural, best on a GPU)."""
+        engine = engine if engine in ENGINES else "pocket"
+        if engine == self.engine:
+            return
+        self.shutdown()  # The next phrase starts the chosen engine's process.
+        self.engine = engine
+        self._configure_program()
+        env = self.process.processEnvironment()
+        cache = ".cache/voice-lab/hf" if engine == "chatterbox" else ".cache/huggingface"
+        env.insert("HF_HOME", str(PROJECT_ROOT / cache))
+        self.process.setProcessEnvironment(env)
+
+    @staticmethod
+    def chatterbox_installed():
+        return CHATTERBOX_PYTHON.is_file()
 
     def set_hf_token(self, token):
         if token == self._hf_token:
@@ -225,6 +253,8 @@ class SpeechController(QObject):
                 self._advance()
             elif kind == "error":
                 self._fail(event.get("message", "Voice playback failed. Text chat still works."))
+            elif kind == "info" and isinstance(event.get("message"), str):
+                self.changed.emit(event["message"][:300])
 
     def _reset_playback(self):
         self._level_timer.stop()
@@ -277,7 +307,9 @@ class SpeechController(QObject):
     @Slot(QProcess.ProcessError)
     def _process_error(self, error):
         if error == QProcess.ProcessError.FailedToStart:
-            self._fail("Could not start the voice engine. Check your Python environment.")
+            self._fail("Chatterbox is not installed yet. Run Setup Chatterbox.cmd, or switch the voice engine to "
+                       "Pocket TTS in Settings." if self.engine == "chatterbox" else
+                       "Could not start the voice engine. Check your Python environment.")
 
     def _fail(self, message):
         self.stop()

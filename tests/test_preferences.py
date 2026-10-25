@@ -99,7 +99,7 @@ class PreferenceTests(unittest.TestCase):
         self.assertEqual(loaded.avatar_motion, 40)
 
     def test_avatar_controls_reject_out_of_range_or_wrong_types(self):
-        for field, value in [('avatar_width', 219), ('avatar_height', 701),
+        for field, value in [('avatar_width', 219), ('avatar_height', 901),
                              ('avatar_motion', -1), ('avatar_motion', True),
                              ('avatar_lip_sensitivity', 201), ('avatar_lip_sensitivity', 24),
                              ('avatar_cursor_attention', 1), ('avatar_gaze', -1),
@@ -121,3 +121,34 @@ class PreferenceTests(unittest.TestCase):
         self.assertEqual((loaded.llm_provider,loaded.codex_model,loaded.avatar_hd),('codex','chosen-model',False))
         self.assertEqual(loaded.system_prompt,DEFAULTS.system_prompt)
         self.assertEqual(loaded.api_key,DEFAULTS.api_key)
+
+
+class VoiceEngineTests(unittest.TestCase):
+    def test_engine_is_saved_and_unknown_engines_are_rejected(self):
+        from companion.preferences import validate
+        self.assertEqual(validate({"tts_engine": "chatterbox"}), {"tts_engine": "chatterbox"})
+        with self.assertRaises(ValueError):
+            validate({"tts_engine": "cloud"})
+
+    def test_speech_controller_switches_process_and_model_cache(self):
+        from companion.speech import CHATTERBOX_PYTHON, SpeechController
+        from qt_test_support import application
+        application()
+        speech = SpeechController()
+        self.assertIn("--engine", speech.process.arguments())
+        self.assertEqual(speech.process.arguments()[-1], "pocket")
+        speech.set_engine("chatterbox")
+        self.assertEqual(speech.process.program(), str(CHATTERBOX_PYTHON))
+        self.assertEqual(speech.process.arguments()[-1], "chatterbox")
+        from pathlib import Path
+        self.assertEqual(Path(speech.process.processEnvironment().value("HF_HOME")).parts[-2:], ("voice-lab", "hf"))
+        speech.set_engine("anything else")
+        self.assertEqual(speech.engine, "pocket")
+        self.assertNotEqual(speech.process.program(), str(CHATTERBOX_PYTHON))
+
+    def test_chatterbox_refuses_stock_voices_without_loading_a_model(self):
+        from companion.reference_voice import VoiceSetupError
+        from companion.speech_process import ENGINES, ChatterboxSpeaker
+        self.assertEqual(set(ENGINES), {"pocket", "chatterbox"})
+        with self.assertRaisesRegex(VoiceSetupError, "own voice"):
+            ChatterboxSpeaker().prepare("alba", lambda state: None)

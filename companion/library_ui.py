@@ -1,13 +1,87 @@
 """Small native managers for saved conversations and explicit memories."""
 
+from datetime import datetime
 import sqlite3
 from .character import character_key
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout,
+    QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout,
 )
+
+from .theme import icon_button
+
+
+def when(timestamp, today=None):
+    """"Today, 14:32", "Yesterday, 09:10", "Monday" or "3 Mar 2026", in local time."""
+    try:
+        moment = datetime.fromisoformat(timestamp).astimezone()
+    except (TypeError, ValueError):
+        return ""
+    today = today or datetime.now().astimezone().date()
+    days = (today - moment.date()).days
+    if days <= 0:
+        return f"Today, {moment:%H:%M}"
+    if days == 1:
+        return f"Yesterday, {moment:%H:%M}"
+    if days < 7:
+        return f"{moment:%A}"
+    return f"{moment.day} {moment:%b %Y}"
+
+
+class ConversationRow(QFrame):
+    """One saved conversation: title, when, a glimpse of the last message, and a delete button."""
+    delete_requested = Signal(str)
+
+    def __init__(self, conversation, preview, current, parent=None):
+        super().__init__(parent)
+        self.setObjectName("historyRow")
+        self.conversation_id = conversation["id"]
+        self.full_title = conversation["title"] or "New conversation"
+        row = QHBoxLayout(self)
+        row.setContentsMargins(14, 10, 8, 10)
+        row.setSpacing(10)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        self.title = QLabel(self.full_title)
+        self.title.setObjectName("historyTitle")
+        self.title.setTextFormat(Qt.TextFormat.PlainText)
+        self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        top.addWidget(self.title, 1)
+        if current:
+            badge = QLabel("Open now")
+            badge.setObjectName("historyBadge")
+            top.addWidget(badge)
+        text.addLayout(top)
+        count = conversation["message_count"]
+        meta = QLabel(" · ".join(filter(None, (when(conversation["updated_at"]),
+                                                 f"{count} message{'' if count == 1 else 's'}"))))
+        meta.setObjectName("historyMeta")
+        text.addWidget(meta)
+        self.full_preview = ""
+        self.glimpse = None
+        if preview:
+            self.full_preview = ("You: " if preview["role"] == "user" else "") + " ".join(preview["display"].split())[:200]
+            self.glimpse = QLabel(self.full_preview)
+            self.glimpse.setObjectName("historyPreview")
+            self.glimpse.setTextFormat(Qt.TextFormat.PlainText)
+            self.glimpse.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            text.addWidget(self.glimpse)
+        row.addLayout(text, 1)
+        self.delete = icon_button("delete", "Delete this conversation", "historyDelete")
+        self.delete.clicked.connect(lambda: self.delete_requested.emit(self.conversation_id))
+        row.addWidget(self.delete, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Long titles and previews end in "…" instead of widening the list.
+        for label, full in ((self.title, self.full_title), (self.glimpse, self.full_preview)):
+            if label is not None:
+                label.setText(label.fontMetrics().elidedText(full, Qt.TextElideMode.ElideRight, max(40, label.width())))
 
 
 class HistoryDialog(QDialog):
@@ -15,58 +89,156 @@ class HistoryDialog(QDialog):
         super().__init__(parent)
         self.store = store
         self.character = character_key(parent.settings.character_path) if parent is not None else None
+        self.current_id = getattr(parent, "_conversation_id", None)
         self.selected_id = None
-        self.setWindowTitle("Saved conversations")
-        self.resize(560, 440)
+        self.setWindowTitle("Conversations")
+        self.resize(600, 580)
         layout = QVBoxLayout(self)
-        description = QLabel("Open a conversation with this character to continue it. New conversations keep older chats saved.")
-        description.setWordWrap(True)
-        layout.addWidget(description)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(10)
+        heading = QLabel("Conversations")
+        heading.setObjectName("title")
+        layout.addWidget(heading)
+        self.summary = QLabel()
+        self.summary.setObjectName("subtitle")
+        self.summary.setWordWrap(True)
+        layout.addWidget(self.summary)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search titles")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._filter)
+        layout.addWidget(self.search)
         self.items = QListWidget()
-        self.items.itemDoubleClicked.connect(self._open)
-        layout.addWidget(self.items)
+        self.items.setObjectName("history")
+        self.items.setSpacing(3)
+        self.items.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.items.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.items.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.items.customContextMenuRequested.connect(self._menu)
+        self.items.itemActivated.connect(self._open)
+        self.items.currentItemChanged.connect(lambda *_: self._sync_buttons())
+        layout.addWidget(self.items, 1)
+        self.empty = QLabel()
+        self.empty.setObjectName("hint")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty.setWordWrap(True)
+        layout.addWidget(self.empty, 1)
+        hint = QLabel("Double-click or press Enter to open. Delete removes the selected conversation; "
+                      "saved memories are kept.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         buttons = QHBoxLayout()
-        delete = QPushButton("Delete selected")
-        delete.clicked.connect(self._delete)
-        buttons.addWidget(delete)
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setObjectName("danger")
+        self.delete_button.clicked.connect(self._delete)
+        buttons.addWidget(self.delete_button)
         buttons.addStretch()
         close = QPushButton("Close")
         close.clicked.connect(self.reject)
         buttons.addWidget(close)
-        open_button = QPushButton("Open")
-        open_button.clicked.connect(self._open)
-        buttons.addWidget(open_button)
+        self.open_button = QPushButton("Open")
+        self.open_button.setObjectName("primary")
+        self.open_button.setDefault(True)
+        self.open_button.clicked.connect(self._open)
+        buttons.addWidget(self.open_button)
         layout.addLayout(buttons)
+        QShortcut(QKeySequence(QKeySequence.StandardKey.Delete), self.items, self._delete)
         self.refresh()
 
-    def refresh(self):
+    def refresh(self, keep=None):
         self.items.clear()
-        for conversation in self.store.conversations(self.character):
-            item = QListWidgetItem(f"{conversation['title']}\n{conversation['message_count']} saved messages")
+        # Empty chats (a New that was never used) are clutter, unless it is the one open now.
+        conversations = [c for c in self.store.conversations(self.character)
+                         if c["message_count"] or c["id"] == self.current_id]
+        for conversation in conversations:
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, conversation["id"])
+            item.setData(Qt.ItemDataRole.ToolTipRole, conversation["title"])
+            row = ConversationRow(conversation, self.store.last_message(conversation["id"]),
+                                  conversation["id"] == self.current_id)
+            row.delete_requested.connect(self._delete_id)
+            item.setSizeHint(row.sizeHint())
             self.items.addItem(item)
-        if self.items.count():
-            self.items.setCurrentRow(0)
+            self.items.setItemWidget(item, row)
+        total = len(conversations)
+        self.summary.setText(f"{total} saved conversation{'' if total == 1 else 's'} with this character. "
+                             "Open one to carry on where you left off.")
+        rows = [self.items.item(i) for i in range(self.items.count())]
+        chosen = next((item for item in rows if item.data(Qt.ItemDataRole.UserRole) == keep), None)
+        if chosen or rows:
+            self.items.setCurrentItem(chosen or rows[0])
+        self._filter(self.search.text())
+
+    def _filter(self, text):
+        words = text.lower().split()
+        visible = []
+        for index in range(self.items.count()):
+            item = self.items.item(index)
+            title = (item.data(Qt.ItemDataRole.ToolTipRole) or "").lower()
+            item.setHidden(not all(word in title for word in words))
+            if not item.isHidden():
+                visible.append(item)
+        current = self.items.currentItem()
+        if visible and (current is None or current.isHidden()):
+            self.items.setCurrentItem(visible[0])
+        self.empty.setText("No conversation title matches that search." if words else
+                           "No saved conversations yet. Say hello and this list starts filling up.")
+        self.empty.setVisible(not visible)
+        self.items.setVisible(bool(visible))
+        self._sync_buttons()
+
+    def _selected(self):
+        item = self.items.currentItem()
+        return item if item is not None and not item.isHidden() else None
+
+    def _sync_buttons(self):
+        usable = self._selected() is not None
+        self.open_button.setEnabled(usable)
+        self.delete_button.setEnabled(usable)
+
+    def _menu(self, point):
+        item = self.items.itemAt(point)
+        if item is None:
+            return
+        self.items.setCurrentItem(item)
+        menu = QMenu(self)
+        menu.addAction("Open", self._open)
+        menu.addAction("Delete", self._delete)
+        menu.exec(self.items.viewport().mapToGlobal(point))
 
     @Slot()
-    def _open(self):
-        item = self.items.currentItem()
+    def _open(self, *_):
+        item = self._selected()
         if item:
             self.selected_id = item.data(Qt.ItemDataRole.UserRole)
             self.accept()
 
     @Slot()
     def _delete(self):
-        item = self.items.currentItem()
-        if not item:
+        item = self._selected()
+        if item:
+            self._delete_id(item.data(Qt.ItemDataRole.UserRole))
+
+    @Slot(str)
+    def _delete_id(self, conversation_id):
+        ids = [self.items.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.items.count())]
+        index = ids.index(conversation_id) if conversation_id in ids else 0
+        title = self.items.item(index).data(Qt.ItemDataRole.ToolTipRole) if ids else "this conversation"
+        extra = (" It is the conversation open now, so a fresh one takes its place."
+                 if conversation_id == self.current_id else "")
+        if QMessageBox.question(self, "Delete conversation",
+                                f"Delete “{title}” and all its messages? This cannot be undone.{extra} "
+                                "Saved memories are kept.") != QMessageBox.StandardButton.Yes:
             return
-        if QMessageBox.question(self, "Delete conversation", "Delete this conversation and its messages? Saved memories are managed separately.") != QMessageBox.StandardButton.Yes:
-            return
+        # The next conversation keeps the selection, so clearing out several is quick.
+        following = (ids[index + 1:] + ids[:index])[:1]
         try:
-            self.store.delete_conversation(item.data(Qt.ItemDataRole.UserRole))
-            self.refresh()
+            self.store.delete_conversation(conversation_id)
         except sqlite3.Error:
             QMessageBox.warning(self, "Could not delete", "The database could not be updated. Please try again.")
+            return
+        self.refresh(keep=following[0] if following else None)
 
 
 class MemoryDialog(QDialog):

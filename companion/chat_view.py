@@ -148,6 +148,139 @@ class Bubble(QFrame):
         return '\n'.join(lines)
 
 
+class TaskCard(QFrame):
+    """A computer task in progress: the request, her latest steps, and the state."""
+    STEPS = 6
+
+    def __init__(self, speaker, request, parent=None):
+        super().__init__(parent)
+        self.setObjectName('task')
+        self.request, self.steps, self.status_text = request, [], ''
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 11, 16, 12)
+        layout.setSpacing(4)
+        name = QLabel(f'{speaker.upper()} · TASK')
+        name.setObjectName('speaker')
+        layout.addWidget(name)
+        title = QLabel(request if len(request) <= 160 else request[:157] + '…')
+        title.setObjectName('taskTitle')
+        title.setWordWrap(True)
+        title.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(title)
+        self.list = QLabel()
+        self.list.setObjectName('taskSteps')
+        self.list.setWordWrap(True)
+        self.list.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.list)
+        self.status = QLabel()
+        self.status.setObjectName('taskStatus')
+        layout.addWidget(self.status)
+        self.set_status('Working…', 'working')
+
+    def add_step(self, text):
+        self.steps.append(text)
+        self.list.setText('\n'.join('· ' + step for step in self.steps[-self.STEPS:]))
+
+    def set_status(self, text, state):
+        self.status_text = text
+        self.status.setText(text)
+        self.status.setProperty('state', state)
+        self.status.style().unpolish(self.status)
+        self.status.style().polish(self.status)
+
+    def plain(self):
+        return '\n'.join(['Task: ' + self.request, *self.steps, self.status_text])
+
+
+class OfferCard(QFrame):
+    """A task she has proposed. The person confirms with a click, or simply answers in words."""
+    accepted = Signal(str)
+    declined = Signal()
+
+    def __init__(self, description, parent=None):
+        super().__init__(parent)
+        self.setObjectName('task')
+        self.description, self.state = description, 'Waiting for your answer'
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 11, 16, 12)
+        layout.setSpacing(6)
+        name = QLabel('PROPOSED TASK')
+        name.setObjectName('speaker')
+        layout.addWidget(name)
+        plan = QLabel(description)
+        plan.setObjectName('taskTitle')
+        plan.setWordWrap(True)
+        plan.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(plan)
+        self.row = QHBoxLayout()
+        self.row.setSpacing(8)
+        self.yes = QPushButton('Yes, do it')
+        self.yes.setObjectName('primary')
+        self.no = QPushButton('Not now')
+        for button in (self.yes, self.no):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.row.addWidget(button)
+        self.row.addStretch()
+        layout.addLayout(self.row)
+        self.status = QLabel('Or just tell her, for example “yes, but skip the PDFs”.')
+        self.status.setObjectName('taskStatus')
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.yes.clicked.connect(lambda: self.accepted.emit(self.description))
+        self.no.clicked.connect(self.declined.emit)
+
+    def close_offer(self, text, state='done'):
+        self.state = text
+        self.yes.hide()
+        self.no.hide()
+        self.status.setText(text)
+        self.status.setProperty('state', state)
+        self.status.style().unpolish(self.status)
+        self.status.style().polish(self.status)
+
+    @property
+    def open(self):
+        return self.yes.isVisibleTo(self)
+
+    def plain(self):
+        return '\n'.join(['Proposed task: ' + self.description, self.state])
+
+
+class MemoryNote(QFrame):
+    """"Memory saved" / "Forgot" in the conversation, with Undo, like other assistants show it."""
+    undo = Signal()
+
+    def __init__(self, text, can_undo=True, parent=None):
+        super().__init__(parent)
+        self.setObjectName('memoryNote')
+        self.text = text
+        row = QHBoxLayout(self)
+        row.setContentsMargins(12, 5, 6, 5)
+        row.setSpacing(8)
+        icon = QLabel(ICONS['memories'])
+        icon.setObjectName('memoryIcon')
+        row.addWidget(icon)
+        self.label = QLabel(text)
+        self.label.setObjectName('memoryText')
+        self.label.setWordWrap(True)
+        self.label.setTextFormat(Qt.TextFormat.PlainText)
+        row.addWidget(self.label, 1)
+        self.button = QPushButton('Undo')
+        self.button.setObjectName('memoryUndo')
+        self.button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button.setVisible(can_undo)
+        self.button.clicked.connect(self.undo.emit)
+        row.addWidget(self.button)
+
+    def settle(self, text):
+        self.text = text
+        self.label.setText(text)
+        self.button.hide()
+
+    def plain(self):
+        return self.text
+
+
 class Welcome(QWidget):
     suggestion = Signal(str)
 
@@ -223,7 +356,7 @@ class ChatView(QScrollArea):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         for item in self._items:
-            if isinstance(item, Bubble):
+            if isinstance(item, (Bubble, TaskCard, OfferCard)):
                 item.setMaximumWidth(self._bubble_width())
 
     def _add(self, widget, align):
@@ -265,6 +398,21 @@ class ChatView(QScrollArea):
         bubble.set_text(text)
         bubble.set_notice(notice)
         return self._add(bubble, 'right' if role == 'user' else 'left')
+
+    def add_offer(self, description):
+        card = OfferCard(description)
+        card.setMaximumWidth(self._bubble_width())
+        return self._add(card, 'left')
+
+    def add_memory_note(self, text, can_undo=True):
+        note = MemoryNote(text, can_undo)
+        note.setMaximumWidth(self._bubble_width())
+        return self._add(note, 'left')
+
+    def add_task_card(self, speaker, request):
+        card = TaskCard(speaker, request)
+        card.setMaximumWidth(self._bubble_width())
+        return self._add(card, 'left')
 
     def add_note(self, text, tone=''):
         note = QLabel(text.strip())

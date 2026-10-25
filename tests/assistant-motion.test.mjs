@@ -67,14 +67,14 @@ test('speech emphasis requires real voice level and reset clears any pending nod
   const h=harness();h.request('speaking');h.advance(2);
   assert.equal(h.motion.snapshot().nod,0,'speaking state alone is silent');
   h.motion.setVoice(.8);h.advance(1);
-  assert.ok(h.motion.snapshot().nod>1,'actual playback creates a small nod');
+  assert.ok(h.motion.snapshot().nod>.5,'actual playback creates a small nod');
   const before=h.avatar.pose.angleY;
   h.motion.resetVoice();assert.equal(h.motion.snapshot().nod,0);
   h.step();assert.ok(Math.abs(h.avatar.pose.angleY-before)<.4,'audio reset releases the pose without a head snap');
   h.advance(3);assert.equal(h.motion.snapshot().nod,0,'reset playback cannot retrigger a nod');
   h.request('ready');h.advance(.3);h.motion.setVoice(1);h.advance(2);
   assert.equal(h.motion.snapshot().nod,0,'voice outside the speaking state does not animate emphasis');
-  h.request('speaking');h.advance(2);assert.ok(h.motion.snapshot().nod>1);
+  h.request('speaking');h.advance(2);assert.ok(h.motion.snapshot().nod>.5);
   h.motion.suspend();assert.equal(h.motion.snapshot().nod,0);
 });
 

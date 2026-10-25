@@ -54,6 +54,7 @@ class DesktopAvatar(QWidget):
     hide_requested = Signal()
     menu_requested = Signal(QPoint)
     resized = Signal()
+    moved = Signal()  # A drag finished.
 
     def __init__(self):
         # A separate tool window stays reachable when the chat is hidden in the tray.
@@ -163,6 +164,8 @@ class DesktopAvatar(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
             if not self._dragged:
                 self.open_requested.emit()
+            else:
+                self.moved.emit()
             event.accept()
 
     def contextMenuEvent(self, event):
@@ -227,6 +230,8 @@ class DesktopAvatar(QWidget):
 
 
 class AvatarController(QObject):
+    placed = Signal()  # Position or size changed by the user; worth remembering.
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -245,6 +250,7 @@ class AvatarController(QObject):
         window.avatar_cursor_attention.toggled.connect(self.set_attention_controls)
         window.avatar_gaze.valueChanged.connect(self.set_attention_controls)
         window.avatar_hair.valueChanged.connect(self.set_attention_controls)
+        window.avatar_sleep.currentIndexChanged.connect(self.set_sleep_delay)
         window.preview_avatar_motion.clicked.connect(self.toggle_motion_preview)
         window.hands_free.toggled.connect(self._preview_context_changed)
         window.speech.changed.connect(self._preview_context_changed)
@@ -292,6 +298,7 @@ class AvatarController(QObject):
         self._apply_dimensions()
         self.set_visual_controls()
         self.set_attention_controls()
+        self.set_sleep_delay()
         self._update_preview_controls()
 
     @Slot(bool)
@@ -307,6 +314,7 @@ class AvatarController(QObject):
                 self.widget.menu_requested.connect(self.show_menu)
                 self.widget.resized.connect(self.constrain)
                 self.widget.resized.connect(self._resized)
+                self.widget.moved.connect(self.placed)
                 if hasattr(self.widget, 'preview_changed'):
                     self.widget.preview_changed.connect(self._preview_changed)
                 self.widget.set_name(self.window.settings.name)
@@ -314,6 +322,7 @@ class AvatarController(QObject):
                 self._apply_dimensions()
                 self.set_visual_controls()
                 self.set_attention_controls()
+                self.set_sleep_delay()
                 x, y = self._position
                 if x is None or y is None:
                     self.reset_position()
@@ -369,7 +378,8 @@ class AvatarController(QObject):
 
     def _apply_dimensions(self):
         if self.widget is not None and hasattr(self.widget, 'set_visual_controls') and not self.widget.failed:
-            self.widget.resize(*self._dimensions)
+            fitted = getattr(self.widget, 'fitted', None)
+            self.widget.resize(*(fitted(self._dimensions[0]) if fitted else self._dimensions))
             self.constrain()
 
     def _resized(self):
@@ -378,10 +388,12 @@ class AvatarController(QObject):
             with QSignalBlocker(self.window.avatar_size):
                 self.window.avatar_size.setValue(self.widget.width())
             self.window.avatar_size_label.setText(f'{self.widget.width()}px')
+            self.placed.emit()
 
     @Slot(int)
     def set_size(self, width):
-        self._dimensions = (width, round(width * 350 / 320))
+        fitted = getattr(self.widget, 'fitted', None)
+        self._dimensions = fitted(width) if fitted else (width, round(width * 350 / 320))
         self._apply_dimensions()
 
     @Slot()
@@ -401,6 +413,11 @@ class AvatarController(QObject):
         if self.widget is not None and hasattr(self.widget, 'set_attention_controls'):
             self.widget.set_attention_controls(self.window.avatar_cursor_attention.isChecked(),
                                                self.window.avatar_gaze.value(), self.window.avatar_hair.value())
+
+    @Slot()
+    def set_sleep_delay(self):
+        if self.widget is not None and hasattr(self.widget, 'set_sleep_delay'):
+            self.widget.set_sleep_delay(self.window.avatar_sleep.currentData() or 0)
 
     @Slot()
     def hide_avatar(self):
@@ -490,6 +507,7 @@ class AvatarController(QObject):
             area = screen.availableGeometry()
             self.widget.move(area.right() - self.widget.width() - 23, area.bottom() - self.widget.height() - 23)
             self.constrain()
+            self.placed.emit()
 
     @Slot()
     def constrain(self):
@@ -511,6 +529,13 @@ class AvatarController(QObject):
         menu.addAction("Settings", self.window.open_settings)
         menu.addAction("Stop", self.window._stop)
         menu.addAction("Resume" if self.window.suspended else "Suspend", self.window.toggle_suspended)
+        if hasattr(self.widget, 'play_cue') and getattr(self.widget, 'kind', '') == 'live2d':
+            from .avatar_cues import EXPRESSION_MENU
+            expressions = menu.addMenu("Expression")
+            for label, cue in EXPRESSION_MENU:
+                expressions.addAction(label, lambda cue=cue: self.cue(cue))
+            expressions.addSeparator()
+            expressions.addAction("Test all animations…", self.window.open_animation_tester)
         menu.addSeparator()
         menu.addAction("Reload avatar", self.reload_avatar)
         menu.addAction("Reset position", self.reset_position)
@@ -518,6 +543,17 @@ class AvatarController(QObject):
         menu.addAction("Quit", self.window.request_quit)
         menu.aboutToHide.connect(menu.deleteLater)
         menu.popup(point)
+
+    def cue(self, name):
+        """Show an expression or gesture, from a reply cue, the avatar menu or the tester."""
+        if self.widget is not None and hasattr(self.widget, 'play_cue'):
+            return self.widget.play_cue(name)
+        return False
+
+    def work(self, state, text=""):
+        """Show her working on a computer task (Live2D): face, motion and a progress panel."""
+        if self.widget is not None and hasattr(self.widget, 'set_work'):
+            self.widget.set_work(state, text)
 
     def reload_avatar(self):
         if self.widget is not None:

@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import httpx
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QEvent, QObject, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 
 from companion.config import DEFAULT_MODEL, Settings
 from companion.ui import CompanionWindow
@@ -174,6 +174,80 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(len(self.window._messages), 2)
         self.assertEqual(self.window.status.text(), "Ready")
         self.assertTrue(self.window.send_button.isEnabled())
+
+    def test_avatar_cues_drive_the_avatar_and_never_reach_text_speech_or_history(self):
+        def handler(request):
+            body = json.loads(request.content)
+            self.assertIn("Avatar cues", body["messages"][0]["content"])
+            chunks = ["[[bl", "ush]] You noticed", "? [[smi", "le]] I did."]
+            return httpx.Response(200, text="".join(
+                'data: ' + json.dumps({"choices": [{"delta": {"content": c}, "finish_reason": None}]}) + "\n\n" for c in chunks)
+                + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+        shown = []
+        self.window.show_avatar.setChecked(True)
+        with patch.object(self.window.avatar, "cue", side_effect=shown.append), self.mock_client(handler):
+            self.send("Do you like my scarf?")
+            self.wait_until(lambda: self.window._worker is None)
+        self.assertEqual(shown, ["blush", "smile"])
+        self.assertIn("You noticed? I did.", self.window.transcript.toPlainText())
+        self.assertNotIn("[[", self.window.transcript.toPlainText())
+        stored = self.window.store.messages(self.window._conversation_id)[-1]
+        self.assertEqual(stored["display"], "You noticed? I did.")
+        self.assertNotIn("[[", self.window.store.context(self.window._conversation_id)[-1]["content"])
+
+    def test_scrolling_over_settings_never_changes_them(self):
+        from PySide6.QtCore import QPoint, QPointF
+        from PySide6.QtGui import QWheelEvent
+        self.window.open_settings()
+        self.app.processEvents()
+        combo, slider = self.window.avatar_sleep, self.window.avatar_motion
+        before = (combo.currentIndex(), slider.value())
+        for control in (combo, slider):
+            event = QWheelEvent(QPointF(5, 5), QPointF(control.mapToGlobal(QPoint(5, 5))), QPoint(0, 0), QPoint(0, -120),
+                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+            self.app.sendEvent(control, event)
+        self.assertEqual((combo.currentIndex(), slider.value()), before)
+        self.assertEqual(combo.focusPolicy(), Qt.FocusPolicy.StrongFocus)
+        self.window.settings_dialog.hide()
+
+    def test_avatar_settings_are_remembered_without_save_defaults(self):
+        import tempfile
+        from pathlib import Path
+        from companion.preferences import Preferences
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        preferences = Preferences(Path(folder.name) / "preferences.json")
+        self.replace_window(preferences=preferences)
+        self.window.animate_avatar.setChecked(False)
+        self.window.avatar_sleep.setCurrentIndex(self.window.avatar_sleep.findData(10))
+        self.window.avatar_gaze.setValue(40)
+        self.window.volume.setValue(5)  # Not an avatar setting: still waits for Save defaults.
+        self.wait_until(lambda: not self.window._avatar_save.isActive())
+        loaded = Preferences(Path(folder.name) / "preferences.json").load(SETTINGS)
+        self.assertEqual((loaded.avatar_animated, loaded.avatar_sleep_minutes, loaded.avatar_gaze), (False, 10, 40))
+        self.assertNotEqual(loaded.tts_volume, 5)
+
+    def test_animation_tester_explains_what_is_needed_and_plays_on_a_ready_rig(self):
+        self.window.open_animation_tester()
+        self.assertEqual(self.window.settings_tabs.currentIndex(), 2)
+        self.window.animation_buttons["blush"].click()
+        self.assertIn("Show desktop avatar", self.window.animation_status.text())
+        played = []
+
+        class Rig:
+            kind = "live2d"
+            def play_cue(self, name):
+                played.append(name)
+                return True
+        with patch.object(self.window.avatar, "widget", Rig()):
+            self.window.show_avatar.blockSignals(True)
+            self.window.show_avatar.setChecked(True)
+            self.window.show_avatar.blockSignals(False)
+            self.window.animation_buttons["test:sleep"].click()
+            self.window.animation_buttons["neutral"].click()
+        self.assertEqual(played, ["test:sleep", "neutral"])
+        self.assertEqual(self.window.animation_status.text(), "Playing: Neutral.")
+        self.window.settings_dialog.hide()
 
     def test_switching_response_provider_keeps_character_voice_memory_and_conversation(self):
         before=self.window.settings

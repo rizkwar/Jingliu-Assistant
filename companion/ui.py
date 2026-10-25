@@ -7,7 +7,8 @@ import time
 from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QImage, QKeyEvent
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMenu,
+    QMessageBox,
     QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -28,15 +29,35 @@ from .avatar_presets import AVATAR_MOTION_PRESETS, motion_preset_name
 from .avatar_models import AvatarModels
 from .connection_ui import ConnectionPanel
 from .prompts import reply_prompt
+from .avatar_cues import TEST_GROUPS, CueFilter
 from .reference_voice import inspect_reference, VoiceSetupError
 from . import attachments
 from .chat_view import AttachmentCard, ChatView
-from .theme import ACTIVITY_COLORS, ICONS, STYLE, NightSky, glyph_icon, icon_button, moon_icon, repolish
+from .theme import ACTIVITY_COLORS, ICONS, STYLE, NightSky, WindowChrome, glyph_icon, icon_button, moon_icon, repolish
 
 
 # Calm, everyday states that should not displace the default footer hint.
 IDLE_NOTES = {"", "Microphone off", "Voice loads on first use", "Voice ready", "Voice stopped", "Hands-free off"}
 SEALS = {"jingliu": "镜流"}
+
+
+_YES = {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "go", "do", "sounds"}
+_NO = {"no", "nope", "nah", "not", "cancel", "dont", "never", "stop"}
+_FILLER = {"please", "ahead", "it", "for", "good", "great", "perfect", "thanks", "thank", "you", "that",
+           "then", "now", "mind", "jingliu", "go", "do", "sure", "of", "course"}
+
+
+def offer_answer(text):
+    """"yes" or "no" for a short, plain answer to her proposal ("yeah go ahead", "not now, thanks");
+    None for anything else, such as "yes, but skip the PDFs", which she should read herself."""
+    words = "".join(c if c.isalnum() or c.isspace() else " " for c in text.lower().replace("'", "")).split()
+    if not words or len(words) > 6:
+        return None
+    if words[0] in _NO and all(word in _NO | _FILLER for word in words):
+        return "no"
+    if (words[0] in _YES or words[0] == "please") and all(word in _YES | _FILLER for word in words):
+        return "yes"
+    return None
 
 
 class Note(QLabel):
@@ -138,6 +159,9 @@ class CompanionWindow(QMainWindow):
         self._streaming_voice = False
         self._voice_for_reply = False
         self._spoken_phrases = []
+        self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
+        self._task, self._task_request, self._task_offer, self._offer_card = None, None, None, None
+        self._memory_actions = []
         self._voice_note = ""
         self._voice_message = None
         # The entry point injects a disk store. Isolated previews/tests use RAM.
@@ -161,6 +185,8 @@ class CompanionWindow(QMainWindow):
         self._scroll_timer.timeout.connect(self._scroll_to_latest)
         self.setWindowTitle(f"{settings.name} · Desktop Companion")
         self.setWindowIcon(moon_icon())
+        self._chrome = WindowChrome(self)
+        self._chrome.watch(self)
         self.resize(780, 860)
         self.setMinimumSize(460, 560)
         self.setStyleSheet(STYLE)
@@ -247,6 +273,7 @@ class CompanionWindow(QMainWindow):
         self.reload.clicked.connect(self._reload_settings)
 
         self.settings_dialog = QDialog(self)
+        self._chrome.watch(self.settings_dialog)
         self.settings_dialog.setWindowTitle("Settings")
         self.settings_dialog.setWindowIcon(moon_icon())
         self.settings_dialog.setMinimumWidth(520)
@@ -309,6 +336,21 @@ class CompanionWindow(QMainWindow):
         settings_layout.addStretch()
         settings_layout = voice_page
         section(settings_layout, "Voice")
+        engine_row = QHBoxLayout()
+        engine_label = QLabel("Voice engine")
+        self.voice_engine = QComboBox()
+        self.voice_engine.setAccessibleName("Voice engine")
+        engine_label.setBuddy(self.voice_engine)
+        self.voice_engine.addItem("Pocket TTS · fast and light (CPU)", "pocket")
+        self.voice_engine.addItem("Chatterbox · more natural (needs the GPU)", "chatterbox")
+        self.voice_engine.setCurrentIndex(max(0, self.voice_engine.findData(settings.tts_engine)))
+        engine_row.addWidget(engine_label)
+        engine_row.addWidget(self.voice_engine, 1)
+        settings_layout.addLayout(engine_row)
+        self.voice_engine_hint = QLabel()
+        self.voice_engine_hint.setObjectName("hint")
+        self.voice_engine_hint.setWordWrap(True)
+        settings_layout.addWidget(self.voice_engine_hint)
         voice_row = QHBoxLayout()
         self.auto_speak = QCheckBox("Speak replies")
         self.auto_speak.setChecked(settings.tts_enabled)
@@ -374,6 +416,8 @@ class CompanionWindow(QMainWindow):
         self.voice_status = Note(self)
         self.voice_status.hide()
         self.voice_status.setText("Voice loads on first use")
+        self.voice_engine.currentIndexChanged.connect(self._voice_engine_changed)
+        self._apply_voice_engine(settings.tts_engine)
         self.speech.changed.connect(self._voice_changed)
         self.speech.failed.connect(self._voice_failed)
         self.speech.spoken.connect(self._phrase_spoken)
@@ -426,10 +470,41 @@ class CompanionWindow(QMainWindow):
         self.use_memories.setChecked(settings.memory_enabled)
         self.use_memories.toggled.connect(self._memory_toggled)
         settings_layout.addWidget(self.use_memories)
-        memory_hint = QLabel("Turning this off affects future requests. Existing conversation context still applies.")
+        self.auto_memory = QCheckBox("Let her remember important things on her own")
+        self.auto_memory.setChecked(settings.auto_memory)
+        self.auto_memory.setToolTip("On: like other assistants, she saves lasting preferences and facts you mention. "
+                                    "Off: she saves only when you ask (\"remember that…\"). Either way you see each "
+                                    "change in the chat, can undo it, and can edit everything in Memories.")
+        settings_layout.addWidget(self.auto_memory)
+        self.auto_memory.toggled.connect(self._auto_memory_toggled)
+        memory_hint = QLabel("Ask her to remember or forget something in your own words. Turning off relevant "
+                             "memories affects future requests; existing conversation context still applies.")
         memory_hint.setObjectName("hint")
         memory_hint.setWordWrap(True)
         settings_layout.addWidget(memory_hint)
+        section(settings_layout, "Computer tasks")
+        self.computer_tasks = QCheckBox("Let her do tasks on this computer when I ask")
+        self.computer_tasks.setChecked(settings.computer_tasks)
+        settings_layout.addWidget(self.computer_tasks)
+        self.confirm_tasks = QCheckBox("Confirm with me before she starts a task")
+        self.confirm_tasks.setChecked(settings.confirm_tasks)
+        self.confirm_tasks.setToolTip("On: she describes what she would do and waits for your yes. "
+                                      "Off: she starts clear, specific requests right away and only asks when unsure.")
+        settings_layout.addWidget(self.confirm_tasks)
+        self.confirm_tasks.toggled.connect(self._confirm_tasks_toggled)
+        self.approve_steps = QCheckBox("Ask before she runs commands or uses the mouse and keyboard")
+        self.approve_steps.setChecked(settings.approve_steps)
+        self.approve_steps.setToolTip("On: commands, file changes, clicks and typing wait for your Allow. "
+                                      "Off: she does them immediately; each step still appears in the chat "
+                                      "and Stop cancels the task.")
+        settings_layout.addWidget(self.approve_steps)
+        self.approve_steps.toggled.connect(self._approve_steps_toggled)
+        self.tasks_hint = tasks_hint = QLabel()
+        tasks_hint.setObjectName("hint")
+        tasks_hint.setWordWrap(True)
+        settings_layout.addWidget(tasks_hint)
+        self.computer_tasks.toggled.connect(self._computer_tasks_toggled)
+        self._describe_tasks()
         section(settings_layout, "Window")
         self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
         self.close_to_tray.setChecked(settings.close_to_tray)
@@ -496,6 +571,22 @@ class CompanionWindow(QMainWindow):
             'Brief desktop cursor glances with pauses between them. Cursor positions stay on this computer. '
             'Save defaults to keep this setting.')
         settings_layout.addWidget(self.avatar_cursor_attention)
+        sleep_row = QHBoxLayout()
+        sleep_label = QLabel('Doze off when left alone')
+        self.avatar_sleep = QComboBox()
+        self.avatar_sleep.setAccessibleName('Doze off when left alone')
+        sleep_label.setBuddy(self.avatar_sleep)
+        for label, minutes in (('Never', 0), ('After 2 minutes', 2), ('After 5 minutes', 5),
+                               ('After 10 minutes', 10), ('After 20 minutes', 20)):
+            self.avatar_sleep.addItem(label, minutes)
+        self._set_sleep_option(settings.avatar_sleep_minutes)
+        self.avatar_sleep.setToolTip(
+            'Live2D only. With no conversation, clicks or hovering, she grows drowsy and falls asleep '
+            '(a little sooner late at night). Talking to her, clicking her or resting the pointer on her wakes her. '
+            'Save defaults to keep this setting.')
+        sleep_row.addWidget(sleep_label)
+        sleep_row.addWidget(self.avatar_sleep, 1)
+        settings_layout.addLayout(sleep_row)
         preset_row = QHBoxLayout()
         preset_label = QLabel('Motion preset')
         self.avatar_preset = QComboBox()
@@ -554,9 +645,41 @@ class CompanionWindow(QMainWindow):
         self.avatar_preview_status.setObjectName('hint')
         self.avatar_preview_status.setWordWrap(True)
         settings_layout.addWidget(self.avatar_preview_status)
+        section(settings_layout, "Animation tester")
+        self.animation_tester = QWidget()
+        tester = QVBoxLayout(self.animation_tester)
+        tester.setContentsMargins(0, 0, 0, 0)
+        tester.setSpacing(6)
+        tester_hint = QLabel("Play any expression, gesture or sleep stage on the Live2D avatar right away. "
+                             "These are the same expressions she chooses herself while replying.")
+        tester_hint.setObjectName("hint")
+        tester_hint.setWordWrap(True)
+        tester.addWidget(tester_hint)
+        self.animation_buttons = {}
+        for title, items in TEST_GROUPS:
+            group = QLabel(title)
+            group.setObjectName("subtitle")
+            tester.addWidget(group)
+            grid = QGridLayout()
+            grid.setSpacing(6)
+            for column in range(4):
+                grid.setColumnStretch(column, 1)  # Same button width in every group.
+            for index, (label, name) in enumerate(items):
+                button = QPushButton(label)
+                button.setObjectName("chip")
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.clicked.connect(lambda _=False, name=name, label=label: self._test_animation(name, label))
+                grid.addWidget(button, index // 4, index % 4)
+                self.animation_buttons[name] = button
+            tester.addLayout(grid)
+        self.animation_status = QLabel("Show the Live2D avatar, then pick an animation.")
+        self.animation_status.setObjectName("hint")
+        self.animation_status.setWordWrap(True)
+        tester.addWidget(self.animation_status)
+        settings_layout.addWidget(self.animation_tester)
         settings_layout.addStretch()
-        self.preference_status = QLabel("Changes apply now. Your model and character are remembered automatically; "
-                                        "Save defaults keeps everything else after restarting.")
+        self.preference_status = QLabel("Changes apply now. Your model, character and avatar settings are remembered "
+                                        "automatically; Save defaults keeps voice, microphone and app settings.")
         self.preference_status.setObjectName("hint")
         self.preference_status.setWordWrap(True)
         settings_outer.addWidget(self.preference_status)
@@ -672,6 +795,17 @@ class CompanionWindow(QMainWindow):
         self.auto_speak.toggled.connect(self._speak_glyph)
         self._restore_conversation(self._conversation_id)
         self.avatar = AvatarController(self)
+        # Avatar choices are remembered as you make them; no Save defaults needed.
+        self._avatar_save = QTimer(self)
+        self._avatar_save.setSingleShot(True)
+        self._avatar_save.setInterval(600)
+        self._avatar_save.timeout.connect(self._remember_avatar)
+        for control in (self.show_avatar, self.animate_avatar, self.avatar_hd, self.avatar_cursor_attention):
+            control.toggled.connect(self._avatar_save.start)
+        for slider in (self.avatar_size, self.avatar_motion, self.avatar_lip_sensitivity, self.avatar_gaze, self.avatar_hair):
+            slider.valueChanged.connect(self._avatar_save.start)
+        self.avatar_sleep.currentIndexChanged.connect(self._avatar_save.start)
+        self.avatar.placed.connect(self._avatar_save.start)
         self.input.setFocus()
 
     def eventFilter(self, watched, event):
@@ -813,6 +947,15 @@ class CompanionWindow(QMainWindow):
             return
         if not files and self._local_command(text):
             return
+        if self._offer_card is not None and self._offer_card.open and not self._closing:
+            # A plain yes (typed or spoken) starts the offered plan at once; anything more goes to her.
+            answer = offer_answer(text) if not files else None
+            if answer == "yes":
+                self.input.clear()
+                self._accept_offer(self._offer_card, self._offer_card.description, text)
+                return
+            self._offer_card.close_offer("Not now." if answer == "no" else "You answered in the chat.",
+                                         "failed" if answer == "no" else "done")
         try:
             self.settings.validate_connection()
         except ValueError as exc:
@@ -859,7 +1002,14 @@ class CompanionWindow(QMainWindow):
         self._reply = ""
         self.transcript.add_message("user", "You", text, attachments=stored)
         self.transcript.begin_reply(self.settings.name)
-        prompt = reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None)
+        prompt = reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None,
+                              avatar_cues=self.show_avatar.isChecked(),
+                              computer_tasks=self.computer_tasks.isChecked(),
+                              confirm_tasks=self.confirm_tasks.isChecked(),
+                              memory_cues=True, auto_memory=self.auto_memory.isChecked())
+        self._task_request = self._task_offer = None
+        self._memory_actions = []
+        self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
         self._worker_kind = "reply"
         worker = ReplyWorker(replace(self.settings, system_prompt=prompt), context, self)
         self._worker = worker
@@ -913,7 +1063,8 @@ class CompanionWindow(QMainWindow):
         preview_active = bool(getattr(getattr(getattr(self, 'avatar', None), 'widget', None),
                                       '_preview_active', False))
         self.stop_button.setEnabled(self._worker is not None or self.microphone.busy or self.speech.busy
-                                    or self.hands_free.isChecked() or preview_active)
+                                    or self.hands_free.isChecked() or preview_active
+                                    or getattr(self, "_task", None) is not None)
         self.stop_button.setVisible(self.stop_button.isEnabled())
 
     def _refresh_activity(self) -> None:
@@ -952,6 +1103,11 @@ class CompanionWindow(QMainWindow):
             else:
                 self._summary_text += text
             return
+        # Expression cues leave the text here, before display, speech or saving.
+        text, cues = self._cues.feed(text)
+        self._queue_cues(cues)
+        if not text:
+            return
         self.status.setText("Replying…")
         self._reply += text
         self._refresh_activity()
@@ -970,6 +1126,14 @@ class CompanionWindow(QMainWindow):
             self._finish_summary(worker)
             return
         interrupted = worker.stop_requested.is_set() or bool(worker.error)
+        tail = self._cues.finish()
+        if tail and not interrupted:
+            self._reply += tail
+            self.transcript.append_reply(tail)
+            if self._streaming_voice:
+                self.speech.feed_reply(tail)
+        if not self._streaming_voice or interrupted:
+            self._flush_cues(all_cues=not interrupted)
         if interrupted:
             self._interrupt_speech()
         elif self._streaming_voice:
@@ -993,9 +1157,23 @@ class CompanionWindow(QMainWindow):
         else:
             self._messages.pop()  # Do not carry an unanswered failed turn into the next request.
         self._save_timer.stop()
+        task_turn = self._active_turn
         self._save_active_turn()
         self.transcript.end_reply(notice="Reply stopped" if interrupted and not worker.error else "",
                                   error=worker.error)
+        if not worker.error:
+            self._apply_memory_actions()
+        self._memory_actions = []
+        if not interrupted and self.computer_tasks.isChecked():
+            if self._task_request is not None:
+                # Her own description of the agreed job; the person's words are the fallback.
+                request = self._task_request or next(
+                    (m["content"] for m in reversed(self._messages) if m["role"] == "user"), "")
+                acknowledgement = self._reply
+                QTimer.singleShot(0, lambda: self._start_task(request, task_turn, acknowledgement))
+            elif self._task_offer:
+                self._show_offer(self._task_offer)
+        self._task_request = self._task_offer = None
         self._worker = None
         worker.deleteLater()
         if worker.error:
@@ -1020,6 +1198,8 @@ class CompanionWindow(QMainWindow):
             self.microphone.cancel()
             self.mic_status.setText("Recording or transcription cancelled")
         self._interrupt_speech()
+        if self._task is not None:
+            self._task.stop()
         if self._worker:
             self._worker.stop()
             self.stop_button.setEnabled(False)
@@ -1121,6 +1301,10 @@ class CompanionWindow(QMainWindow):
         self.avatar_cursor_attention.setChecked(settings.avatar_cursor_attention)
         self.avatar_gaze.setValue(settings.avatar_gaze)
         self.avatar_hair.setValue(settings.avatar_hair)
+        self._set_sleep_option(settings.avatar_sleep_minutes)
+        with QSignalBlocker(self.voice_engine):
+            self.voice_engine.setCurrentIndex(max(0, self.voice_engine.findData(settings.tts_engine)))
+        self._apply_voice_engine(settings.tts_engine)
         self.mic_device.clear()
         self.mic_device.addItem("Windows default microphone", None)
         if settings.stt_microphone:
@@ -1284,6 +1468,7 @@ class CompanionWindow(QMainWindow):
                                 builtin=self.voice.currentData() if self.voice.currentData() in VOICES else draft.builtin,
                                 rate=self.delivery_rate.value())
             dialog = CharacterDialog(self.characters, self, existing=existing, draft=draft)
+            self._chrome.watch(dialog)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "Could not edit character", str(exc))
             return
@@ -1338,7 +1523,294 @@ class CompanionWindow(QMainWindow):
             avatar_hd=self.avatar_hd.isChecked(),
             avatar_cursor_attention=self.avatar_cursor_attention.isChecked(),
             avatar_gaze=self.avatar_gaze.value(), avatar_hair=self.avatar_hair.value(),
+            avatar_sleep_minutes=self.avatar_sleep.currentData(),
+            tts_engine=self.voice_engine.currentData(),
         )
+
+    AVATAR_FIELDS = ("avatar_enabled", "avatar_animated", "avatar_x", "avatar_y", "avatar_width", "avatar_height",
+                     "avatar_motion", "avatar_lip_sensitivity", "avatar_hd", "avatar_cursor_attention",
+                     "avatar_gaze", "avatar_hair", "avatar_sleep_minutes")
+
+    @Slot()
+    def _remember_avatar(self):
+        if self._closing:
+            return
+        current = self._current_preferences()
+        self.settings = replace(self.settings, **{key: getattr(current, key) for key in self.AVATAR_FIELDS})
+        try:
+            self.preferences.remember(current, self.AVATAR_FIELDS)
+        except (OSError, ValueError):
+            pass  # The choice still applies now; Save defaults reports problems explicitly.
+
+    # Computer tasks ---------------------------------------------------------------
+
+    @Slot(bool)
+    def _computer_tasks_toggled(self, enabled):
+        self.settings = replace(self.settings, computer_tasks=enabled)
+        try:
+            self.preferences.remember(self.settings, ("computer_tasks",))
+        except (OSError, ValueError):
+            pass
+
+    @Slot(bool)
+    def _approve_steps_toggled(self, enabled):
+        self.settings = replace(self.settings, approve_steps=enabled)
+        self._describe_tasks()
+        try:
+            self.preferences.remember(self.settings, ("approve_steps",))
+        except (OSError, ValueError):
+            pass
+
+    def _describe_tasks(self):
+        steps = ("she asks you before running commands, changing files, or using the mouse and keyboard."
+                 if self.approve_steps.isChecked() else
+                 "she runs commands, changes files and uses the mouse and keyboard without asking, "
+                 "showing each step in the chat.")
+        self.tasks_hint.setText("Uses Claude Code with your Claude plan. She can read files, search and look at the "
+                                f"screen; {steps} Ask in chat, or type /do followed by the task. Stop cancels a task.")
+
+    # Memory ----------------------------------------------------------------------
+
+    @Slot(bool)
+    def _auto_memory_toggled(self, enabled):
+        self.settings = replace(self.settings, auto_memory=enabled)
+        try:
+            self.preferences.remember(self.settings, ("auto_memory",))
+        except (OSError, ValueError):
+            pass
+
+    def _apply_memory_actions(self):
+        actions, self._memory_actions = self._memory_actions, []
+        for action, detail in actions:
+            self._remember(detail) if action == "remember" else self._forget(detail)
+
+    def _remember(self, fact):
+        fact = " ".join(fact.split())[:1000]
+        try:
+            known = {memory["id"] for memory in self.store.memories()}
+            memory_id = self.store.save_memory(fact)
+        except (ValueError, sqlite3.Error):
+            self.transcript.add_note("She tried to remember something, but it could not be saved.", "warning")
+            return
+        if memory_id in known:
+            self.transcript.add_memory_note(f"Already remembered: “{fact}”", can_undo=False)
+            return
+        note = self.transcript.add_memory_note(f"Memory saved: “{fact}”")
+
+        def undo(note=note, memory_id=memory_id, fact=fact):
+            try:
+                self.store.delete_memory(memory_id)
+            except sqlite3.Error:
+                return
+            note.settle(f"Not remembered: “{fact}”")
+        note.undo.connect(undo)
+
+    def _forget(self, description):
+        from .storage import terms
+        wanted = terms(description)
+        try:
+            memories = self.store.memories()
+        except sqlite3.Error:
+            return
+        # The memory sharing the most words with her description; it must clearly match.
+        scored = sorted(((len(wanted & terms(m["content"])) / max(1, len(wanted)), m) for m in memories),
+                        key=lambda item: item[0], reverse=True)
+        if not scored or scored[0][0] < .5:
+            self.transcript.add_memory_note(f"No saved memory matched “{description}”. Open Memories to remove it.",
+                                            can_undo=False)
+            return
+        memory = scored[0][1]
+        try:
+            self.store.delete_memory(memory["id"])
+        except sqlite3.Error:
+            return
+        note = self.transcript.add_memory_note(f"Forgot: “{memory['content']}”")
+
+        def undo(note=note, memory=memory):
+            try:
+                self.store.save_memory(memory["content"], pinned=bool(memory["pinned"]))
+            except (ValueError, sqlite3.Error):
+                return
+            note.settle(f"Kept: “{memory['content']}”")
+        note.undo.connect(undo)
+
+    @Slot(bool)
+    def _confirm_tasks_toggled(self, enabled):
+        self.settings = replace(self.settings, confirm_tasks=enabled)
+        try:
+            self.preferences.remember(self.settings, ("confirm_tasks",))
+        except (OSError, ValueError):
+            pass
+
+    def _show_offer(self, description):
+        if self._offer_card is not None and self._offer_card.open:
+            self._offer_card.close_offer("Replaced by her newer suggestion.")
+        card = self.transcript.add_offer(description)
+        self._offer_card = card
+        card.accepted.connect(lambda text, card=card: self._accept_offer(card, text))
+        card.declined.connect(lambda card=card: self._decline_offer(card))
+
+    def _accept_offer(self, card, description, words="Yes, do it."):
+        if self._worker or self.suspended or self._task is not None:
+            self.transcript.add_note("Wait until she has finished what she is doing, then confirm again.", "warning")
+            return
+        card.close_offer("Confirmed. She is starting.")
+        self.transcript.add_message("user", "You", words)
+        try:
+            turn = self.store.start_turn(self._conversation_id, words)
+        except sqlite3.Error:
+            turn = None
+        self._messages.append({"role": "user", "content": words})
+        self._start_task(description, turn, "")
+
+    def _decline_offer(self, card):
+        if self._worker or self.microphone.busy or self.suspended:
+            return
+        card.close_offer("Not now.", "failed")
+        # Said in the chat, so she can answer it naturally and remember the decision.
+        self.input.setPlainText("Not now, thank you.")
+        self._send()
+
+    def _do_command(self, request):
+        self.input.clear()
+        if not request:
+            self.transcript.add_note("Type /do followed by what you want done, for example: /do tidy my Downloads folder.",
+                                     "warning")
+            return
+        if not self.computer_tasks.isChecked():
+            self.transcript.add_note("Computer tasks are turned off. Turn them on in Settings → App.", "warning")
+            return
+        self.transcript.add_message("user", "You", "/do " + request)
+        try:
+            turn = self.store.start_turn(self._conversation_id, "/do " + request)
+        except sqlite3.Error:
+            turn = None
+        self._messages.append({"role": "user", "content": "/do " + request})
+        self._start_task(request, turn, "")
+
+    def _start_task(self, request, turn, acknowledgement):
+        from .computer_tasks import ComputerTask
+        if self._task is not None:
+            self.transcript.add_note("She is still working on the previous task. Stop it first to start another.", "warning")
+            return
+        if not request.strip() or self._closing:
+            return
+        context = [m for m in self._messages[:-1] if m.get("role") in {"user", "assistant"}]
+        task = ComputerTask(request, context, self.settings, self)
+        card = self.transcript.add_task_card(self.settings.name, request)
+        self._task, self._task_card, self._task_turn, self._task_ack = task, card, turn, acknowledgement
+        task.step.connect(card.add_step)
+        task.step.connect(self._task_step)
+        task.approval.connect(self._ask_approval)
+        task.finished.connect(self._task_finished)
+        self.avatar.work("start", request)
+        self.status.setText("Working on a task…")
+        task.start()
+        self._refresh_stop_button()
+
+    def _task_step(self, summary):
+        from .computer_tasks import step_kind
+        self.avatar.work(step_kind(summary), summary)
+
+    def _ask_approval(self, request):
+        from .approval_ui import ApprovalDialog
+        card = self._task_card
+        card.set_status("Waiting for your approval…", "approval")
+        self.avatar.work("wait", request.summary)
+        self.show_companion()
+        dialog = ApprovalDialog(self.settings.name, request, self)
+        self._chrome.watch(dialog)
+
+        def decided(choice, dialog=dialog):
+            if choice == "deny":
+                request.answer(False, "The person did not allow this step. Do not try it another way.")
+                card.add_step("Not allowed: " + request.summary)
+            else:
+                if choice == "task" and self._task is not None:
+                    self._task.remember_approval(request)
+                request.answer(True)
+                card.add_step(request.summary)
+            if self._task is not None:
+                card.set_status("Working…", "working")
+                if choice == "deny":
+                    self.avatar.work("think", "Finding another way to finish what I can…")
+                else:
+                    self._task_step(request.summary)
+            dialog.deleteLater()
+        dialog.decided.connect(decided)
+        dialog.open()
+
+    def _task_finished(self, report, succeeded):
+        task, self._task = self._task, None
+        card = self._task_card
+        card.set_status("Done" if succeeded else "Stopped" if "stopped" in report.lower() else "Not finished",
+                        "done" if succeeded else "failed")
+        for dialog in self.findChildren(QDialog):
+            if dialog.windowTitle() == "Allow this step?" and dialog.isVisible():
+                dialog.reject()
+        self.transcript.add_message("assistant", self.settings.name, report)
+        self._messages.append({"role": "assistant", "content": "[Task report] " + report})
+        if self._task_turn is not None:
+            # The report joins the reply that accepted the task, so later replies know the outcome.
+            shown = (self._task_ack + "\n\n" if self._task_ack else "") + report
+            try:
+                self.store.save_turn(self._task_turn, shown, shown, "complete")
+            except sqlite3.Error:
+                pass
+        self.avatar.work("done" if succeeded else "failed", report)
+        if self.auto_speak.isChecked() and self.volume.value() > 0 and not self._closing:
+            self.speech.speak(report, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
+        self.status.setText("Ready")
+        self._refresh_stop_button()
+        if task is not None:
+            task.deleteLater()
+
+    @Slot()
+    def _voice_engine_changed(self):
+        engine = self.voice_engine.currentData()
+        self._interrupt_speech()
+        self._apply_voice_engine(engine)
+        self.settings = replace(self.settings, tts_engine=engine)
+        try:
+            # Like the response model, the engine choice is remembered at once.
+            self.preferences.remember(self.settings, ("tts_engine",))
+        except (OSError, ValueError):
+            pass
+
+    def _apply_voice_engine(self, engine):
+        if hasattr(self.speech, "set_engine"):
+            self.speech.set_engine(engine)
+        installed = getattr(self.speech, "chatterbox_installed", lambda: True)()
+        self.voice_engine_hint.setText(
+            "Kyutai Pocket TTS: starts speaking quickly and runs comfortably on the CPU." if engine != "chatterbox" else
+            "Resemble AI Chatterbox in her calm, composed style: more human-sounding, but slower. On this laptop's "
+            "RTX 4060 each sentence takes about 1.5 times its length to prepare, so she pauses briefly before each "
+            "one (on the CPU, much longer). The first use downloads about 3 GB and loads for about 40 seconds."
+            + ("" if installed else " Not installed yet: run Setup Chatterbox.cmd in the project folder."))
+
+    def _test_animation(self, name, label):
+        widget = self.avatar.widget
+        if widget is None or not self.show_avatar.isChecked():
+            self.animation_status.setText("Turn on Show desktop avatar first.")
+        elif getattr(widget, "kind", "") != "live2d":
+            self.animation_status.setText("The animation tester needs the Live2D visual model.")
+        elif not self.animate_avatar.isChecked():
+            self.animation_status.setText("Turn on Animate avatar to play animations.")
+        elif self.avatar.cue(name):
+            self.animation_status.setText(f"Playing: {label}.")
+        else:
+            self.animation_status.setText("The avatar is still loading. Try again in a moment.")
+
+    def open_animation_tester(self) -> None:
+        self.open_settings()
+        self.settings_tabs.setCurrentIndex(2)
+        scroll = self.settings_tabs.currentWidget()
+        QTimer.singleShot(0, lambda: scroll.ensureWidgetVisible(self.animation_tester, 0, 0))
+
+    def _set_sleep_option(self, minutes):
+        if self.avatar_sleep.findData(minutes) < 0:
+            self.avatar_sleep.addItem(f"After {minutes} minutes", minutes)
+        self.avatar_sleep.setCurrentIndex(self.avatar_sleep.findData(minutes))
 
     @Slot()
     def _sync_avatar_preset(self) -> None:
@@ -1428,6 +1900,8 @@ class CompanionWindow(QMainWindow):
             event.ignore()
             return
         self._end_handsfree()
+        if self._task is not None:
+            self._task.stop("The app was closed, so I stopped the task where it was.")
         if self._worker is None and self._active_turn and not self._save_active_turn():
             if QMessageBox.question(self, "Reply not saved", "The latest reply could not be saved. Close anyway? The last successful checkpoint will remain in History.") != QMessageBox.StandardButton.Yes:
                 self._closing = False
@@ -1490,6 +1964,10 @@ class CompanionWindow(QMainWindow):
     @Slot(str)
     def _voice_changed(self, state: str) -> None:
         self.voice_status.setText(state)
+        if getattr(self.speech, "state", "") == "speaking":
+            self._flush_cues()  # Cues at the very start show as the voice begins.
+        elif not self.speech.busy:
+            self._pending_cues = []  # Playback ended or stopped; late cues would be out of place.
         self._refresh_controls()
         if not self.speech.busy:
             self._schedule_handsfree()
@@ -1589,6 +2067,34 @@ class CompanionWindow(QMainWindow):
     def _phrase_spoken(self, text: str) -> None:
         if self._voice_for_reply:
             self._spoken_phrases.append(text)
+        self._spoken_chars += len(text) + 1
+        self._flush_cues()
+
+    def _queue_cues(self, cues):
+        # Action cues are for the app, not the avatar: tasks, offers and memory changes.
+        for _, cue in cues:
+            name, _, detail = cue.partition(":")
+            if name == "task":
+                self._task_request = detail
+            elif name == "offer" and detail:
+                self._task_offer = detail
+            elif name in {"remember", "forget"} and detail:
+                self._memory_actions.append((name, detail))
+        cues = [(offset, cue) for offset, cue in cues
+                if cue.partition(":")[0] not in {"task", "offer", "remember", "forget"}]
+        # Spoken replies show each expression as the voice reaches it; silent ones show it at once.
+        self._pending_cues.extend(cues)
+        if not self._streaming_voice:
+            self._flush_cues(all_cues=True)
+        elif getattr(self.speech, "state", "") == "speaking":
+            self._flush_cues()
+
+    def _flush_cues(self, all_cues=False):
+        due = [cue for offset, cue in self._pending_cues if all_cues or offset <= self._spoken_chars]
+        self._pending_cues = [(offset, cue) for offset, cue in self._pending_cues
+                              if not all_cues and offset > self._spoken_chars]
+        for cue in due[-3:]:  # A burst of cues collapses to its latest few.
+            self.avatar.cue(cue)
 
     def _record_voice_interruption(self) -> None:
         completed = " ".join(self._spoken_phrases) or "none confirmed"
@@ -1874,6 +2380,7 @@ class CompanionWindow(QMainWindow):
             return
         try:
             dialog = SummaryDialog(self.store, self._conversation_id, self)
+            self._chrome.watch(dialog)
             self._summary_dialog = dialog
             dialog.generate_requested.connect(self._generate_summary)
             dialog.cancel_requested.connect(self._stop)
@@ -1980,6 +2487,7 @@ class CompanionWindow(QMainWindow):
             return
         try:
             dialog = HistoryDialog(self.store, self)
+            self._chrome.watch(dialog)
             accepted = dialog.exec()
             if self._closing:
                 dialog.deleteLater()
@@ -2001,6 +2509,7 @@ class CompanionWindow(QMainWindow):
             return
         try:
             dialog = MemoryDialog(self.store, self)
+            self._chrome.watch(dialog)
             dialog.exec()
             dialog.deleteLater()
         except sqlite3.Error:
@@ -2009,6 +2518,9 @@ class CompanionWindow(QMainWindow):
     def _local_command(self, text) -> bool:
         parts = text.split(maxsplit=1)
         command, argument = parts[0], parts[1] if len(parts) > 1 else ""
+        if command.lower() == "/do":
+            self._do_command(argument.strip())
+            return True
         if command.lower() not in {"/remember", "/forget", "/memories"}:
             return False
         self._interrupt_speech()

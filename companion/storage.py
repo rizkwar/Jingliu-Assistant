@@ -90,6 +90,12 @@ class Store:
             (character,) if character is not None else (),
         )]
 
+    def last_message(self, conversation_id):
+        row = self.connection.execute(
+            "SELECT role, display FROM messages WHERE conversation_id=? AND display!='' ORDER BY id DESC LIMIT 1",
+            (conversation_id,)).fetchone()
+        return dict(row) if row else None
+
     def conversation(self, conversation_id):
         row = self.connection.execute("SELECT * FROM conversations WHERE id=?", (conversation_id,)).fetchone()
         return dict(row) if row else None

@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -62,6 +63,29 @@ class WindowChromeTests(unittest.TestCase):
         self.window.deleteLater()
         self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.app.processEvents()
+
+    def test_mouse_wheel_scrolls_the_chat(self):
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        self.window.resize(700, 600)
+        self.window.show()
+        for index in range(30):
+            self.window.transcript.add_message('user', 'You', f'Message {index} ' * 8)
+        bar = self.window.transcript.verticalScrollBar()
+        deadline = time.monotonic() + 3
+        while bar.maximum() == 0 and time.monotonic() < deadline:
+            self.app.processEvents()
+        bar.setValue(bar.maximum())
+        self.assertGreater(bar.maximum(), 0)
+        viewport = self.window.transcript.viewport()
+        point = QPointF(viewport.rect().center())
+        for target in (viewport, bar):  # Over the messages, and over the scroll bar itself.
+            before = bar.value()
+            event = QWheelEvent(point, QPointF(viewport.mapToGlobal(point.toPoint())), QPoint(), QPoint(0, 120),
+                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+                                Qt.ScrollPhase.NoScrollPhase, False)
+            self.app.sendEvent(target, event)
+            self.assertLess(bar.value(), before, target)
 
     def test_header_speaker_mirrors_speak_replies_setting(self):
         self.assertFalse(self.window.speak_toggle.isChecked())

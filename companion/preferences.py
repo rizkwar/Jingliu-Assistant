@@ -14,7 +14,7 @@ from .voice_settings import validate_rate
 FIELDS = {
     'llm_provider': str, 'openrouter_model': str, 'codex_model': str, 'claude_model': str,
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
-    "tts_rate": int,
+    "tts_rate": int, "tts_engine": str, "computer_tasks": bool, "confirm_tasks": bool, "approve_steps": bool, "auto_memory": bool,
     "tts_reference": str,
     "character_path": str,
     "stt_model": str, "stt_auto_send": bool, "stt_microphone": str,
@@ -26,6 +26,7 @@ FIELDS = {
     "avatar_motion": int, "avatar_lip_sensitivity": int,
     "avatar_hd": bool,
     "avatar_cursor_attention": bool, "avatar_gaze": int, "avatar_hair": int,
+    "avatar_sleep_minutes": int,
 }
 
 
@@ -43,6 +44,8 @@ def validate(values):
             raise ValueError('Saved model ID is invalid.')
     if "tts_voice" in clean and clean["tts_voice"] not in (*VOICES, "reference"):
         raise ValueError("Saved voice is not available.")
+    if clean.get("tts_engine", "pocket") not in {"pocket", "chatterbox"}:
+        raise ValueError("Saved voice engine is not available.")
     if "tts_volume" in clean and not 0 <= clean["tts_volume"] <= 100:
         raise ValueError("Saved volume must be from 0 to 100.")
     if "tts_rate" in clean:
@@ -56,9 +59,10 @@ def validate(values):
     if "stt_pause_ms" in clean and not 600 <= clean["stt_pause_ms"] <= 2500:
         raise ValueError("Speech pause must be from 600 to 2,500 milliseconds.")
     x, y = clean.get("avatar_x"), clean.get("avatar_y")
-    for key, lower, upper in [('avatar_width', 220, 640), ('avatar_height', 240, 700),
+    for key, lower, upper in [('avatar_width', 220, 640), ('avatar_height', 240, 900),
                               ('avatar_motion', 0, 100), ('avatar_lip_sensitivity', 25, 200),
-                              ('avatar_gaze', 0, 100), ('avatar_hair', 20, 80)]:
+                              ('avatar_gaze', 0, 100), ('avatar_hair', 20, 80),
+                              ('avatar_sleep_minutes', 0, 120)]:
         if key in clean and not lower <= clean[key] <= upper:
             raise ValueError(f'Saved {key} must be from {lower} to {upper}.')
     if (x is None) != (y is None) or any(value is not None and abs(value) > 1000000 for value in (x, y)):

@@ -39,9 +39,15 @@ class Settings:
     avatar_cursor_attention: bool = True
     avatar_gaze: int = 100
     avatar_hair: int = 45
+    avatar_sleep_minutes: int = 5
     character_path: str = ""
     voice_preview: str = ""
     tts_rate: int = 100
+    tts_engine: str = 'pocket'
+    computer_tasks: bool = True
+    confirm_tasks: bool = True
+    approve_steps: bool = True
+    auto_memory: bool = True
     character_voice: str = ""
     character_voice_rate: int = 100
     character_voice_description: str = ""

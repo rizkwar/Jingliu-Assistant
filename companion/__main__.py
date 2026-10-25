@@ -1,3 +1,5 @@
+import os
+import signal
 import sys
 import sqlite3
 
@@ -13,6 +15,10 @@ from .background import TrayController
 
 
 def main() -> int:
+    # The see-through avatar window is a web page. With Qt's default Direct3D 11 backend it
+    # sometimes showed a frame with the page (or parts of it) missing; OpenGL hands each
+    # frame over intact. Set before the application exists; a user's own choice still wins.
+    os.environ.setdefault("QSG_RHI_BACKEND", "opengl")
     app = QApplication(sys.argv)
     app.setApplicationName("Desktop Companion")
     app.setStyle("Fusion")
@@ -61,6 +67,14 @@ def main() -> int:
             window._on_finished()
         window.microphone.shutdown()
         window.speech.shutdown()
+        if os.environ.get("QSG_RHI_BACKEND") == "opengl":
+            # Destroying the web views under OpenGL stalls in the graphics driver for about
+            # fifteen seconds. Everything is saved and closed by now: end the process directly.
+            store.close()
+            instance_lock.unlock()
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.kill(os.getpid(), signal.SIGTERM)
         window.deleteLater()
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         store.close()
