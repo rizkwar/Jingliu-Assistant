@@ -4,10 +4,13 @@ Run separately so Stop can cancel even a model download or native inference call
 No OpenRouter key, conversation history, or Qt dependency is needed here.
 """
 
+from concurrent.futures import Future
 from contextlib import redirect_stdout
 import json
 import logging
+import queue
 import sys
+import threading
 
 from .voice_settings import VOICES, playback_sample_rate, validate_rate
 from .reference_voice import inspect_reference, VoiceSetupError
@@ -73,12 +76,22 @@ class ChatterboxSpeaker:
 
     EXAGGERATION = .4
     CFG_WEIGHT = .4
-
     def __init__(self):
         self.model = None
         self.reference_key = None
+        # One worker renders phrases in order, so the next is ready while this one plays.
+        # The phrase being spoken right now always goes first.
+        self.lock = threading.Lock()
+        self.wake = threading.Condition()
+        self.pending = []   # (text, voice, future) not started yet
+        self.rendered = {}  # text → Future of its audio
+        self.thread = None
 
     def prepare(self, voice, report):
+        with self.lock:
+            self._prepare(voice, report)
+
+    def _prepare(self, voice, report):
         if voice in VOICES:
             raise VoiceSetupError("Chatterbox speaks only in the character's own voice. Choose her reference "
                                   "recording in Settings, or switch the voice engine back to Pocket TTS.")
@@ -97,16 +110,67 @@ class ChatterboxSpeaker:
             report("preparing")
             self.model.prepare_conditionals(reference.path, exaggeration=self.EXAGGERATION)
             self.reference_key = reference.fingerprint
+            # The first generation after loading is much slower (GPU warm-up); spend it here,
+            # while she is still thinking, rather than on her first real phrase.
+            self.model.generate("Mm.", exaggeration=self.EXAGGERATION, cfg_weight=self.CFG_WEIGHT)
+
+    def _render(self, text, voice):
+        with self.lock:
+            self._prepare(voice, lambda *_: None)
+            audio = self.model.generate(text, exaggeration=self.EXAGGERATION, cfg_weight=self.CFG_WEIGHT)
+        return audio.squeeze(0).detach().cpu().numpy()
+
+    def _loop(self):
+        while True:
+            with self.wake:
+                while not self.pending:
+                    self.wake.wait()
+                text, voice, future = self.pending.pop(0)
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(self._render(text, voice))
+            except BaseException as exc:  # Reported to whoever speaks the phrase.
+                future.set_exception(exc)
+
+    def _submit(self, text, voice, first=False):
+        with self.wake:
+            future = self.rendered.get(text)
+            if future is None:
+                future = self.rendered[text] = Future()
+                self.pending.insert(0 if first else len(self.pending), (text, voice, future))
+            elif first:
+                for index, item in enumerate(self.pending):
+                    if item[0] == text:
+                        self.pending.insert(0, self.pending.pop(index))
+                        break
+            if self.thread is None:
+                self.thread = threading.Thread(target=self._loop, name="chatterbox", daemon=True)
+                self.thread.start()
+            self.wake.notify()
+        return future
+
+    def ahead(self, text, voice):
+        """A phrase that will be spoken soon: start rendering it now, after any earlier ones."""
+        if text:
+            self._submit(text, voice)
 
     def speak(self, text, voice, volume, report, rate=100):
         from .audio_playback import play_chunks
 
         validate_rate(rate)
+        # Chatterbox renders a whole phrase at once. Phrases announced in advance are usually
+        # finished by now; the next ones keep rendering while this one plays. Queue this one
+        # first, before waiting on the model, so the worker cannot start a later phrase instead.
+        future = self._submit(text, voice, first=True)
         self.prepare(voice, report)
         report("preparing")
-        # Chatterbox renders a whole phrase at once; the app already sends one phrase at a time.
-        audio = self.model.generate(text, exaggeration=self.EXAGGERATION, cfg_weight=self.CFG_WEIGHT)
-        play_chunks([audio.squeeze(0).detach().cpu().numpy()], playback_sample_rate(self.model.sr, rate), volume,
+        try:
+            audio = future.result()
+        finally:
+            with self.wake:
+                self.rendered.pop(text, None)
+        play_chunks([audio], playback_sample_rate(self.model.sr, rate), volume,
                     report, getattr(report, 'playback', lambda *_: None))
 
 
@@ -118,12 +182,34 @@ def run(input_stream=None, output_stream=None, speaker=None, engine="pocket"):
     output_stream = output_stream or sys.stdout
     speaker = speaker or ENGINES.get(engine, PocketSpeaker)()
     logging.basicConfig(level=logging.ERROR, stream=sys.stderr)
+    writing = threading.Lock()
 
     def emit(job_id, kind, **values):
-        output_stream.write(json.dumps({"id": job_id, "type": kind, **values}) + "\n")
-        output_stream.flush()
+        with writing:
+            output_stream.write(json.dumps({"id": job_id, "type": kind, **values}) + "\n")
+            output_stream.flush()
 
-    for line in input_stream:
+    # Commands are read on their own thread: an "ahead" hint can arrive while a phrase plays.
+    jobs = queue.Queue()
+
+    def read():
+        for line in input_stream:
+            try:
+                command = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(command, dict) and command.get("action") == "ahead":
+                if hasattr(speaker, "ahead"):
+                    try:
+                        speaker.ahead(str(command.get("text", "")), command.get("voice", ""))
+                    except Exception:
+                        pass  # A hint never fails a job; the phrase is rendered when spoken instead.
+                continue
+            jobs.put(line)
+        jobs.put(None)
+
+    threading.Thread(target=read, daemon=True).start()
+    for line in iter(jobs.get, None):
         job_id = ""
         try:
             command = json.loads(line)

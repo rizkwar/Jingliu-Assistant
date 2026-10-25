@@ -1948,12 +1948,24 @@ class CompanionWindow(QMainWindow):
         if hasattr(self.speech, "set_engine"):
             self.speech.set_engine(engine)
         installed = getattr(self.speech, "chatterbox_installed", lambda: True)()
+        if engine == "chatterbox" and installed:
+            QTimer.singleShot(2500, self, self._warm_voice)
         self.voice_engine_hint.setText(
             "Kyutai Pocket TTS: starts speaking quickly and runs comfortably on the CPU." if engine != "chatterbox" else
-            "Resemble AI Chatterbox in her calm, composed style: more human-sounding, but slower. On this laptop's "
-            "RTX 4060 each sentence takes about 1.5 times its length to prepare, so she pauses briefly before each "
-            "one (on the CPU, much longer). The first use downloads about 3 GB and loads for about 40 seconds."
+            "Resemble AI Chatterbox in her calm, composed style: more human-sounding, but slower. It loads in the "
+            "background when the app opens, and prepares her next sentences while she is still speaking, so on this "
+            "laptop's RTX 4060 the pauses between sentences are short (on the CPU, much longer). The first use "
+            "downloads about 3 GB."
             + ("" if installed else " Not installed yet: run Setup Chatterbox.cmd in the project folder."))
+
+    @Slot()
+    def _warm_voice(self):
+        """Chatterbox takes a while to load: start it early when her replies will be spoken."""
+        from .voice_settings import VOICES
+        voice = self._speech_voice()
+        if (hasattr(self.speech, "warm") and not self._closing and self.auto_speak.isChecked()
+                and self.volume.value() > 0 and voice not in VOICES):
+            self.speech.warm(voice)
 
     def _test_animation(self, name, label):
         widget = self.avatar.widget

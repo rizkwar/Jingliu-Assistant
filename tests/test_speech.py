@@ -278,3 +278,146 @@ for line in sys.stdin:
         self.speech.finish_reply()
         self.assertFalse(self.speech.busy)
         self.assertEqual(self.errors, ["Test voice failure"])
+
+
+class ChatterboxPipelineTests(unittest.TestCase):
+    """Rendering ahead, with a stand-in model: no torch or GPU needed."""
+
+    def speaker(self):
+        import threading
+        from unittest.mock import patch
+        from companion.speech_process import ChatterboxSpeaker
+
+        class Model:
+            sr = 24000
+            rendered = []
+
+            def generate(self, text, **_):
+                self.rendered.append(text)
+                time.sleep(.15)
+
+                class Audio:
+                    def squeeze(self, _):
+                        return self
+                    def detach(self):
+                        return self
+                    def cpu(self):
+                        return self
+                    def numpy(self):
+                        return [0.0] * 240
+                return Audio()
+
+        speaker = ChatterboxSpeaker()
+        speaker.model = Model()
+        speaker._prepare = lambda voice, report: None
+        played = []
+        patcher = patch("companion.audio_playback.play_chunks",
+                        side_effect=lambda chunks, *a: played.append(threading.current_thread().name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return speaker, played
+
+    def test_announced_phrases_render_in_order_and_once(self):
+        speaker, _ = self.speaker()
+        for text in ("One.", "Two.", "Three."):
+            speaker.ahead(text, "voices/her.wav")
+        for text in ("One.", "Two.", "Three."):
+            speaker.speak(text, "voices/her.wav", 70, lambda *_: None)
+        self.assertEqual(speaker.model.rendered, ["One.", "Two.", "Three."])
+        self.assertEqual(speaker.rendered, {})  # Nothing kept once spoken.
+
+    def test_the_phrase_being_spoken_goes_first(self):
+        speaker, _ = self.speaker()
+        for text in ("Later one.", "Later two.", "Later three."):
+            speaker.ahead(text, "voices/her.wav")
+        time.sleep(.05)  # "Later one." is already rendering.
+        speaker.speak("Now.", "voices/her.wav", 70, lambda *_: None)
+        self.assertEqual(speaker.model.rendered[:2], ["Later one.", "Now."])
+
+    def test_hints_are_handled_mid_job_without_events_and_ignored_by_other_engines(self):
+        class Speaker:
+            def __init__(self):
+                self.hints, self.spoken = [], []
+            def ahead(self, text, voice):
+                self.hints.append(text)
+            def speak(self, text, voice, volume, report, rate=100):
+                self.spoken.append(text)
+
+        lines = [json.dumps({"id": "", "action": "ahead", "text": "Next.", "voice": "v"}),
+                 json.dumps({"id": "1", "action": "speak", "text": "Now.", "voice": "v", "volume": 70})]
+        for speaker in (Speaker(), type("Plain", (), {"speak": lambda *a, **k: None})()):
+            output = io.StringIO()
+            run(io.StringIO("\n".join(lines)), output, speaker)
+            events = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertEqual([e["id"] for e in events], ["1"])  # No reply to a hint.
+        self.assertEqual(Speaker().hints, [])
+
+
+ANNOUNCING_ENGINE = '''
+import json, sys, time
+log = open(sys.argv[1], "a", encoding="utf-8")
+for line in sys.stdin:
+    command = json.loads(line)
+    log.write(line); log.flush()
+    if not command["id"]:
+        continue
+    if command.get("action") == "prepare":
+        time.sleep(1.0)
+    print(json.dumps({"id": command["id"], "type": "done"}), flush=True)
+'''
+
+
+class SpeechWarmupTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = application()
+
+    def setUp(self):
+        import tempfile
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.log = os.path.join(folder.name, "commands.jsonl")
+        self.speech = SpeechController()
+        self.speech.engine = "chatterbox"
+        self.speech.process.setArguments(["-u", "-c", ANNOUNCING_ENGINE, self.log])
+
+    def tearDown(self):
+        self.speech.shutdown()
+        self.speech.deleteLater()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+
+    def wait_until(self, condition, seconds=6):
+        deadline = time.monotonic() + seconds
+        while not condition() and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.005)
+        self.app.processEvents()
+        self.assertTrue(condition())
+
+    def commands(self):
+        with open(self.log, encoding="utf-8") as lines:
+            return [json.loads(line) for line in lines]
+
+    def test_a_reply_during_warmup_waits_for_it_and_announces_its_phrases(self):
+        played = []
+        self.speech.spoken.connect(played.append)
+        self.speech.warm("voices/her.wav")
+        self.wait_until(lambda: self.speech.process.state() == QProcess.ProcessState.Running)
+        pid = self.speech.process.processId()
+        self.speech.begin_reply("voices/her.wav", 70)  # Must not kill the loading engine.
+        self.speech.feed_reply("First sentence. Second sentence. ")
+        self.speech.finish_reply()
+        self.wait_until(lambda: not self.speech.busy)
+        self.assertEqual(self.speech.process.processId(), pid)
+        self.assertEqual(played, ["First sentence.", "Second sentence."])
+        hints = [c["text"] for c in self.commands() if c.get("action") == "ahead"]
+        self.assertEqual(hints, ["First sentence.", "Second sentence."])
+
+    def test_pocket_gets_no_hints_and_no_warmup(self):
+        self.speech.engine = "pocket"
+        self.speech.warm("alba")
+        self.assertFalse(self.speech.busy)
+        self.speech.speak("Hello there.", "alba", 70)
+        self.wait_until(lambda: not self.speech.busy)
+        self.assertFalse(any(c.get("action") == "ahead" for c in self.commands()))

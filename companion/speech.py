@@ -38,6 +38,7 @@ class SpeechController(QObject):
         self._stream_open = False
         self._session_active = False
         self._current_text = ""
+        self._warming = False  # A background model load that new speech waits for, not cancels.
         self._voice = "alba"
         self._volume = 70
         self._rate = 100
@@ -50,6 +51,7 @@ class SpeechController(QObject):
         env.insert("HF_HOME", str(PROJECT_ROOT / ".cache" / "huggingface"))
         env.insert("HF_HUB_DISABLE_TELEMETRY", "1")
         env.insert("PYTHONIOENCODING", "utf-8")
+        env.insert("TQDM_DISABLE", "1")  # Chatterbox's per-step progress bar costs time and goes nowhere.
         self.process.setProcessEnvironment(env)
         self._hf_token = env.value("HF_TOKEN", "")
         self.process.started.connect(self._dispatch)
@@ -119,8 +121,17 @@ class SpeechController(QObject):
         self._hf_token = token
         self.process.setProcessEnvironment(env)
 
+    def warm(self, voice):
+        """Load Chatterbox in the background (it takes a while) so her first reply starts sooner."""
+        if self.busy or self.engine != "chatterbox":
+            return
+        self._voice = voice
+        self._warming = True
+        self._queue.append(("prepare", ""))
+        self._advance()
+
     def speak(self, text, voice, volume, rate=100):
-        self.stop()
+        self.stop(keep_warmup=True)
         self._rate = validate_rate(rate)
         if volume <= 0:
             self._report("Voice muted", "idle")
@@ -136,7 +147,7 @@ class SpeechController(QObject):
 
     def begin_reply(self, voice, volume, rate=100):
         """Warm the voice while the language model thinks; enqueue phrases as they arrive."""
-        self.stop()
+        self.stop(keep_warmup=True)
         self._rate = validate_rate(rate)
         if volume <= 0:
             self._report("Voice muted", "idle")
@@ -150,13 +161,24 @@ class SpeechController(QObject):
 
     def feed_reply(self, text):
         if self._segmenter is not None:
-            self._queue.extend(("speak", phrase) for phrase in self._segmenter.feed(text))
+            self._enqueue(self._segmenter.feed(text))
             self._advance()
+
+    def _enqueue(self, phrases):
+        for phrase in phrases:
+            self._queue.append(("speak", phrase))
+            self._announce(phrase)
+
+    def _announce(self, phrase):
+        """Chatterbox renders slower than it speaks: let it start on phrases it will say next."""
+        if self.engine == "chatterbox" and self.process.state() == QProcess.ProcessState.Running and not self._stopping:
+            self.process.write((json.dumps({"id": "", "action": "ahead", "text": phrase, "voice": self._voice})
+                                + "\n").encode("utf-8"))
 
     def finish_reply(self):
         if self._segmenter is None:
             return
-        self._queue.extend(("speak", phrase) for phrase in self._segmenter.finish())
+        self._enqueue(self._segmenter.finish())
         self._segmenter = None
         self._stream_open = False
         self._advance()
@@ -198,7 +220,15 @@ class SpeechController(QObject):
             command, self._pending = self._pending, None
             self.process.write((json.dumps(command) + "\n").encode("utf-8"))
 
-    def stop(self):
+    def stop(self, keep_warmup=False):
+        if keep_warmup and self._warming and self._active_id and not self._queue:
+            # The model is still loading in the background: new speech queues behind it.
+            self._warming = False
+            self._reset_playback()
+            self._segmenter = None
+            self._stream_open = False
+            return
+        self._warming = False
         self._reset_playback()
         was_busy = self.busy
         self.state = "idle"
@@ -244,6 +274,7 @@ class SpeechController(QObject):
                 state = event.get("state")
                 self._report(labels.get(state, "Preparing speech…"), state if state in labels else "preparing")
             elif kind == "done":
+                self._warming = False
                 self._reset_playback()
                 self.deadline.stop()
                 self._active_id = ""
