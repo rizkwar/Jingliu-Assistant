@@ -50,7 +50,8 @@ class CharacterWindowTests(unittest.TestCase):
     def run_editor(self, callback, edit=False):
         errors = []
         def fill():
-            dialog = QApplication.activeModalWidget()
+            # The editor opens as a page of the main window, not a separate window.
+            dialog = next((d for d in self.window.findChildren(CharacterDialog) if d.isVisible()), None)
             try:
                 self.assertIsInstance(dialog, CharacterDialog)
                 callback(dialog)

@@ -208,7 +208,7 @@ class WindowTests(unittest.TestCase):
             self.app.sendEvent(control, event)
         self.assertEqual((combo.currentIndex(), slider.value()), before)
         self.assertEqual(combo.focusPolicy(), Qt.FocusPolicy.StrongFocus)
-        self.window.settings_dialog.hide()
+        self.window._close_panel()
 
     def test_avatar_settings_are_remembered_without_save_defaults(self):
         import tempfile
@@ -247,7 +247,7 @@ class WindowTests(unittest.TestCase):
             self.window.animation_buttons["neutral"].click()
         self.assertEqual(played, ["test:sleep", "neutral"])
         self.assertEqual(self.window.animation_status.text(), "Playing: Neutral.")
-        self.window.settings_dialog.hide()
+        self.window._close_panel()
 
     def test_switching_response_provider_keeps_character_voice_memory_and_conversation(self):
         before=self.window.settings

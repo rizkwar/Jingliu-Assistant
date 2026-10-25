@@ -10,8 +10,10 @@ from PySide6.QtGui import QCloseEvent, QDesktopServices, QImage, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMenu,
     QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QTabWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QTabWidget,
+    QVBoxLayout, QWidget,
 )
+from PySide6.QtCore import QEventLoop
 
 from .config import PROJECT_ROOT, Settings, VOICES, active_character_voice, load_settings
 from .character import character_key, load_character, read_profile
@@ -124,6 +126,30 @@ ENGINE_IDLE_SECONDS = 600   # Voice and microphone engines close after 10 idle m
 TRIM_EVERY_SECONDS = 600    # While hidden, memory is handed back at most every 10 minutes.
 
 
+class PanelPage(QWidget):
+    """A page inside the main window (Settings, History, Memories…) with a way back to the chat."""
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setObjectName("panel")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 18, 22, 14)
+        layout.setSpacing(6)
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        self.back = icon_button("back", "Back to the conversation (Esc)")
+        header.addWidget(self.back, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.title = QLabel(title)
+        self.title.setObjectName("title")
+        header.addWidget(self.title, 1)
+        layout.addLayout(header)
+        self.body = QWidget()
+        self.body.setObjectName("panelBody")
+        self.body_layout = QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.body, 1)
+
+
 class CompanionWindow(QMainWindow):
     closed = Signal()
     suspended_changed = Signal(bool)
@@ -216,11 +242,16 @@ class CompanionWindow(QMainWindow):
         self.setCentralWidget(root)
         centring = QHBoxLayout(root)
         centring.setContentsMargins(0, 0, 0, 0)
+        # One window: the conversation, and pages such as Settings or History in its place.
+        self.pages = QStackedWidget()
+        self.pages.setObjectName("pages")
+        self.pages.setMaximumWidth(900)  # Keep lines readable on a maximized window.
         column = QWidget()
         column.setObjectName("column")
-        column.setMaximumWidth(900)  # Keep lines readable on a maximized window.
+        self.chat_page = column
+        self.pages.addWidget(column)
         centring.addStretch(1)
-        centring.addWidget(column, 100)
+        centring.addWidget(self.pages, 100)
         centring.addStretch(1)
         layout = QVBoxLayout(column)
         layout.setContentsMargins(22, 18, 22, 12)
@@ -298,14 +329,11 @@ class CompanionWindow(QMainWindow):
         self.new_chat.clicked.connect(self._new_conversation)
         self.reload.clicked.connect(self._reload_settings)
 
-        self.settings_dialog = QDialog(self)
-        self._chrome.watch(self.settings_dialog)
-        self.settings_dialog.setWindowTitle("Settings")
-        self.settings_dialog.setWindowIcon(moon_icon())
-        self.settings_dialog.setMinimumWidth(520)
-        self.settings_dialog.resize(600, 720)
-        settings_outer = QVBoxLayout(self.settings_dialog)
-        settings_outer.setContentsMargins(20, 16, 20, 18)
+        self.settings_dialog = PanelPage("Settings")
+        self.settings_dialog.back.clicked.connect(self._close_panel)
+        self.pages.addWidget(self.settings_dialog)
+        settings_outer = self.settings_dialog.body_layout
+        settings_outer.setContentsMargins(0, 4, 0, 0)
         settings_outer.setSpacing(12)
         self.settings_tabs = QTabWidget()
         self.settings_tabs.setDocumentMode(True)
@@ -716,7 +744,7 @@ class CompanionWindow(QMainWindow):
         settings_actions.addWidget(self.save_defaults)
         done = QPushButton("Done")
         done.setObjectName("primary")
-        done.clicked.connect(self.settings_dialog.hide)
+        done.clicked.connect(self._close_panel)
         settings_actions.addWidget(done)
         settings_outer.addLayout(settings_actions)
 
@@ -1514,7 +1542,7 @@ class CompanionWindow(QMainWindow):
         self.speech.changed.connect(dialog.feedback.setText)
         self.speech.failed.connect(dialog.feedback.setText)
         try:
-            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            accepted = self._present(dialog) == QDialog.DialogCode.Accepted
             self._interrupt_speech()
             if accepted and not self._closing:
                 self._activate_character(dialog.saved_path, use_profile_voice=True)
@@ -1539,9 +1567,45 @@ class CompanionWindow(QMainWindow):
         if self._closing:
             return
         self.show_companion()
-        self.settings_dialog.show()
-        self.settings_dialog.raise_()
-        self.settings_dialog.activateWindow()
+        self._chrome.guard(self.settings_dialog)
+        self.pages.setCurrentWidget(self.settings_dialog)
+
+    @Slot()
+    def _close_panel(self):
+        """Back to the conversation from Settings (dialog pages close themselves)."""
+        if self.pages.currentWidget() is self.settings_dialog:
+            self.pages.setCurrentWidget(self.chat_page)
+            self.input.setFocus()
+
+    def _present(self, dialog):
+        """Show a dialog as a page in this window and wait for it, like exec(); returns its result."""
+        if not self.isVisible() or self.isMinimized():
+            self.show_companion()  # Pages live in this window, so it has to be on screen.
+        page = PanelPage(dialog.windowTitle())
+        dialog.setParent(page.body)
+        dialog.setWindowFlags(Qt.WindowType.Widget)
+        dialog.setProperty("embedded", True)
+        page.body_layout.addWidget(dialog)
+        page.back.clicked.connect(dialog.reject)
+        previous = self.pages.currentWidget()
+        self.pages.addWidget(page)
+        self.pages.setCurrentWidget(page)
+        self._chrome.guard(dialog)
+        loop = QEventLoop()
+        dialog.finished.connect(loop.quit)
+        dialog.show()
+        if not self._closing:
+            loop.exec()
+        result = dialog.result()
+        back = previous if self.pages.indexOf(previous) >= 0 else self.chat_page
+        self.pages.setCurrentWidget(back)
+        self.pages.removeWidget(page)
+        dialog.hide()
+        dialog.setParent(self)  # The caller still owns and deletes it.
+        page.deleteLater()
+        if back is self.chat_page:
+            self.input.setFocus()
+        return result
 
     def _current_preferences(self):
         return replace(
@@ -1919,7 +1983,7 @@ class CompanionWindow(QMainWindow):
             QMessageBox.warning(self, "Could not open reminders", "Reminders could not be read. Please try again.")
             return
         self._chrome.watch(dialog)
-        dialog.exec()
+        self._present(dialog)
         dialog.deleteLater()
 
     def _latest_undo(self):
@@ -1946,7 +2010,7 @@ class CompanionWindow(QMainWindow):
         dialog = TasksDialog(UNDO_ROOT, self)
         dialog.undo_requested.connect(lambda journal: self._undo_task(None, journal) or dialog.refresh())
         self._chrome.watch(dialog)
-        dialog.exec()
+        self._present(dialog)
         dialog.deleteLater()
 
     def _undo_task(self, card, journal):
@@ -2118,7 +2182,7 @@ class CompanionWindow(QMainWindow):
         self.hide()
 
     def _dismiss_dialogs(self) -> None:
-        self.settings_dialog.hide()
+        self._close_panel()
         for dialog in self.findChildren(QDialog):
             if dialog is not self.settings_dialog and dialog.isVisible():
                 dialog.reject()
@@ -2635,7 +2699,7 @@ class CompanionWindow(QMainWindow):
             dialog.generate_requested.connect(self._generate_summary)
             dialog.cancel_requested.connect(self._stop)
             dialog.saved.connect(self._refresh_continuity)
-            dialog.exec()
+            self._present(dialog)
             self._summary_dialog = None
             dialog.deleteLater()
             self._refresh_continuity()
@@ -2738,7 +2802,7 @@ class CompanionWindow(QMainWindow):
         try:
             dialog = HistoryDialog(self.store, self)
             self._chrome.watch(dialog)
-            accepted = dialog.exec()
+            accepted = self._present(dialog)
             if self._closing:
                 dialog.deleteLater()
                 return
@@ -2760,7 +2824,7 @@ class CompanionWindow(QMainWindow):
         try:
             dialog = MemoryDialog(self.store, self)
             self._chrome.watch(dialog)
-            dialog.exec()
+            self._present(dialog)
             dialog.deleteLater()
         except sqlite3.Error:
             QMessageBox.warning(self, "Could not open memories", "Saved memories could not be read. Please try again.")

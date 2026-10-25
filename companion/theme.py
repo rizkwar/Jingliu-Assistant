@@ -25,7 +25,7 @@ ICONS = {
     'stop': '', 'settings': '', 'history': '', 'speaker': '', 'muted': '',
     'handsfree': '', 'memories': '', 'context': '', 'pause': '', 'play': '',
     'moon': '', 'attach': '', 'close': '', 'document': '', 'image': '',
-    'delete': '', 'clock': '',
+    'delete': '', 'clock': '', 'back': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -38,6 +38,7 @@ STYLE = f"""
 * {{ font-family: 'Segoe UI Variable Text', 'Segoe UI'; font-size: 14px; color: {FROST}; }}
 QMainWindow, QDialog {{ background: {NIGHT}; }}
 QWidget#column, QWidget#chatBody, QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QStackedWidget#pages, QWidget#panel, QWidget#panelBody, QDialog[embedded="true"] {{ background: transparent; }}
 QLabel {{ background: transparent; }}
 QToolTip {{ background: #111b31; color: {FROST}; border: 1px solid #2a3b5e; padding: 6px 8px; border-radius: 6px; }}
 
@@ -332,8 +333,12 @@ class WindowChrome(QObject):
 
     def _prepare(self, window):
         style_title_bar(window)
+        self.guard(window)
+
+    def guard(self, widget):
+        """The wheel scrolls past lists and sliders in `widget` unless one was clicked first."""
         # Scroll bars are sliders too, but the wheel is how a page scrolls: leave them alone.
-        controls = [control for kind in CONTROLS for control in window.findChildren(kind)
+        controls = [control for kind in CONTROLS for control in widget.findChildren(kind)
                     if not isinstance(control, QScrollBar)]
         for control in controls:
             if control.property("wheelGuard") is None:
