@@ -203,6 +203,21 @@ overlay, and a click waking her gently and opening chat, with no renderer
 console errors. Pose sheets of every gesture were rendered from the real rig and
 inspected, and expression values were tuned from those images.
 
+## Smoothness, flicker and CPU
+
+- **Frame rate follows what she is doing.** She draws at 60 FPS while anything lively happens:
+  conversation (listening, thinking, speaking), a gesture or expression changing, petting, a task,
+  a preview, or the cursor moving near her in the last 1.5 s. While she only breathes and blinks
+  she draws at 30 FPS, and at 24 FPS asleep. Measured on this laptop with the app idle: about
+  1.0 → 0.5 of a CPU core for the avatar and its web process.
+- **OpenGL, not Direct3D 11.** With Qt's default Direct3D 11 backend, the see-through avatar
+  window occasionally showed a frame with the page missing (a visible flicker, about once a minute
+  during tasks). The app sets `QSG_RHI_BACKEND=opengl`, which hands every frame over intact; set the
+  variable yourself to override it. Destroying the web view under OpenGL stalls in the driver for
+  about 15 seconds, so on quit the app saves and closes everything, then ends its process directly.
+- **The task panel is drawn by Qt**, in its own click-through window above her, not in the page:
+  Chromium sometimes presented a frame without that panel's layer while its text typed out.
+
 ## Rig controls
 
 The existing posture controller feeds the model's real `ParamAngleX`, `ParamAngleY`,

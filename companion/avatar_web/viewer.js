@@ -12,7 +12,7 @@ let voiceSequence = -1, voiceAt = 0, voiceActive = false;
 let visual, activity = 'ready', activitySequence = -1;
 let visible = false, controlsSequence = -1, movement = 1, sensitivity = 1;
 let cursorEnabled=true, gaze=1, hair=.45, attentionSequence=-1, cursorSequence=-1;
-let previewSequence=-1;
+let previewSequence=-1, pointerAt=-1e9;
 let framing='portrait';
 let appearance={};
 let sleepMinutes=5, lifeSequence=-1, gestureSequence=-1, lifeState='awake';
@@ -111,6 +111,7 @@ bridge.workChanged?.connect((state,text,sequence)=>{
   visual?.life?.work(state);
 });
 bridge.cursorChanged.connect((x,y,valid,sequence)=>{
+  if(valid)pointerAt=performance.now();
   if(sequence<=cursorSequence||disposed)return;
   cursorSequence=sequence;
   // Resting the pointer on her (not just passing by) can wake her gently.
@@ -153,9 +154,20 @@ bridge.voiceChanged.connect((level, sequence, reset) => {
   visual?.setVoice(Math.max(0,Math.min(1,level)));
   avatar?.setSpeaking(value > 0); avatar?.setVoiceLevel(value);
 });
+// How many frames she needs right now: smooth motion while anything lively happens,
+// fewer while she only breathes and blinks (saves CPU and battery), fewest asleep.
+function targetRate(now) {
+  const life = visual?.life;
+  const lively = activity !== 'ready' || voiceActive || visual?.preview || petting || now - pointerAt < 1500
+    || (life && (life.gestures.length || life.working || life.petWeight > .01 || life.workWeight > .01
+                 || Math.abs((life.moodWeight ?? 0) - (life.mood ? 1 : 0)) > .02));
+  if (lively) return 60;
+  return life?.state === 'asleep' ? 24 : 30;
+}
 function tick(now) {
   frame = 0;
   if (!avatar || paused || !visible || document.hidden || disposed) return;
+  cadence.setTarget(targetRate(now));
   const dt = cadence.step(now);
   if (dt === null) {
     frame = requestAnimationFrame(tick); return;

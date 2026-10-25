@@ -49,3 +49,14 @@ test('invalid timestamps cannot poison deadlines or produce extra draws',()=>{
   assert.equal(c.step(0),null);
   assert.ok(c.step(1000/60)>0);
 });
+
+test('a quiet avatar can draw fewer frames, and lively moments return to 60', () => {
+  const c=new RenderCadence();
+  const drawn=(rate,start)=>{c.setTarget(rate);let count=0;
+    for(let i=0;i<600;i++)if(c.step(start+i*1000/60)!==null)count++;return count;};
+  assert.ok(Math.abs(drawn(30,0)-300)<=2,'30 FPS while idle');
+  assert.ok(Math.abs(drawn(24,10000)-240)<=3,'24 FPS while asleep');
+  assert.ok(Math.abs(drawn(60,20000)-600)<=2,'back to 60 at once');
+  c.setTarget(5);assert.equal(c.frameRate(),15);
+  c.setTarget(Number.NaN);assert.equal(c.frameRate(),60);
+});

@@ -2,12 +2,16 @@
 // conversation starts. requestAnimationFrame still limits slower displays.
 export class RenderCadence {
   constructor() {
+    this.target = 60;
     this.restart();
   }
 
+  // Lively moments draw at 60 FPS; a quietly idle or sleeping avatar needs far fewer frames.
+  setTarget(rate) { this.target = Number.isFinite(rate) ? Math.max(15, Math.min(60, rate)) : 60; }
+
   restart() { this.previous = null; this.deadline = null; this.rate = 0; }
 
-  frameRate() { return 60; }
+  frameRate() { return this.target; }
 
   step(now) {
     if (!Number.isFinite(now)) return null;
