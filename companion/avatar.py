@@ -17,6 +17,8 @@ COLORS = {"listening": "#91cdb8", "opening_mic": "#91cdb8", "speaking": "#f2bf9a
           "error": "#edaaa8", "suspended": "#929bad"}
 
 
+
+UNLOAD_AFTER_MS = 15_000
 def activity_state(*, closing=False, suspended=False, microphone="idle", speech="idle",
                    speech_busy=False, working=False, summary=False, has_reply=False, error=False):
     if closing:
@@ -243,6 +245,11 @@ class AvatarController(QObject):
         window.show_avatar.toggled.connect(self.set_enabled)
         window.animate_avatar.toggled.connect(self.set_animated)
         window.reset_avatar.clicked.connect(self.reset_position)
+        # A hidden avatar is unloaded after a short while: her web page holds hundreds of MB.
+        self._unload_timer = QTimer(self)
+        self._unload_timer.setSingleShot(True)
+        self._unload_timer.setInterval(UNLOAD_AFTER_MS)
+        self._unload_timer.timeout.connect(self._unload_hidden)
         window.avatar_size.valueChanged.connect(self.set_size)
         window.avatar_motion.valueChanged.connect(self.set_visual_controls)
         window.avatar_lip_sensitivity.valueChanged.connect(self.set_visual_controls)
@@ -307,6 +314,7 @@ class AvatarController(QObject):
             return
         self.window.reset_avatar.setEnabled(enabled)
         if enabled:
+            self._unload_timer.stop()
             if self.widget is None:
                 self.widget = self._create_widget()
                 self.widget.open_requested.connect(self.window.show_companion)
@@ -333,6 +341,16 @@ class AvatarController(QObject):
             self.widget.show()
         elif self.widget is not None:
             self.widget.hide()
+            self._unload_timer.start()
+        self._update_preview_controls()
+
+    @Slot()
+    def _unload_hidden(self):
+        """Still hidden: release her page entirely; showing her again loads it in a few seconds."""
+        if self.widget is None or self.widget.isVisible() or self._shutdown or self.window._closing:
+            return
+        self._position = (self.widget.x(), self.widget.y())
+        self._release_widget()
         self._update_preview_controls()
 
     def _create_widget(self):

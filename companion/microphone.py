@@ -105,6 +105,12 @@ class MicrophoneController(QObject):
         self.level.emit(0)
         self._set_state("idle")
 
+    def release(self):
+        """Idle for a long while: close the recognizer to free its model. The next recording starts it again."""
+        if not self.busy and self.process.state() != QProcess.ProcessState.NotRunning:
+            self._stopping = True
+            self.process.kill()
+
     def shutdown(self):
         self.cancel()
         if self.process.state() != QProcess.ProcessState.NotRunning:

@@ -54,6 +54,7 @@ this one step at a time, following the character, voice, and memory brief.
 - A moonlit **Jingliu theme** with a matching title bar, few buttons, and everything else in **⋯**.
 - In **Windows Search / Start** as **Jingliu**; lives in the **system tray** when closed (Quit from there).
 - Settings are remembered as you change them; your data stays on this PC under `data/`.
+- **Light in the background:** hidden in the tray with the avatar off, it uses about 11 MB of memory ([details](#running-in-the-background)).
 
 **Chat commands:** `/do <task>` · `/undo` · `/remember <fact>` · `/forget <number>` · `/memories`
 
@@ -594,9 +595,16 @@ Voice activity detection is local; only submitted transcript text goes to OpenRo
 ## Running in the background
 
 Closing the main window keeps the companion running in the Windows notification area by
-default. Look for the purple face icon, including under the hidden-icons arrow.
+default. Look for the moon icon, including under the hidden-icons arrow.
 Click the icon to reopen the conversation, or right-click for **Show companion**,
 **Hide to tray**, **Settings**, **Suspend/Resume**, and **Quit**.
+
+**Light in the background.** While the window is hidden or minimized, the app hands its idle
+memory back to Windows after 30 seconds (and again every 10 minutes); it returns by itself when you
+open the window. A hidden avatar is fully unloaded after 15 seconds and reloads in a few seconds
+when shown. The voice and microphone engines close after 10 idle minutes and start again when
+needed (Chatterbox reloads in the background when you open the window). Measured: about 1.7 GB in
+use with the window and avatar open, about 11 MB with both hidden. Reminders still arrive.
 
 Hiding the window cancels recording or transcription and clears any pending
 automatic send. An existing text reply and its speech can continue in the

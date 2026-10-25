@@ -120,6 +120,10 @@ class MessageInput(QPlainTextEdit):
             super().keyPressEvent(event)
 
 
+ENGINE_IDLE_SECONDS = 600   # Voice and microphone engines close after 10 idle minutes.
+TRIM_EVERY_SECONDS = 600    # While hidden, memory is handed back at most every 10 minutes.
+
+
 class CompanionWindow(QMainWindow):
     closed = Signal()
     suspended_changed = Signal(bool)
@@ -177,6 +181,13 @@ class CompanionWindow(QMainWindow):
         self._reminder_timer.timeout.connect(self._check_reminders)
         self._reminder_timer.start()
         QTimer.singleShot(4000, self, self._check_reminders)
+        # In the background, give memory back: close idle voice/microphone engines, trim RAM.
+        self._engines_used_at = self._hidden_at = time.monotonic()
+        self._trimmed_at = 0.0
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setInterval(30_000)
+        self._idle_timer.timeout.connect(self._save_memory_when_idle)
+        self._idle_timer.start()
         key = character_key(settings.character_path)
         self.store.claim_legacy_conversations(key)
         conversations = self.store.conversations(key)
@@ -2070,6 +2081,28 @@ class CompanionWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        if self.settings.tts_engine == "chatterbox":
+            QTimer.singleShot(500, self, self._warm_voice)  # Reloaded if it was closed while idle.
+
+    @Slot()
+    def _save_memory_when_idle(self):
+        """Every 30 s: close voice and microphone engines unused for 10 minutes, and while the window
+        is hidden or minimized, hand idle memory back to Windows (again every 10 minutes)."""
+        now = time.monotonic()
+        if self._worker or self._task is not None or self.speech.busy or self.microphone.busy:
+            self._engines_used_at = now
+        elif now - self._engines_used_at > ENGINE_IDLE_SECONDS:
+            for engine in (self.speech, self.microphone):
+                if hasattr(engine, "release"):
+                    engine.release()
+        if self.isVisible() and not self.isMinimized():
+            self._hidden_at = now
+            return
+        if now - self._hidden_at >= 30 and now - self._trimmed_at >= TRIM_EVERY_SECONDS:
+            from .memory_saver import trim
+            processes = [getattr(engine, "process", None) for engine in (self.speech, self.microphone)]
+            trim([process.processId() for process in processes if process is not None])
+            self._trimmed_at = now
 
     @Slot()
     def hide_to_tray(self) -> None:

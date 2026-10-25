@@ -246,6 +246,12 @@ class SpeechController(QObject):
         if was_busy:
             self._report("Voice stopped", "idle")
 
+    def release(self):
+        """Idle for a long while: close the engine to free its model. The next phrase starts it again."""
+        if not self.busy and self.process.state() != QProcess.ProcessState.NotRunning:
+            self._stopping = True
+            self.process.kill()
+
     def shutdown(self):
         self.stop()
         if self.process.state() != QProcess.ProcessState.NotRunning:
