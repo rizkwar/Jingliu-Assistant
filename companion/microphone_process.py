@@ -79,7 +79,8 @@ def run(input_stream=None, output_stream=None, capture_factory=Capture, transcri
     commands = queue.Queue()
 
     def read_commands():
-        for line in input_stream:
+        from .pipe_lines import lines
+        for line in lines(input_stream):  # Never a blocking pipe read: see pipe_lines.
             commands.put(line)
         commands.put(None)
 

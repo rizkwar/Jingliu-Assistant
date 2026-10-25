@@ -193,7 +193,8 @@ def run(input_stream=None, output_stream=None, speaker=None, engine="pocket"):
     jobs = queue.Queue()
 
     def read():
-        for line in input_stream:
+        from .pipe_lines import lines
+        for line in lines(input_stream):  # Never a blocking pipe read: see pipe_lines.
             try:
                 command = json.loads(line)
             except ValueError:
