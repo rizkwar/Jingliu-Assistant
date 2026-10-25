@@ -47,11 +47,11 @@ QListWidget#nav::item:selected {{ color: {FROST}; background: rgba(168, 212, 255
 QLabel {{ background: transparent; }}
 QToolTip {{ background: #111b31; color: {FROST}; border: 1px solid #2a3b5e; padding: 6px 8px; border-radius: 6px; }}
 
-QLabel#title {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 28px; font-weight: 400; color: #eef4fd; }}
+QLabel#title {{ font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; font-size: 26px; letter-spacing: 1px; }}
 QLabel#seal {{ font-family: 'Microsoft YaHei UI Light'; font-size: 15px; color: {ICE_DEEP}; padding-top: 6px; }}
 QLabel#subtitle {{ color: {MUTED}; font-size: 12px; }}
 QLabel#hint, QLabel#footer {{ color: {DIM}; font-size: 12px; }}
-QLabel#section {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 17px; color: #eef4fd; padding: 16px 0 6px 0;
+QLabel#section {{ color: {ICE}; font-size: 13px; font-weight: 600; padding: 14px 0 6px 0;
     border-bottom: 1px solid rgba(168, 212, 255, 0.10); }}
 QLabel#emblem {{ font-family: '{ICON_FONT}'; font-size: 20px; color: {ICE};
     background: qradialgradient(cx:0.5, cy:0.5, radius:0.6, fx:0.4, fy:0.35, stop:0 #1d3256, stop:1 #0d1528);
@@ -88,8 +88,8 @@ QFrame#composer[focused="true"] {{ border-color: rgba(168, 212, 255, 0.45); }}
 QPlainTextEdit#input {{ background: transparent; border: none; padding: 2px 4px; font-size: 15px;
     selection-background-color: #2f5487; }}
 
-QFrame#assistant {{ background: transparent; border: none; border-left: 2px solid rgba(168, 212, 255, 0.34); }}
-QFrame#assistant QLabel#body {{ font-family: 'Sitka Text', 'Cambria', 'Georgia'; font-size: 16px; color: #e9f0fa; }}
+QFrame#assistant {{ background: rgba(18, 29, 52, 0.84); border: 1px solid rgba(168, 212, 255, 0.10);
+    border-radius: 16px; border-top-left-radius: 4px; }}
 QFrame#user {{ background: rgba(168, 212, 255, 0.075); border: none; border-radius: 14px; }}
 QFrame#user QLabel#body {{ color: #dbe6f5; }}
 QFrame#task {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.12);
@@ -111,7 +111,7 @@ QListWidget#history::item {{ background: transparent; border: none; padding: 0; 
 QFrame#historyRow {{ background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(168, 212, 255, 0.08); border-radius: 6px; }}
 QListWidget#history::item:hover QFrame#historyRow {{ background: rgba(168, 212, 255, 0.07); }}
 QListWidget#history::item:selected {{ background: rgba(111, 168, 232, 0.12); border: 1px solid rgba(168, 212, 255, 0.32); border-radius: 6px; }}
-QLabel#historyTitle {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 16px; color: #eef4fd; }}
+QLabel#historyTitle {{ font-size: 14px; font-weight: 600; color: {FROST}; }}
 QLabel#historyMeta {{ font-size: 11px; color: {ICE}; letter-spacing: 0.3px; }}
 QLabel#historyPreview {{ font-size: 12px; color: {MUTED}; }}
 QLabel#historyBadge {{ font-size: 10px; font-weight: 600; letter-spacing: 1px; color: {NIGHT}; background: {ICE};
@@ -127,14 +127,14 @@ QLabel#memoryIcon {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {ICE}; 
 QLabel#memoryText {{ font-size: 12px; color: #cfe0f6; }}
 QPushButton#memoryUndo {{ background: transparent; border: none; color: {ICE}; font-size: 12px; padding: 2px 8px; }}
 QPushButton#memoryUndo:hover {{ color: {FROST}; text-decoration: underline; }}
-QLabel#speaker {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; color: {ICE}; font-size: 14px; font-style: italic; }}
+QLabel#speaker {{ color: {ICE}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
 QLabel#body {{ font-size: 15px; selection-background-color: #2f5487; }}
 QLabel#notice {{ color: {MUTED}; font-size: 12px; font-style: italic; }}
 QLabel#error {{ color: #f3b3bd; font-size: 13px; }}
 QLabel#note {{ color: {MUTED}; font-size: 12px; background: transparent; border: none; padding: 2px 12px; }}
 QLabel#note[tone="warning"] {{ color: {AMBER}; border-color: rgba(230, 194, 140, 0.30); }}
 QLabel#note[tone="error"] {{ color: #f3b3bd; border-color: rgba(226, 86, 110, 0.35); }}
-QLabel#welcomeTitle {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 26px; color: #eef4fd; }}
+QLabel#welcomeTitle {{ font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; font-size: 22px; color: {FROST}; }}
 QLabel#welcomeText {{ color: {MUTED}; font-size: 13px; }}
 QLabel#welcomeMoon {{ font-family: '{ICON_FONT}'; font-size: 40px; color: {ICE}; }}
 QFrame#attachment {{ background: rgba(168, 212, 255, 0.07); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 10px; }}
