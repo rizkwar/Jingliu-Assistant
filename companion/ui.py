@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 import sqlite3
+import sys
 from pathlib import Path
 import tempfile
 import time
@@ -632,6 +633,12 @@ class CompanionWindow(QMainWindow):
         self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
         self.close_to_tray.setChecked(settings.close_to_tray)
         settings_layout.addWidget(self.close_to_tray)
+        from . import autostart
+        self.start_with_windows = QCheckBox("Start Jingliu when I sign in to Windows (quietly, in the tray)")
+        self.start_with_windows.setChecked(autostart.enabled())
+        self.start_with_windows.setEnabled(sys.platform == "win32")
+        self.start_with_windows.toggled.connect(self._start_with_windows_toggled)
+        settings_layout.addWidget(self.start_with_windows)
         section(settings_layout, "Configuration")
         reload_row = QHBoxLayout()
         reload_hint = QLabel("Re-read .env and the character profile after editing them by hand.")
@@ -1783,6 +1790,16 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_note(f"She could not see your screen: {exc}", "warning")
             return
         self._begin_reply("[My screen, shared because you asked to look]", [str(path)], looking=True)
+
+    @Slot(bool)
+    def _start_with_windows_toggled(self, enabled):
+        from . import autostart
+        try:
+            autostart.set_enabled(enabled)
+        except OSError as exc:
+            with QSignalBlocker(self.start_with_windows):
+                self.start_with_windows.setChecked(autostart.enabled())
+            self._flash(f"Could not change starting with Windows: {exc}")
 
     @Slot(bool)
     def _barge_in_toggled(self, enabled):

@@ -54,7 +54,9 @@ def main() -> int:
     hotkey.activated.connect(window._toggle_recording)
     if not hotkey.register():
         window.mic_hint.setText("Hold the button to talk · Ctrl+Alt+Space is unavailable · 60-second limit")
-    window.show()
+    from .autostart import BACKGROUND
+    if not (BACKGROUND in sys.argv and tray_available):
+        window.show()  # Started with Windows: stay in the tray (her avatar still appears if it is on).
     try:
         return app.exec()
     finally:
