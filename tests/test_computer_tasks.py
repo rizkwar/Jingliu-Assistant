@@ -50,7 +50,8 @@ class ToolServerTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in replies], [1, 2, 3])
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
         names = {tool["name"] for tool in replies[1]["result"]["tools"]}
-        self.assertEqual(names, {"approve", "screenshot", "click", "type_text", "press_keys", "scroll", "wait"})
+        self.assertEqual(names, {"approve", "screenshot", "click", "type_text", "press_keys", "scroll", "wait",
+                                 "move_path", "copy_path", "delete_path", "make_folder"})
         self.assertIn("error", replies[2])
 
 
@@ -97,6 +98,65 @@ class TaskRunTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = application()
+
+    def setUp(self):
+        import tempfile
+        self.undo = tempfile.TemporaryDirectory()
+        self.addCleanup(self.undo.cleanup)
+        patcher = patch("companion.computer_tasks.UNDO_ROOT", Path(self.undo.name))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_allowed_steps_are_recorded_for_undo_before_they_run(self):
+        work = Path(self.undo.name) / "work"
+        work.mkdir()
+        (work / "notes.txt").write_text("original", encoding="utf-8")
+        task = ComputerTask("Tidy", [], SETTINGS)
+        self.assertIn(str(Path(self.undo.name)), str(task.journal.folder))  # Never the real data folder in tests.
+        for tool, values in (("Edit", {"file_path": str(work / "notes.txt")}),
+                             ("Write", {"file_path": str(work / "new.txt")}),
+                             ("PowerShell", {"command": "Get-Date"}),
+                             ("mcp__jingliu__click", {"x": 1, "y": 2})):
+            request = FakeRequest(tool)
+            request.values = values
+            task._record(request)
+        ops = [entry["op"] for entry in task.journal.entries()]
+        self.assertEqual(ops, ["replace", "create", "note", "note"])
+        (work / "notes.txt").write_text("changed by the task", encoding="utf-8")
+        (work / "new.txt").write_text("made by the task", encoding="utf-8")
+        lines, notes = task.journal.plan()
+        self.assertTrue(any("restore 1 edited file" in line for line in lines))
+        self.assertEqual(len(notes), 2)  # The command, and the clicks.
+        done, problems = task.journal.undo()
+        self.assertEqual(problems, [])
+        self.assertEqual((work / "notes.txt").read_text(encoding="utf-8"), "original")
+        self.assertFalse((work / "new.txt").exists())
+        task.folder.cleanup()
+
+    def test_tool_server_file_operations_are_undoable(self):
+        work = Path(self.undo.name) / "files"
+        (work / "Downloads").mkdir(parents=True)
+        (work / "Downloads" / "a.png").write_text("a", encoding="utf-8")
+        (work / "Downloads" / "old.zip").write_text("z", encoding="utf-8")
+        journal = Path(self.undo.name) / "journal"
+        with patch.dict(os.environ, {"JINGLIU_JOURNAL": str(journal)}):
+            for name, arguments in (("make_folder", {"path": str(work / "Downloads" / "Pictures" / "2026")}),
+                                    ("move_path", {"source": str(work / "Downloads" / "a.png"),
+                                                   "destination": str(work / "Downloads" / "Pictures" / "2026")}),
+                                    ("copy_path", {"source": str(work / "Downloads" / "Pictures"),
+                                                   "destination": str(work / "Backup" / "Pictures")}),
+                                    ("delete_path", {"path": str(work / "Downloads" / "old.zip")})):
+                self.assertFalse(task_tools.call(name, arguments).get("isError"), name)
+        self.assertTrue((work / "Downloads" / "Pictures" / "2026" / "a.png").exists())
+        self.assertFalse((work / "Downloads" / "old.zip").exists())
+        from companion.task_journal import Journal
+        done, problems = Journal(journal).undo()
+        self.assertEqual(problems, [])
+        self.assertEqual(sorted(p.name for p in (work / "Downloads").iterdir()), ["a.png", "old.zip"])
+        self.assertFalse((work / "Backup").exists())
+        with patch.dict(os.environ, {"JINGLIU_JOURNAL": ""}):
+            self.assertTrue(task_tools.call("delete_path", {"path": str(work)}).get("isError"))
+        self.assertTrue(work.exists())
 
     def test_task_runs_isolated_with_approval_for_risky_steps(self):
         task = ComputerTask("Tidy my Downloads folder", [{"role": "user", "content": "Hi"}], SETTINGS)
@@ -273,6 +333,41 @@ class WindowTaskTests(unittest.TestCase):
             task.step.emit("Run a command: New-Item Screenshots")
             task.finished.emit("Sorted.", True)
         self.assertEqual(shown, ["start", "read", "command", "done"])
+
+    def test_a_finished_task_can_be_undone_from_its_card_or_with_slash_undo(self):
+        import tempfile
+        from PySide6.QtWidgets import QMessageBox
+        from companion.task_journal import Journal
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        work = Path(folder.name) / "Downloads"
+        work.mkdir()
+        (work / "a.png").write_text("a", encoding="utf-8")
+        self.window.input.setPlainText("/do sort my downloads")
+        self.window._send()
+        task = FakeTask.created[0]
+        task.journal = Journal(Path(folder.name) / "journal")
+        task.journal.move(work / "a.png", task.journal.make_folder(work / "Pictures"))
+        task.journal.note("command", "Get-ChildItem")
+        task.finished.emit("Sorted.", True)
+        card = self.window._task_card
+        self.assertTrue(card.undo_button.isVisibleTo(card))
+        asked = []
+        def question(parent, title, text, *rest):
+            asked.append(text)
+            return QMessageBox.StandardButton.Yes
+        with patch.object(QMessageBox, "question", side_effect=question):
+            card.undo_button.click()
+        self.assertIn("move 1 item back", asked[0])
+        self.assertIn("cannot reverse 1 command", asked[0])
+        self.assertEqual([p.name for p in work.iterdir()], ["a.png"])  # Moved back, empty folder removed.
+        self.assertEqual(card.status_text, "Undone")
+        self.assertFalse(card.undo_button.isVisibleTo(card))
+        self.assertIn("Undid the task", self.window.transcript.toPlainText())
+        self.assertIn("[Task undone by the person]", self.window._messages[-1]["content"])
+        self.window.input.setPlainText("/undo")
+        self.window._send()
+        self.assertIn("no finished task to undo", self.window.transcript.toPlainText())
 
     def test_tasks_can_be_turned_off(self):
         self.window.computer_tasks.setChecked(False)

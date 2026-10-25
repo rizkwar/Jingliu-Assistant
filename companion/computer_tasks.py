@@ -13,6 +13,7 @@ import shutil
 import string
 import sys
 import tempfile
+import time
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 from PySide6.QtNetwork import QHostAddress, QTcpServer
@@ -25,6 +26,7 @@ FREE_TOOLS = ("Read", "Glob", "Grep", "WebSearch", "WebFetch", f"mcp__{SERVER}__
 TOOLS = "Bash,PowerShell,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"
 INPUT_TOOLS = {f"mcp__{SERVER}__{name}" for name in ("click", "type_text", "press_keys", "scroll")}
 MAX_TURNS = 80
+UNDO_ROOT = PROJECT_ROOT / "data" / "task_undo"
 TIME_LIMIT_MS = 20 * 60 * 1000
 
 TASK_PROMPT = """You are {name}, the user's desktop companion, now carrying out a task they asked you to do
@@ -39,6 +41,9 @@ How to work:
   needs a password, stop and explain instead of guessing.
 - Some steps need the user's approval. If a step is denied, do not retry it another way; finish what you
   can and say what was not done.
+- The user can undo your task afterwards. To move, rename, copy or delete files and folders, or to create
+  folders, always use the move_path, copy_path, delete_path and make_folder tools, and use Write or Edit for
+  file contents: those changes can be reversed. Use commands only for what these tools cannot do.
 
 When you finish, reply with a short report in {name}'s own voice (first person, composed, warm, no
 stage directions or asterisks), two to four sentences: what you did, where to find the result, and
@@ -83,13 +88,22 @@ def describe(tool, values):
         "press_keys": lambda: f"Press {values.get('keys', '')}",
         "scroll": lambda: f"Scroll {'up' if (values.get('amount') or 0) > 0 else 'down'} on the screen",
         "wait": lambda: "Wait a moment",
+        **{tool: (lambda tool=tool: FILE_STEPS[tool](values)) for tool in FILE_STEPS},
     }.get(name, lambda: f"Use {name}")()
+
+
+FILE_STEPS = {
+    "move_path": lambda v: f"Move {v.get('source', '')} to {v.get('destination', '')}",
+    "copy_path": lambda v: f"Copy {v.get('source', '')} to {v.get('destination', '')}",
+    "delete_path": lambda v: f"Delete {v.get('path', '')}",
+    "make_folder": lambda v: f"Create the folder {v.get('path', '')}",
+}
 
 
 def step_kind(summary):
     """How she looks while doing a step: reading, writing, running, using the screen or thinking."""
     for kind, starts in (("read", ("Read", "Look for files", "Search in files", "Search the web", "Open the page")),
-                         ("command", ("Run a command",)),
+                         ("command", ("Run a command", "Move ", "Copy ", "Delete ", "Create the folder")),
                          ("type", ("Write the file", "Edit the file", "Type", "Press")),
                          ("look", ("Click", "Double-click", "Right-click", "Scroll", "Look at the screen"))):
         if summary.startswith(starts):
@@ -103,7 +117,7 @@ def approval_group(tool):
         return "mouse and keyboard"
     if tool in {"Bash", "PowerShell"}:
         return "commands"
-    if tool in {"Write", "Edit"}:
+    if tool in {"Write", "Edit"} or tool.removeprefix(f"mcp__{SERVER}__") in FILE_STEPS:
         return "file changes"
     return tool
 
@@ -155,6 +169,7 @@ class ApprovalRequest:
     def __init__(self, socket, tool, values):
         self.socket, self.tool, self.values = socket, tool, values
         self.answered = False
+        self.on_allow = None  # Records the step for undo just before it is allowed to run.
 
     @property
     def summary(self):
@@ -164,6 +179,12 @@ class ApprovalRequest:
         if self.answered:
             return
         self.answered = True
+        if allow and self.on_allow is not None:
+            try:
+                self.on_allow(self)
+            except OSError as exc:
+                # Without a copy of the original, the change could not be undone: refuse it.
+                allow, message = False, f"The original could not be kept for undo ({exc}), so this was not done."
         from shiboken6 import isValid
         if not isValid(self.socket):
             return  # The task ended while the person was deciding.
@@ -177,9 +198,13 @@ class ComputerTask(QObject):
     approval = Signal(object)
     finished = Signal(str, bool)  # report, succeeded
 
-    def __init__(self, request, context, settings, parent=None):
+    def __init__(self, request, context, settings, parent=None, undo_root=None):
         super().__init__(parent)
         self.request = request
+        from .task_journal import Journal, cleanup
+        root = Path(undo_root or UNDO_ROOT)
+        cleanup(root)
+        self.journal = Journal(root / (time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)))
         self.allowed_groups = set()
         # Off in Settings: every step runs at once, still shown as it happens.
         self.ask = getattr(settings, "approve_steps", True)
@@ -205,7 +230,8 @@ class ComputerTask(QObject):
             python = python.with_name("python.exe")
         server = {"command": str(python), "args": ["-u", "-m", "companion.task_tools"],
                   "env": {"PYTHONPATH": str(PROJECT_ROOT), "JINGLIU_APPROVAL_PORT": str(self.approvals.port),
-                          "JINGLIU_APPROVAL_TOKEN": self.approvals.token, "PYTHONIOENCODING": "utf-8"}}
+                          "JINGLIU_APPROVAL_TOKEN": self.approvals.token, "PYTHONIOENCODING": "utf-8",
+                          "JINGLIU_JOURNAL": str(self.journal.folder)}}
         (work / "mcp.json").write_text(json.dumps({"mcpServers": {SERVER: server}}), encoding="utf-8")
         (work / "prompt.txt").write_text(TASK_PROMPT.format(
             name=settings.name, home=Path.home(), profile=settings.system_prompt or settings.name), encoding="utf-8")
@@ -246,6 +272,7 @@ class ComputerTask(QObject):
         self._finish(report, False)
 
     def _approval(self, request):
+        request.on_allow = self._record
         group = approval_group(request.tool)
         if self.done:
             request.answer(False, "The task has ended.")
@@ -254,6 +281,16 @@ class ComputerTask(QObject):
             self.step.emit(request.summary)
         else:
             self.approval.emit(request)
+
+    def _record(self, request):
+        """Before an allowed step runs: keep what undo needs, or note what it cannot reverse."""
+        name = request.tool.removeprefix(f"mcp__{SERVER}__")
+        if request.tool in {"Write", "Edit"}:
+            self.journal.before_write(request.values.get("file_path", ""))
+        elif request.tool in {"Bash", "PowerShell"}:
+            self.journal.note("command", request.values.get("command", ""))
+        elif request.tool in INPUT_TOOLS:
+            self.journal.note("screen", name)
 
     def remember_approval(self, request):
         self.allowed_groups.add(approval_group(request.tool))

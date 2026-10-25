@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timezone
 import sqlite3
 from pathlib import Path
 import tempfile
@@ -32,6 +33,7 @@ from .prompts import reply_prompt
 from .avatar_cues import TEST_GROUPS, CueFilter
 from .reference_voice import inspect_reference, VoiceSetupError
 from . import attachments
+from . import reminders
 from .chat_view import AttachmentCard, ChatView
 from .theme import ACTIVITY_COLORS, ICONS, STYLE, NightSky, WindowChrome, glyph_icon, icon_button, moon_icon, repolish
 
@@ -122,6 +124,7 @@ class CompanionWindow(QMainWindow):
     closed = Signal()
     suspended_changed = Signal(bool)
     activity_changed = Signal(str)
+    notify = Signal(str, str)  # title, message: a desktop notification (the tray shows it).
 
     def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None, models=None):
         super().__init__()
@@ -162,11 +165,18 @@ class CompanionWindow(QMainWindow):
         self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
         self._task, self._task_request, self._task_offer, self._offer_card = None, None, None, None
         self._memory_actions = []
+        self._last_undo = None  # (task card, journal) of the latest task with undoable changes.
         self._voice_note = ""
         self._voice_message = None
         # The entry point injects a disk store. Isolated previews/tests use RAM.
         self.store = store if store is not None else Store(":memory:")
         self._owns_store = store is None
+        # Reminders are checked every few seconds and soon after start, for ones due while closed.
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(10000)
+        self._reminder_timer.timeout.connect(self._check_reminders)
+        self._reminder_timer.start()
+        QTimer.singleShot(4000, self, self._check_reminders)
         key = character_key(settings.character_path)
         self.store.claim_legacy_conversations(key)
         conversations = self.store.conversations(key)
@@ -253,6 +263,7 @@ class CompanionWindow(QMainWindow):
         menu = QMenu(self)
         self.history_button = menu.addAction(glyph_icon("history"), "History")
         self.memory_button = menu.addAction(glyph_icon("memories"), "Memories")
+        self.reminders_button = menu.addAction(glyph_icon("clock"), "Reminders")
         self.context_button = menu.addAction(glyph_icon("context"), "Context and summary")
         self.context_button.setToolTip("Inspect or summarize older exchanges in this conversation")
         menu.addSeparator()
@@ -268,6 +279,7 @@ class CompanionWindow(QMainWindow):
         self.context_button.triggered.connect(self._open_summary)
         self.history_button.triggered.connect(self._open_history)
         self.memory_button.triggered.connect(self._open_memories)
+        self.reminders_button.triggered.connect(self._open_reminders)
         self.suspend_button.triggered.connect(self.toggle_suspended)
         self.new_chat.clicked.connect(self._new_conversation)
         self.reload.clicked.connect(self._reload_settings)
@@ -966,16 +978,20 @@ class CompanionWindow(QMainWindow):
         if len(text) > 16000:
             QMessageBox.information(self, "Message too long", "Please keep a message under 16,000 characters.")
             return
+        self._begin_reply(text, files)
+
+    def _begin_reply(self, text, files=(), reminder=False) -> bool:
+        """Save the turn and start her reply. A reminder's line comes from the app, not the input box."""
         self._activity_error = False
         self._interrupt_speech()
         if self._active_turn and not self._save_active_turn():
-            return
+            return False
         try:
             stored = attachments.store(files) if files else []
         except (OSError, attachments.AttachmentError) as exc:
             self._flash(f"Could not attach: {exc}" if isinstance(exc, attachments.AttachmentError)
                         else "An attachment could not be copied. Check the file and try again.")
-            return
+            return False
         try:
             turns = self.store.context_turns(self._conversation_id)
             summary = self.store.summary(self._conversation_id)
@@ -985,9 +1001,10 @@ class CompanionWindow(QMainWindow):
         except sqlite3.Error:
             attachments.remove_files(stored)
             self.privacy.setText("Could not save this message. No request was sent. Please try again.")
-            return
-        self._pending_files.clear()
-        self._render_attachments()
+            return False
+        if not reminder:
+            self._pending_files.clear()
+            self._render_attachments()
         self._active_turn = turn
         self._reply_status, self._reply_notice = "pending", ""
         self._spoken_phrases = []
@@ -998,15 +1015,20 @@ class CompanionWindow(QMainWindow):
         self._messages.append({"role": "user", "content": "\n".join(part for part in (text, attachments.note(stored)) if part)})
         # Only this turn carries the files themselves; history keeps a short note about them.
         context = [*recent_messages(turns), {"role": "user", "content": text, "attachments": stored}]
-        self.input.clear()
         self._reply = ""
-        self.transcript.add_message("user", "You", text, attachments=stored)
+        if reminder:
+            # The clock icon already says it; her message keeps the mark that tells her what this is.
+            self.transcript.add_memory_note(text.replace(reminders.MARK, "Reminder"), can_undo=False, icon="clock")
+        else:
+            self.input.clear()
+            self.transcript.add_message("user", "You", text, attachments=stored)
         self.transcript.begin_reply(self.settings.name)
         prompt = reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None,
                               avatar_cues=self.show_avatar.isChecked(),
                               computer_tasks=self.computer_tasks.isChecked(),
                               confirm_tasks=self.confirm_tasks.isChecked(),
-                              memory_cues=True, auto_memory=self.auto_memory.isChecked())
+                              memory_cues=True, auto_memory=self.auto_memory.isChecked(),
+                              reminders=self._reminder_prompt())
         self._task_request = self._task_offer = None
         self._memory_actions = []
         self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
@@ -1022,6 +1044,7 @@ class CompanionWindow(QMainWindow):
             self.speech.begin_reply(self._speech_voice(), self.volume.value(), self.delivery_rate.value())
         self._update_conversation_title()
         worker.start()
+        return True
 
     def _set_busy(self, busy: bool) -> None:
         self._refresh_controls()
@@ -1581,8 +1604,10 @@ class CompanionWindow(QMainWindow):
 
     def _apply_memory_actions(self):
         actions, self._memory_actions = self._memory_actions, []
+        handlers = {"remember": self._remember, "forget": self._forget,
+                    "remind": self._set_reminder, "unremind": self._cancel_reminder}
         for action, detail in actions:
-            self._remember(detail) if action == "remember" else self._forget(detail)
+            handlers[action](detail)
 
     def _remember(self, fact):
         fact = " ".join(fact.split())[:1000]
@@ -1758,12 +1783,154 @@ class CompanionWindow(QMainWindow):
             except sqlite3.Error:
                 pass
         self.avatar.work("done" if succeeded else "failed", report)
+        journal = getattr(task, "journal", None)
+        if journal is not None and journal.undoable():
+            card.offer_undo()
+            card.undo_requested.connect(lambda card=card, journal=journal: self._undo_task(card, journal))
+            self._last_undo = (card, journal)
         if self.auto_speak.isChecked() and self.volume.value() > 0 and not self._closing:
             self.speech.speak(report, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
         self.status.setText("Ready")
         self._refresh_stop_button()
         if task is not None:
             task.deleteLater()
+
+    # Reminders --------------------------------------------------------------------
+
+    def _reminder_prompt(self):
+        try:
+            return reminders.prompt(self.store.reminders())
+        except sqlite3.Error:
+            return reminders.prompt([])
+
+    def _set_reminder(self, payload):
+        try:
+            due, text, repeat = reminders.parse(payload)
+            reminder_id = self.store.add_reminder(text, due, repeat)
+        except ValueError as exc:
+            self.transcript.add_note(f"The reminder could not be set: {exc}", "warning")
+            return
+        except sqlite3.Error:
+            self.transcript.add_note("The reminder could not be saved.", "warning")
+            return
+        when = reminders.describe({"due_at": due.isoformat(), "repeat": repeat})
+        note = self.transcript.add_memory_note(f"Reminder set: “{text}” · {when}", button="Cancel", icon="clock")
+
+        def cancel(note=note, reminder_id=reminder_id, text=text):
+            try:
+                self.store.delete_reminder(reminder_id)
+            except sqlite3.Error:
+                return
+            note.settle(f"Reminder cancelled: “{text}”")
+        note.undo.connect(cancel)
+
+    def _cancel_reminder(self, description):
+        try:
+            upcoming = self.store.reminders()
+        except sqlite3.Error:
+            return
+        scored = sorted(((reminders.match(description, r["text"]), r) for r in upcoming),
+                        key=lambda item: item[0], reverse=True)
+        if not scored or scored[0][0] < .5:
+            self.transcript.add_memory_note(f"No reminder matched “{description}”. Open Reminders to remove it.",
+                                            can_undo=False, icon="clock")
+            return
+        reminder = scored[0][1]
+        try:
+            self.store.delete_reminder(reminder["id"])
+        except sqlite3.Error:
+            return
+        note = self.transcript.add_memory_note(f"Reminder cancelled: “{reminder['text']}”", icon="clock")
+
+        def restore(note=note, reminder=reminder):
+            try:
+                self.store.add_reminder(reminder["text"], datetime.fromisoformat(reminder["due_at"]), reminder["repeat"])
+            except (ValueError, sqlite3.Error):
+                return
+            note.settle(f"Reminder kept: “{reminder['text']}”")
+        note.undo.connect(restore)
+
+    def _finish_reminder(self, reminder):
+        repeat = reminder.get("repeat") or ""
+        following = reminders.following(datetime.fromisoformat(reminder["due_at"]), repeat) if repeat else None
+        self.store.finish_reminder(reminder["id"], following)
+
+    @Slot()
+    def _check_reminders(self):
+        """Every few seconds: deliver a due reminder once she is free; list long-missed ones."""
+        if self._closing:
+            return
+        try:
+            due = self.store.due_reminders(datetime.now(timezone.utc))
+            now = reminders.now_local()
+            fresh = []
+            for reminder in due:
+                if now - datetime.fromisoformat(reminder["due_at"]) > reminders.LATE_LIMIT:
+                    self._finish_reminder(reminder)
+                    self.transcript.add_memory_note(f"Missed while the app was closed: “{reminder['text']}” "
+                                                    f"({reminders.describe(reminder)})", can_undo=False, icon="clock")
+                else:
+                    fresh.append(reminder)
+            busy = (self._worker or self._task is not None or self.microphone.busy or self.suspended
+                    or self.speech.busy)
+            if not fresh or busy:
+                return
+            reminder = fresh[0]
+            self._finish_reminder(reminder)
+        except sqlite3.Error:
+            return
+        self._deliver_reminder(reminder)
+
+    def _deliver_reminder(self, reminder):
+        line = reminders.message(reminder)
+        if not self.isVisible() or self.isMinimized():
+            self.notify.emit(f"{self.settings.name} · Reminder", reminder["text"])
+        try:
+            self.settings.validate_connection()
+            started = self._begin_reply(line, reminder=True)
+        except ValueError:
+            started = False
+        if not started:
+            # Without a model she cannot speak it herself; the reminder still appears.
+            self.transcript.add_memory_note(f"Reminder: {reminder['text']}", can_undo=False, icon="clock")
+
+    @Slot()
+    def _open_reminders(self) -> None:
+        from .library_ui import ReminderDialog
+        try:
+            dialog = ReminderDialog(self.store, self)
+        except sqlite3.Error:
+            QMessageBox.warning(self, "Could not open reminders", "Reminders could not be read. Please try again.")
+            return
+        self._chrome.watch(dialog)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def _undo_task(self, card, journal):
+        """Reverse a finished task's file changes, after showing what will happen."""
+        if journal.undone or self._task is not None:
+            if self._task is not None:
+                self.transcript.add_note("Stop the current task before undoing an earlier one.", "warning")
+            return
+        lines, notes = journal.plan()
+        text = "This will " + "; ".join(lines) + "." if lines else "There is nothing left to undo."
+        if notes:
+            text += "\n\nIt cannot reverse " + " or ".join(notes) + "."
+        if QMessageBox.question(self, "Undo this task?", text) != QMessageBox.StandardButton.Yes:
+            return
+        done, problems = journal.undo()
+        card.offer_undo(False)
+        card.set_status("Undone" if not problems else "Partly undone", "undone")
+        if self._last_undo and self._last_undo[1] is journal:
+            self._last_undo = None
+        summary = f"Undid the task: {len(done)} change{'s' if len(done) != 1 else ''} reversed."
+        if problems:
+            summary += " Not reversed: " + "; ".join(problems[:4]) + ("…" if len(problems) > 4 else ".")
+        if notes:
+            summary += " Commands and screen actions were left as they are."
+        self.transcript.add_note(summary, "warning" if problems else "")
+        # She should know her work was taken back, so later replies do not assume it is still there.
+        self._messages.append({"role": "assistant", "content": "[Task undone by the person] " + summary})
 
     @Slot()
     def _voice_engine_changed(self):
@@ -2078,10 +2245,10 @@ class CompanionWindow(QMainWindow):
                 self._task_request = detail
             elif name == "offer" and detail:
                 self._task_offer = detail
-            elif name in {"remember", "forget"} and detail:
+            elif name in {"remember", "forget", "remind", "unremind"} and detail:
                 self._memory_actions.append((name, detail))
         cues = [(offset, cue) for offset, cue in cues
-                if cue.partition(":")[0] not in {"task", "offer", "remember", "forget"}]
+                if cue.partition(":")[0] not in {"task", "offer", "remember", "forget", "remind", "unremind"}]
         # Spoken replies show each expression as the voice reaches it; silent ones show it at once.
         self._pending_cues.extend(cues)
         if not self._streaming_voice:
@@ -2520,6 +2687,13 @@ class CompanionWindow(QMainWindow):
         command, argument = parts[0], parts[1] if len(parts) > 1 else ""
         if command.lower() == "/do":
             self._do_command(argument.strip())
+            return True
+        if command.lower() == "/undo":
+            self.input.clear()
+            if self._last_undo is None:
+                self.transcript.add_note("There is no finished task to undo in this session.")
+            else:
+                self._undo_task(*self._last_undo)
             return True
         if command.lower() not in {"/remember", "/forget", "/memories"}:
             return False

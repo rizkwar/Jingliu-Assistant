@@ -47,6 +47,29 @@ spends money, messages other people, changes system settings, or deletes a lot.
 
 Turn the feature off in **Settings → App → Let her do tasks on this computer**.
 
+## Undoing a task
+
+Every task keeps a record of the file changes it makes, so a finished task's card shows
+**Undo this task** (or type `/undo` for the latest one). Undo first lists what it will do and
+asks you to confirm, then reverses the changes, newest first:
+
+- Files she **edited or overwrote** get their original content back (the original is copied just
+  before the change is allowed).
+- Files and folders she **created or copied** are removed. They are set aside in the task's undo
+  folder rather than destroyed.
+- Items she **moved or renamed** go back where they were.
+- Items she **deleted** come back. Her delete tool keeps them in the undo folder instead of erasing them.
+
+She is told to use her own `move_path`, `copy_path`, `delete_path` and `make_folder` tools for
+these operations, which is what makes them reversible. Shell **commands** and **clicks or typing in
+other apps** cannot be reversed automatically; the confirmation says so when a task used them.
+Undo never overwrites something that has changed since: if you created a file where one used to
+be, or put your own files into a folder she made, that part is skipped and reported. If the
+original of a file cannot be saved, that edit is refused rather than made unrecoverable.
+
+Undo records live in `data/task_undo/` and are removed after 7 days. Undo works for tasks from the
+current session; she is told when you undo, so later replies don't assume the work is still there.
+
 ## How it works
 
 Conversation stays tool-free, exactly as before. A task is a separate Claude Code run

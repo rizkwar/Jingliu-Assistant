@@ -35,7 +35,19 @@ TOOLS = [
          **POINT, "amount": {"type": "integer"}}}},
     {"name": "wait", "description": "Wait for something on screen to finish (0.2 to 10 seconds).",
      "inputSchema": {"type": "object", "required": ["seconds"], "properties": {"seconds": {"type": "number"}}}},
+    # File operations that the person can undo afterwards; prefer them to shell commands.
+    {"name": "move_path", "description": "Move or rename a file or folder (undoable). If destination is an "
+     "existing folder, the item goes inside it.", "inputSchema": {"type": "object", "required": ["source", "destination"],
+         "properties": {"source": {"type": "string"}, "destination": {"type": "string"}}}},
+    {"name": "copy_path", "description": "Copy a file or folder (undoable).", "inputSchema": {
+        "type": "object", "required": ["source", "destination"],
+        "properties": {"source": {"type": "string"}, "destination": {"type": "string"}}}},
+    {"name": "delete_path", "description": "Delete a file or folder (undoable: it is kept so it can be restored).",
+     "inputSchema": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}},
+    {"name": "make_folder", "description": "Create a folder, with any missing parents (undoable).",
+     "inputSchema": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}},
 ]
+FILE_TOOLS = {"move_path", "copy_path", "delete_path", "make_folder"}
 state = {"factor": None}
 
 
@@ -81,6 +93,8 @@ def call(name, arguments):
                     else {"behavior": "deny", "message": message})
         log({"approve": arguments, "decision": decision["behavior"]})
         return text(json.dumps(decision))
+    if name in FILE_TOOLS:
+        return file_operation(name, arguments)
     from . import desktop_control as desktop
     if name == "screenshot":
         path = Path(tempfile.gettempdir()) / f"jingliu-screen-{os.getpid()}.png"
@@ -109,6 +123,25 @@ def call(name, arguments):
         desktop.press(str(arguments["keys"]))
         return text("Pressed.")
     return text(f"Unknown tool: {name}", error=True)
+
+
+def file_operation(name, arguments):
+    from .task_journal import Journal
+    folder = os.environ.get("JINGLIU_JOURNAL")
+    if not folder:
+        return text("File tools are unavailable in this run.", error=True)
+    journal = Journal(folder)
+    if name == "move_path":
+        moved = journal.move(arguments["source"], arguments["destination"])
+        return text(f"Moved to {moved}.")
+    if name == "copy_path":
+        copied = journal.copy(arguments["source"], arguments["destination"])
+        return text(f"Copied to {copied}.")
+    if name == "delete_path":
+        journal.delete(arguments["path"])
+        return text("Deleted (kept for undo).")
+    made = journal.make_folder(arguments["path"])
+    return text(f"Folder ready: {made}.")
 
 
 def main():

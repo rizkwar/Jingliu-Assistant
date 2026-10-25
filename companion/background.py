@@ -31,6 +31,7 @@ class TrayController(QObject):
         self.icon.setContextMenu(self.menu)
         self.icon.activated.connect(self._activated)
         window.suspended_changed.connect(self._suspended)
+        window.notify.connect(self._notify)
         window.setWindowIcon(self.icon.icon())
         self._suspended(False)
 
@@ -49,6 +50,11 @@ class TrayController(QObject):
     def _activated(self, reason):
         if reason in {QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick}:
             self.window.show_companion()
+
+    @Slot(str, str)
+    def _notify(self, title, message):
+        if self.icon.isVisible():
+            self.icon.showMessage(title, message, self.icon.icon(), 8000)
 
     @Slot(bool)
     def _suspended(self, suspended):

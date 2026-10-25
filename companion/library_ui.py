@@ -325,3 +325,79 @@ class MemoryDialog(QDialog):
             self.refresh()
         except sqlite3.Error:
             QMessageBox.warning(self, "Could not delete", "The database could not be updated. Please try again.")
+
+
+class ReminderDialog(QDialog):
+    """Upcoming reminders she has set, with a way to remove any of them."""
+
+    def __init__(self, store, parent=None):
+        super().__init__(parent)
+        from .reminders import describe
+        self.store, self.describe = store, describe
+        self.setWindowTitle("Reminders")
+        self.resize(520, 420)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(10)
+        heading = QLabel("Reminders")
+        heading.setObjectName("title")
+        layout.addWidget(heading)
+        hint = QLabel("Ask her in your own words, such as “remind me at 7 to study” or “every weekday at 8, "
+                      "remind me to stretch”. She tells you herself when one is due.")
+        hint.setObjectName("subtitle")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.items = QListWidget()
+        self.items.setObjectName("history")
+        self.items.setSpacing(3)
+        layout.addWidget(self.items, 1)
+        self.empty = QLabel("No upcoming reminders.")
+        self.empty.setObjectName("hint")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.empty, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close = QPushButton("Close")
+        close.setObjectName("primary")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+        self.refresh()
+
+    def refresh(self):
+        self.items.clear()
+        upcoming = self.store.reminders()
+        for reminder in upcoming:
+            row = QFrame()
+            row.setObjectName("historyRow")
+            line = QHBoxLayout(row)
+            line.setContentsMargins(14, 9, 8, 9)
+            text = QVBoxLayout()
+            text.setSpacing(2)
+            title = QLabel(reminder["text"])
+            title.setObjectName("historyTitle")
+            title.setWordWrap(True)
+            title.setTextFormat(Qt.TextFormat.PlainText)
+            text.addWidget(title)
+            when = QLabel(self.describe(reminder))
+            when.setObjectName("historyMeta")
+            text.addWidget(when)
+            line.addLayout(text, 1)
+            remove = icon_button("delete", "Remove this reminder", "historyDelete")
+            remove.clicked.connect(lambda checked=False, reminder_id=reminder["id"]: self._remove(reminder_id))
+            line.addWidget(remove, 0, Qt.AlignmentFlag.AlignVCenter)
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, reminder["id"])
+            item.setSizeHint(row.sizeHint())
+            self.items.addItem(item)
+            self.items.setItemWidget(item, row)
+        self.items.setVisible(bool(upcoming))
+        self.empty.setVisible(not upcoming)
+
+    def _remove(self, reminder_id):
+        try:
+            self.store.delete_reminder(reminder_id)
+        except sqlite3.Error:
+            QMessageBox.warning(self, "Could not remove", "The database could not be updated. Please try again.")
+            return
+        self.refresh()

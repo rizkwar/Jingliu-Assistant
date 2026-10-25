@@ -25,7 +25,7 @@ ICONS = {
     'stop': '', 'settings': '', 'history': '', 'speaker': '', 'muted': '',
     'handsfree': '', 'memories': '', 'context': '', 'pause': '', 'play': '',
     'moon': '', 'attach': '', 'close': '', 'document': '', 'image': '',
-    'delete': '',
+    'delete': '', 'clock': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -94,6 +94,10 @@ QLabel#taskStatus {{ font-size: 12px; font-weight: 600; color: {ICE}; }}
 QLabel#taskStatus[state="approval"] {{ color: {AMBER}; }}
 QLabel#taskStatus[state="done"] {{ color: #7fd1b9; }}
 QLabel#taskStatus[state="failed"] {{ color: #f3b3bd; }}
+QLabel#taskStatus[state="undone"] {{ color: {MUTED}; }}
+QPushButton#taskUndo {{ background: transparent; border: 1px solid rgba(168, 212, 255, 0.28); border-radius: 9px;
+    color: {ICE}; font-size: 12px; padding: 3px 12px; }}
+QPushButton#taskUndo:hover {{ background: rgba(168, 212, 255, 0.10); color: {FROST}; }}
 QLabel#approvalAction {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 13px; color: {FROST};
     background: rgba(10, 17, 33, 0.9); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 8px; padding: 10px; }}
 QListWidget#history {{ background: transparent; border: none; padding: 0; outline: none; }}

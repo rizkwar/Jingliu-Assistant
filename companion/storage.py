@@ -13,7 +13,7 @@ from .continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 STOP_WORDS = set("a an and are as at be been but by can do for from have how i in is it me my of on or that the this to was we what with you your".split())
 
 
@@ -60,6 +60,12 @@ class Store:
                 fingerprint TEXT NOT NULL UNIQUE, pinned INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL,
+                due_at TEXT NOT NULL, repeat TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, delivered_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS reminders_by_due ON reminders(delivered_at, due_at);
             CREATE TABLE IF NOT EXISTS conversation_summaries (
                 conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
                 content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 6000),
@@ -232,6 +238,37 @@ class Store:
 
     def memories(self):
         return [dict(row) for row in self.connection.execute("SELECT * FROM memories ORDER BY pinned DESC, updated_at DESC, id DESC")]
+
+    # Reminders: due times are UTC ISO strings, so they sort and compare as text.
+
+    def add_reminder(self, text, due_utc, repeat=""):
+        with self.connection:
+            return self.connection.execute(
+                "INSERT INTO reminders(text,due_at,repeat,created_at) VALUES (?,?,?,?)",
+                (text, due_utc.isoformat(timespec="seconds"), repeat, now())).lastrowid
+
+    def reminders(self):
+        """Upcoming reminders, soonest first."""
+        return [dict(row) for row in self.connection.execute(
+            "SELECT * FROM reminders WHERE delivered_at IS NULL ORDER BY due_at, id")]
+
+    def due_reminders(self, moment_utc):
+        return [dict(row) for row in self.connection.execute(
+            "SELECT * FROM reminders WHERE delivered_at IS NULL AND due_at<=? ORDER BY due_at, id",
+            (moment_utc.isoformat(timespec="seconds"),))]
+
+    def finish_reminder(self, reminder_id, next_due_utc=None):
+        """Delivered: a repeating reminder moves to its next time, any other is marked done."""
+        with self.connection:
+            if next_due_utc is not None:
+                self.connection.execute("UPDATE reminders SET due_at=? WHERE id=?",
+                                        (next_due_utc.isoformat(timespec="seconds"), reminder_id))
+            else:
+                self.connection.execute("UPDATE reminders SET delivered_at=? WHERE id=?", (now(), reminder_id))
+
+    def delete_reminder(self, reminder_id):
+        with self.connection:
+            self.connection.execute("DELETE FROM reminders WHERE id=?", (reminder_id,))
 
     def save_memory(self, content, pinned=True, memory_id=None):
         content = content.strip()

@@ -151,6 +151,7 @@ class Bubble(QFrame):
 class TaskCard(QFrame):
     """A computer task in progress: the request, her latest steps, and the state."""
     STEPS = 6
+    undo_requested = Signal()
 
     def __init__(self, speaker, request, parent=None):
         super().__init__(parent)
@@ -172,10 +173,23 @@ class TaskCard(QFrame):
         self.list.setWordWrap(True)
         self.list.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.list)
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
         self.status = QLabel()
         self.status.setObjectName('taskStatus')
-        layout.addWidget(self.status)
+        footer.addWidget(self.status, 1)
+        self.undo_button = QPushButton('Undo this task')
+        self.undo_button.setObjectName('taskUndo')
+        self.undo_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.undo_button.setToolTip('Put back the files she created, changed, moved or deleted')
+        self.undo_button.clicked.connect(self.undo_requested.emit)
+        self.undo_button.hide()
+        footer.addWidget(self.undo_button)
+        layout.addLayout(footer)
         self.set_status('Working…', 'working')
+
+    def offer_undo(self, available=True):
+        self.undo_button.setVisible(available)
 
     def add_step(self, text):
         self.steps.append(text)
@@ -250,22 +264,22 @@ class MemoryNote(QFrame):
     """"Memory saved" / "Forgot" in the conversation, with Undo, like other assistants show it."""
     undo = Signal()
 
-    def __init__(self, text, can_undo=True, parent=None):
+    def __init__(self, text, can_undo=True, parent=None, button='Undo', icon='memories'):
         super().__init__(parent)
         self.setObjectName('memoryNote')
         self.text = text
         row = QHBoxLayout(self)
         row.setContentsMargins(12, 5, 6, 5)
         row.setSpacing(8)
-        icon = QLabel(ICONS['memories'])
-        icon.setObjectName('memoryIcon')
-        row.addWidget(icon)
+        glyph = QLabel(ICONS[icon])
+        glyph.setObjectName('memoryIcon')
+        row.addWidget(glyph)
         self.label = QLabel(text)
         self.label.setObjectName('memoryText')
         self.label.setWordWrap(True)
         self.label.setTextFormat(Qt.TextFormat.PlainText)
         row.addWidget(self.label, 1)
-        self.button = QPushButton('Undo')
+        self.button = QPushButton(button)
         self.button.setObjectName('memoryUndo')
         self.button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.button.setVisible(can_undo)
@@ -404,8 +418,8 @@ class ChatView(QScrollArea):
         card.setMaximumWidth(self._bubble_width())
         return self._add(card, 'left')
 
-    def add_memory_note(self, text, can_undo=True):
-        note = MemoryNote(text, can_undo)
+    def add_memory_note(self, text, can_undo=True, button='Undo', icon='memories'):
+        note = MemoryNote(text, can_undo, button=button, icon=icon)
         note.setMaximumWidth(self._bubble_width())
         return self._add(note, 'left')
 

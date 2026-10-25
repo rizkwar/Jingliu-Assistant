@@ -627,6 +627,19 @@ remain visible in History, and unanswered failures are excluded from model
 context. A save failure is reported in the window; a failed final save can be
 retried before the next message or when closing.
 
+### Reminders
+
+Ask her in your own words: "remind me at 7 to study", "in 20 minutes tell me to take a break",
+"every weekday at 8, remind me to stretch". She knows the current date and time, works out when,
+and confirms in character; a line such as **Reminder set: "Study" · Today, 19:00** appears with
+**Cancel**. Repeats can be daily, weekdays or weekly. If the time is unclear, she asks.
+
+When one is due she tells you herself, in the chat and aloud, as soon as she is not busy with a
+reply or a task; a Windows notification appears too when the window is hidden in the tray.
+Reminders are saved, so ones that came due while the app was closed are delivered when it opens
+(those missed by more than 12 hours are only listed). "Cancel my stretching reminder" works in
+chat, and **⋯ → Reminders** lists everything upcoming with a remove button.
+
 ### Asking her to remember
 
 Tell her in your own words, as with other assistants: "remember that I take my tea

@@ -38,9 +38,9 @@ PROMPT = (
 )
 # Cues for the app itself rather than the avatar, with a description of the work:
 # [[offer: …]] proposes a computer task for the person to confirm; [[task: …]] starts one.
-ACTIONS = ("task", "offer", "remember", "forget")
+ACTIONS = ("task", "offer", "remember", "forget", "remind", "unremind")
 _CUE = re.compile(r"\[\[\s*([A-Za-z]{2,12})\s*(?::\s*([^\[\]]{0,1500}?))?\s*\]\]")
-_ACTION_START = re.compile(r"\[\[\s*(?:task|offer|remember|forget)\s*:", re.IGNORECASE)
+_ACTION_START = re.compile(r"\[\[\s*(?:task|offer|remember|forget|remind|unremind)\s*:", re.IGNORECASE)
 _LONGEST = 20  # "[[" + name + spaces + "]]"; longer bracket text is ordinary text.
 _ACTION_LONGEST = 1520  # An action cue may carry a description of up to 1,500 characters.
 
