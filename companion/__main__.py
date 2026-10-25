@@ -72,8 +72,9 @@ def main() -> int:
             # fifteen seconds. Everything is saved and closed by now: end the process directly.
             store.close()
             instance_lock.unlock()
-            sys.stdout.flush()
-            sys.stderr.flush()
+            for stream in (sys.stdout, sys.stderr):
+                if stream is not None:  # pythonw has no console streams at all.
+                    stream.flush()
             os.kill(os.getpid(), signal.SIGTERM)
         window.deleteLater()
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
