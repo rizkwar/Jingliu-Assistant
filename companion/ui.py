@@ -10,8 +10,8 @@ from PySide6.QtGui import QCloseEvent, QDesktopServices, QImage, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMenu,
     QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QTabWidget,
-    QVBoxLayout, QWidget,
+    QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider,
+    QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import QEventLoop
 
@@ -124,6 +124,57 @@ class MessageInput(QPlainTextEdit):
 
 ENGINE_IDLE_SECONDS = 600   # Voice and microphone engines close after 10 idle minutes.
 TRIM_EVERY_SECONDS = 600    # While hidden, memory is handed back at most every 10 minutes.
+
+
+class SideTabs(QWidget):
+    """Settings sections as a quiet list on the left and the chosen section beside it
+    (the subset of QTabWidget's interface the window uses)."""
+    currentChanged = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
+        self.nav = QListWidget()
+        self.nav.setObjectName("nav")
+        self.nav.setFixedWidth(150)
+        self.nav.setFrameShape(QFrame.Shape.NoFrame)
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout.addWidget(self.nav)
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack, 1)
+        self.nav.currentRowChanged.connect(self._select)
+
+    def _select(self, index):
+        if index >= 0:
+            self.stack.setCurrentIndex(index)
+            self.currentChanged.emit(index)
+
+    def addTab(self, widget, title):
+        item = QListWidgetItem(title)
+        self.nav.addItem(item)
+        self.stack.addWidget(widget)
+        if self.nav.count() == 1:
+            self.nav.setCurrentRow(0)
+        return self.nav.count() - 1
+
+    def setCurrentIndex(self, index):
+        self.nav.setCurrentRow(index)
+
+    def currentIndex(self):
+        return self.nav.currentRow()
+
+    def currentWidget(self):
+        return self.stack.currentWidget()
+
+    def widget(self, index):
+        return self.stack.widget(index)
+
+    def count(self):
+        return self.stack.count()
 
 
 class PanelPage(QWidget):
@@ -335,8 +386,7 @@ class CompanionWindow(QMainWindow):
         settings_outer = self.settings_dialog.body_layout
         settings_outer.setContentsMargins(0, 4, 0, 0)
         settings_outer.setSpacing(12)
-        self.settings_tabs = QTabWidget()
-        self.settings_tabs.setDocumentMode(True)
+        self.settings_tabs = SideTabs()
         settings_outer.addWidget(self.settings_tabs, 1)
 
         def page(title):
@@ -352,7 +402,7 @@ class CompanionWindow(QMainWindow):
             return body_layout
 
         def section(target, text):
-            label = QLabel(text.upper())
+            label = QLabel(text)
             label.setObjectName("section")
             target.addWidget(label)
 

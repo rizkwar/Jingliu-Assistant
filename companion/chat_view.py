@@ -19,7 +19,7 @@ def markdown_html(text):
     document = QTextDocument()
     document.setMarkdown(text, _FEATURES)
     spacing = QTextBlockFormat()
-    spacing.setLineHeight(125,QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+    spacing.setLineHeight(135,QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
     cursor = QTextCursor(document)
     cursor.select(QTextCursor.SelectionType.Document)
     cursor.mergeBlockFormat(spacing)
@@ -84,19 +84,22 @@ class AttachmentCard(QFrame):
 
 
 class Bubble(QFrame):
-    def __init__(self, role, speaker, parent=None, attachments=()):
+    def __init__(self, role, speaker, parent=None, attachments=(), named=True):
         super().__init__(parent)
         self.role = role
         self.speaker = speaker
         self.text = ''
         self.attachments = list(attachments)
         self.setObjectName('user' if role == 'user' else 'assistant')
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        # Her text runs to the reading width like a page; your messages hug their words.
+        self.setSizePolicy(QSizePolicy.Policy.Maximum if role == 'user' else QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 11, 16, 12)
+        # Her lines sit beside a thin line of moonlight; her name heads each run of her messages only.
+        layout.setContentsMargins(*((16, 2, 6, 4) if role != 'user' else (15, 9, 15, 10)))
         layout.setSpacing(4)
-        if role != 'user':
-            name = QLabel(speaker.upper())
+        if role != 'user' and named:
+            name = QLabel(speaker)
             name.setObjectName('speaker')
             layout.addWidget(name)
         if self.attachments:
@@ -128,6 +131,15 @@ class Bubble(QFrame):
         self.text = text
         self.body.setText(text if self.role == 'user' else markdown_html(text))
         self.body.setVisible(bool(text) or self.role != 'user')
+        self.fit()
+
+    def fit(self):
+        """A wrapped label otherwise picks a narrow width: give a short message room for one line."""
+        if self.role != 'user':
+            return
+        limit = self.maximumWidth() - 30 if self.maximumWidth() < 10000 else 520
+        longest = max((self.body.fontMetrics().horizontalAdvance(line) for line in self.text.splitlines()), default=0)
+        self.body.setMinimumWidth(max(0, min(longest + 4, limit)))
 
     def set_waiting(self, frame):
         self.body.setText('<span style="color:#8fa3c2; letter-spacing:3px;">' + '●' * (frame % 3 + 1) + '</span>')
@@ -160,7 +172,7 @@ class TaskCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 11, 16, 12)
         layout.setSpacing(4)
-        name = QLabel(f'{speaker.upper()} · TASK')
+        name = QLabel(f'{speaker} · task')
         name.setObjectName('speaker')
         layout.addWidget(name)
         title = QLabel(request if len(request) <= 160 else request[:157] + '…')
@@ -218,7 +230,7 @@ class OfferCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 11, 16, 12)
         layout.setSpacing(6)
-        name = QLabel('PROPOSED TASK')
+        name = QLabel('Proposed task')
         name.setObjectName('speaker')
         layout.addWidget(name)
         plan = QLabel(description)
@@ -346,7 +358,7 @@ class ChatView(QScrollArea):
         body.setObjectName('chatBody')
         self.rows = QVBoxLayout(body)
         self.rows.setContentsMargins(4, 8, 8, 16)
-        self.rows.setSpacing(14)
+        self.rows.setSpacing(16)
         self.rows.addStretch()
         self.setWidget(body)
         self._items = []
@@ -367,17 +379,25 @@ class ChatView(QScrollArea):
     def _bubble_width(self):
         return max(260, int(self.viewport().width() * 0.82))
 
+    def _reading_width(self):
+        # About 75 characters of her serif text: comfortable to read on a wide window.
+        return max(260, min(680, int(self.viewport().width() * 0.9)))
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         for item in self._items:
             if isinstance(item, (Bubble, TaskCard, OfferCard)):
-                item.setMaximumWidth(self._bubble_width())
+                item.setMaximumWidth(self._bubble_width() if not isinstance(item, Bubble) or item.role == 'user'
+                                     else self._reading_width())
+                if isinstance(item, Bubble):
+                    item.fit()
 
     def _add(self, widget, align):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         if align != 'left': row.addStretch()
-        row.addWidget(widget)
+        # Widgets that may grow (her messages) take the row up to their maximum width.
+        row.addWidget(widget, 1 if widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding else 0)
         if align != 'right': row.addStretch()
         self.rows.insertLayout(self.rows.count() - 1, row)
         if not isinstance(widget, Welcome):
@@ -407,8 +427,10 @@ class ChatView(QScrollArea):
         self._add(welcome, 'center')
 
     def add_message(self, role, speaker, text, notice='', attachments=()):
-        bubble = Bubble(role, speaker, attachments=attachments)
-        bubble.setMaximumWidth(self._bubble_width())
+        previous = self._items[-1] if self._items else None
+        named = role == 'user' or not (isinstance(previous, Bubble) and previous.role != 'user')
+        bubble = Bubble(role, speaker, attachments=attachments, named=named)
+        bubble.setMaximumWidth(self._bubble_width() if role == 'user' else self._reading_width())
         bubble.set_text(text)
         bubble.set_notice(notice)
         return self._add(bubble, 'right' if role == 'user' else 'left')

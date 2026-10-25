@@ -39,29 +39,34 @@ STYLE = f"""
 QMainWindow, QDialog {{ background: {NIGHT}; }}
 QWidget#column, QWidget#chatBody, QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QStackedWidget#pages, QWidget#panel, QWidget#panelBody, QDialog[embedded="true"] {{ background: transparent; }}
+QListWidget#nav {{ background: transparent; border: none; padding: 0; outline: none; }}
+QListWidget#nav::item {{ color: {MUTED}; padding: 7px 12px; margin-bottom: 2px; border-radius: 6px;
+    border-left: 2px solid transparent; }}
+QListWidget#nav::item:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.05); }}
+QListWidget#nav::item:selected {{ color: {FROST}; background: rgba(168, 212, 255, 0.08); border-left: 2px solid {ICE}; }}
 QLabel {{ background: transparent; }}
 QToolTip {{ background: #111b31; color: {FROST}; border: 1px solid #2a3b5e; padding: 6px 8px; border-radius: 6px; }}
 
-QLabel#title {{ font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; font-size: 26px; letter-spacing: 1px; }}
+QLabel#title {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 28px; font-weight: 400; color: #eef4fd; }}
 QLabel#seal {{ font-family: 'Microsoft YaHei UI Light'; font-size: 15px; color: {ICE_DEEP}; padding-top: 6px; }}
 QLabel#subtitle {{ color: {MUTED}; font-size: 12px; }}
 QLabel#hint, QLabel#footer {{ color: {DIM}; font-size: 12px; }}
-QLabel#section {{ color: {ICE}; font-size: 11px; font-weight: 600; letter-spacing: 2px; padding-top: 8px; }}
+QLabel#section {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 17px; color: #eef4fd; padding: 16px 0 6px 0;
+    border-bottom: 1px solid rgba(168, 212, 255, 0.10); }}
 QLabel#emblem {{ font-family: '{ICON_FONT}'; font-size: 20px; color: {ICE};
     background: qradialgradient(cx:0.5, cy:0.5, radius:0.6, fx:0.4, fy:0.35, stop:0 #1d3256, stop:1 #0d1528);
     border: 1px solid #2c4470; border-radius: 22px; }}
 QFrame#pill {{ background: rgba(168, 212, 255, 0.07); border: 1px solid rgba(168, 212, 255, 0.16); border-radius: 13px; }}
 QLabel#status {{ color: #cfe3fb; font-size: 12px; }}
 
-QPushButton {{ background: rgba(168, 212, 255, 0.06); border: 1px solid rgba(168, 212, 255, 0.16);
-    border-radius: 9px; padding: 7px 14px; }}
-QPushButton:hover {{ background: rgba(168, 212, 255, 0.13); border-color: rgba(168, 212, 255, 0.32); }}
-QPushButton:pressed {{ background: rgba(168, 212, 255, 0.20); }}
+QPushButton {{ background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(168, 212, 255, 0.13);
+    border-radius: 6px; padding: 7px 14px; color: #d8e4f4; }}
+QPushButton:hover {{ background: rgba(168, 212, 255, 0.09); border-color: rgba(168, 212, 255, 0.26); color: {FROST}; }}
+QPushButton:pressed {{ background: rgba(168, 212, 255, 0.15); }}
 QPushButton:checked {{ background: rgba(111, 168, 232, 0.24); border-color: {ICE_DEEP}; }}
 QPushButton:disabled {{ color: #4a5a78; border-color: rgba(168, 212, 255, 0.07); }}
-QPushButton#primary {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #cfe6ff, stop:1 {ICE_DEEP});
-    color: #08111f; border: none; font-weight: 600; }}
-QPushButton#primary:hover {{ background: #d9ecff; }}
+QPushButton#primary {{ background: #d3e6fb; color: #0a1424; border: none; font-weight: 600; }}
+QPushButton#primary:hover {{ background: #e6f1fd; }}
 
 QPushButton#icon {{ font-family: '{ICON_FONT}'; font-size: 15px; padding: 0; border-radius: 17px;
     min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; color: #c4d8f2;
@@ -73,22 +78,22 @@ QPushButton#icon[live="true"] {{ color: #fff; background: {CRIMSON}; border-colo
 QPushButton#icon[danger="true"] {{ color: #ffb3bf; }}
 QPushButton#icon::menu-indicator {{ image: none; width: 0; }}
 QPushButton#send {{ font-family: '{ICON_FONT}'; font-size: 15px; padding: 0; border-radius: 17px;
-    min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; border: none; color: #08111f;
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #d6eaff, stop:1 {ICE_DEEP}); }}
+    min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; border: none; color: #0a1424;
+    background: #d3e6fb; }}
 QPushButton#send:hover {{ background: #e3f1ff; }}
 QPushButton#send:disabled {{ background: rgba(168, 212, 255, 0.10); color: #3b4966; }}
 
-QFrame#composer {{ background: rgba(13, 21, 40, 0.92); border: 1px solid rgba(168, 212, 255, 0.16); border-radius: 20px; }}
+QFrame#composer {{ background: rgba(12, 19, 36, 0.94); border: 1px solid rgba(168, 212, 255, 0.12); border-radius: 16px; }}
 QFrame#composer[focused="true"] {{ border-color: rgba(168, 212, 255, 0.45); }}
 QPlainTextEdit#input {{ background: transparent; border: none; padding: 2px 4px; font-size: 15px;
     selection-background-color: #2f5487; }}
 
-QFrame#assistant {{ background: rgba(18, 29, 52, 0.84); border: 1px solid rgba(168, 212, 255, 0.10);
-    border-radius: 16px; border-top-left-radius: 4px; }}
-QFrame#user {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(111, 168, 232, 0.30), stop:1 rgba(80, 120, 190, 0.22));
-    border: 1px solid rgba(168, 212, 255, 0.26); border-radius: 16px; border-top-right-radius: 4px; }}
-QFrame#task {{ background: rgba(14, 24, 44, 0.9); border: 1px solid rgba(168, 212, 255, 0.22);
-    border-left: 3px solid {ICE_DEEP}; border-radius: 14px; }}
+QFrame#assistant {{ background: transparent; border: none; border-left: 2px solid rgba(168, 212, 255, 0.34); }}
+QFrame#assistant QLabel#body {{ font-family: 'Sitka Text', 'Cambria', 'Georgia'; font-size: 16px; color: #e9f0fa; }}
+QFrame#user {{ background: rgba(168, 212, 255, 0.075); border: none; border-radius: 14px; }}
+QFrame#user QLabel#body {{ color: #dbe6f5; }}
+QFrame#task {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.12);
+    border-left: 2px solid rgba(168, 212, 255, 0.45); border-radius: 4px; }}
 QLabel#taskTitle {{ font-size: 14px; color: {FROST}; }}
 QLabel#taskSteps {{ font-size: 12px; color: {MUTED}; font-family: 'Cascadia Mono', 'Consolas'; }}
 QLabel#taskStatus {{ font-size: 12px; font-weight: 600; color: {ICE}; }}
@@ -103,10 +108,10 @@ QLabel#approvalAction {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 13
     background: rgba(10, 17, 33, 0.9); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 8px; padding: 10px; }}
 QListWidget#history {{ background: transparent; border: none; padding: 0; outline: none; }}
 QListWidget#history::item {{ background: transparent; border: none; padding: 0; }}
-QFrame#historyRow {{ background: rgba(168, 212, 255, 0.035); border: 1px solid rgba(168, 212, 255, 0.10); border-radius: 12px; }}
+QFrame#historyRow {{ background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(168, 212, 255, 0.08); border-radius: 6px; }}
 QListWidget#history::item:hover QFrame#historyRow {{ background: rgba(168, 212, 255, 0.07); }}
-QListWidget#history::item:selected {{ background: rgba(111, 168, 232, 0.16); border: 1px solid rgba(168, 212, 255, 0.40); border-radius: 12px; }}
-QLabel#historyTitle {{ font-size: 14px; font-weight: 600; color: {FROST}; }}
+QListWidget#history::item:selected {{ background: rgba(111, 168, 232, 0.12); border: 1px solid rgba(168, 212, 255, 0.32); border-radius: 6px; }}
+QLabel#historyTitle {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 16px; color: #eef4fd; }}
 QLabel#historyMeta {{ font-size: 11px; color: {ICE}; letter-spacing: 0.3px; }}
 QLabel#historyPreview {{ font-size: 12px; color: {MUTED}; }}
 QLabel#historyBadge {{ font-size: 10px; font-weight: 600; letter-spacing: 1px; color: {NIGHT}; background: {ICE};
@@ -117,20 +122,19 @@ QPushButton#historyDelete:hover {{ color: {CRIMSON}; background: rgba(226, 86, 1
 QPushButton#danger {{ color: #f3a5b3; border-color: rgba(226, 86, 110, 0.35); }}
 QPushButton#danger:hover {{ background: rgba(226, 86, 110, 0.14); color: #ffd0d8; }}
 QPushButton#danger:disabled, QPushButton#primary:disabled {{ color: #4a5a78; background: transparent; border-color: #1c2a45; }}
-QFrame#memoryNote {{ background: rgba(168, 212, 255, 0.06); border: 1px solid rgba(168, 212, 255, 0.16); border-radius: 12px; }}
+QFrame#memoryNote {{ background: rgba(168, 212, 255, 0.045); border: none; border-radius: 6px; }}
 QLabel#memoryIcon {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {ICE}; }}
 QLabel#memoryText {{ font-size: 12px; color: #cfe0f6; }}
 QPushButton#memoryUndo {{ background: transparent; border: none; color: {ICE}; font-size: 12px; padding: 2px 8px; }}
 QPushButton#memoryUndo:hover {{ color: {FROST}; text-decoration: underline; }}
-QLabel#speaker {{ color: {ICE}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
+QLabel#speaker {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; color: {ICE}; font-size: 14px; font-style: italic; }}
 QLabel#body {{ font-size: 15px; selection-background-color: #2f5487; }}
 QLabel#notice {{ color: {MUTED}; font-size: 12px; font-style: italic; }}
 QLabel#error {{ color: #f3b3bd; font-size: 13px; }}
-QLabel#note {{ color: {MUTED}; font-size: 12px; background: rgba(168, 212, 255, 0.05);
-    border: 1px solid rgba(168, 212, 255, 0.10); border-radius: 11px; padding: 4px 12px; }}
+QLabel#note {{ color: {MUTED}; font-size: 12px; background: transparent; border: none; padding: 2px 12px; }}
 QLabel#note[tone="warning"] {{ color: {AMBER}; border-color: rgba(230, 194, 140, 0.30); }}
 QLabel#note[tone="error"] {{ color: #f3b3bd; border-color: rgba(226, 86, 110, 0.35); }}
-QLabel#welcomeTitle {{ font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; font-size: 22px; color: {FROST}; }}
+QLabel#welcomeTitle {{ font-family: 'Sitka Display', 'Sitka Heading', 'Cambria', 'Georgia'; font-size: 26px; color: #eef4fd; }}
 QLabel#welcomeText {{ color: {MUTED}; font-size: 13px; }}
 QLabel#welcomeMoon {{ font-family: '{ICON_FONT}'; font-size: 40px; color: {ICE}; }}
 QFrame#attachment {{ background: rgba(168, 212, 255, 0.07); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 10px; }}
@@ -144,8 +148,8 @@ QPushButton#remove {{ font-family: '{ICON_FONT}'; font-size: 9px; padding: 0; bo
 QPushButton#remove:hover {{ color: #fff; background: {CRIMSON}; }}
 QWidget#dropHint {{ background: rgba(7, 12, 24, 0.88); border: 2px dashed rgba(168, 212, 255, 0.55); border-radius: 20px; }}
 QLabel#dropText {{ color: {ICE}; font-size: 18px; font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; }}
-QPushButton#chip {{ background: rgba(168, 212, 255, 0.05); border: 1px solid rgba(168, 212, 255, 0.18);
-    border-radius: 15px; padding: 6px 14px; color: #c9dcf5; font-size: 13px; }}
+QPushButton#chip {{ background: transparent; border: 1px solid rgba(168, 212, 255, 0.16);
+    border-radius: 6px; padding: 6px 14px; color: #c9dcf5; font-size: 13px; }}
 QPushButton#chip:hover {{ background: rgba(168, 212, 255, 0.13); color: {FROST}; }}
 
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px; }}
@@ -169,14 +173,15 @@ QTabBar::tab {{ background: transparent; color: {MUTED}; padding: 9px 16px; bord
 QTabBar::tab:selected {{ color: {FROST}; border-bottom-color: {ICE}; }}
 QTabBar::tab:hover {{ color: {FROST}; }}
 
-QComboBox {{ background: rgba(168, 212, 255, 0.06); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 8px; padding: 6px 10px; }}
-QComboBox:hover {{ border-color: rgba(168, 212, 255, 0.34); }}
+QComboBox {{ background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(168, 212, 255, 0.12); border-radius: 6px; padding: 6px 10px; }}
+QComboBox:hover {{ border-color: rgba(168, 212, 255, 0.28); }}
+QComboBox:focus {{ border-bottom: 1px solid {ICE}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox QAbstractItemView {{ background: #0f1830; border: 1px solid #263756; selection-background-color: #1f3357; outline: none; }}
 QLineEdit, QPlainTextEdit, QTextEdit, QTextBrowser, QListWidget, QTableWidget, QTreeWidget {{
-    background: rgba(10, 17, 33, 0.9); border: 1px solid rgba(168, 212, 255, 0.16); border-radius: 10px; padding: 6px;
+    background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(168, 212, 255, 0.12); border-radius: 6px; padding: 6px;
     selection-background-color: #2f5487; }}
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: rgba(168, 212, 255, 0.45); }}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: rgba(168, 212, 255, 0.22); border-bottom: 1px solid {ICE}; }}
 QHeaderView::section {{ background: #0f1830; color: {MUTED}; border: none; padding: 6px; }}
 QCheckBox {{ spacing: 9px; }}
 QCheckBox::indicator {{ width: 36px; height: 20px; image: url("{ASSETS}/switch-off.svg"); }}
@@ -268,8 +273,8 @@ class NightSky(QWidget):
         painter.fillRect(self.rect(), sky)
         centre = QPointF(width * 0.86, height * 0.06)
         halo = QRadialGradient(centre, max(width, height) * 0.55)
-        halo.setColorAt(0, QColor(168, 212, 255, 46))
-        halo.setColorAt(0.35, QColor(111, 168, 232, 16))
+        halo.setColorAt(0, QColor(168, 212, 255, 30))
+        halo.setColorAt(0.35, QColor(111, 168, 232, 10))
         halo.setColorAt(1, QColor(111, 168, 232, 0))
         painter.fillRect(self.rect(), QBrush(halo))
         radius = min(width, height) * 0.09
@@ -278,18 +283,11 @@ class NightSky(QWidget):
         cut = QPainterPath()
         cut.addEllipse(centre + QPointF(radius * 0.42, -radius * 0.22), radius * 0.92, radius * 0.92)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(214, 232, 255, 20))
+        painter.setBrush(QColor(214, 232, 255, 12))
         painter.drawPath(moon.subtracted(cut))
-        for x, y, size, alpha in self._motes:
-            painter.setBrush(QColor(200, 225, 255, alpha))
-            painter.drawEllipse(QPointF(x * width, y * height), size, size)
-        # One long, faint sword-light stroke across the lower sky.
-        stroke = QLinearGradient(0, height * 0.9, width, height * 0.55)
-        stroke.setColorAt(0, QColor(168, 212, 255, 0))
-        stroke.setColorAt(0.5, QColor(168, 212, 255, 22))
-        stroke.setColorAt(1, QColor(226, 86, 110, 0))
-        painter.setPen(QPen(QBrush(stroke), 1.2))
-        painter.drawLine(QPointF(-10, height * 0.92), QPointF(width + 10, height * 0.58))
+        for x, y, size, alpha in self._motes[::2]:
+            painter.setBrush(QColor(200, 225, 255, alpha * 2 // 3))
+            painter.drawEllipse(QPointF(x * width, y * height), size * .8, size * .8)
         painter.end()
 
 
