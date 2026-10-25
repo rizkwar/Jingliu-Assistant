@@ -6,6 +6,8 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
+# Also stamped on the shortcuts (scripts/ShortcutAppId.ps1), so Windows groups them with this window.
+APP_ID = "Jingliu.DesktopCompanion"
 
 
 def notify(message):
@@ -35,7 +37,7 @@ def taskbar_identity():
     if sys.platform == "win32":
         import ctypes
         try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Jingliu.DesktopCompanion")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
         except (AttributeError, OSError):
             pass
 

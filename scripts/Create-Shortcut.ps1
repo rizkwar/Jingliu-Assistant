@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ShortcutAppId.ps1')
 if ($StartMenu) { $Destination = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs' }
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $pythonWindowed = Join-Path $projectRoot '.venv\Scripts\pythonw.exe'
@@ -30,6 +31,8 @@ try {
     $shortcut.Description = 'Jingliu, your desktop companion'
     $shortcut.IconLocation = (Join-Path $projectRoot 'assets\jingliu.ico') + ',0'
     $shortcut.Save()
+    # The same app ID as the running app: one taskbar icon, and a pinned shortcut that lights up.
+    Set-ShortcutAppId $shortcutPath
     Write-Host ('Shortcut ready: ' + $shortcutPath)
     Write-Host 'Keep this project folder in place. If you move it, recreate the shortcut.'
     exit 0

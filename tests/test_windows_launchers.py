@@ -27,7 +27,7 @@ class WindowsLauncherTests(unittest.TestCase):
             shutil.copyfile(ROOT / name, self.root / name)
         scripts = self.root / "scripts"
         scripts.mkdir()
-        for name in ("Create-Shortcut.ps1", "Setup-Mira.ps1"):
+        for name in ("Create-Shortcut.ps1", "ShortcutAppId.ps1", "Setup-Mira.ps1"):
             shutil.copyfile(ROOT / "scripts" / name, scripts / name)
         python = Path(sys.executable)
         if not python.with_name("pythonw.exe").exists():
@@ -127,7 +127,8 @@ class WindowsLauncherTests(unittest.TestCase):
 $shell=New-Object -ComObject WScript.Shell
 $shortcut=$shell.CreateShortcut($Link)
 if ($Foreign) { $shortcut.TargetPath=Join-Path $env:SystemRoot 'notepad.exe'; $shortcut.Save() }
-[IO.File]::WriteAllText($OutputFile,(@{target=$shortcut.TargetPath;arguments=$shortcut.Arguments;directory=$shortcut.WorkingDirectory}|ConvertTo-Json))
+$item=(New-Object -ComObject Shell.Application).NameSpace((Split-Path $Link)).ParseName((Split-Path $Link -Leaf))
+[IO.File]::WriteAllText($OutputFile,(@{target=$shortcut.TargetPath;arguments=$shortcut.Arguments;directory=$shortcut.WorkingDirectory;appid=$item.ExtendedProperty('System.AppUserModel.ID')}|ConvertTo-Json))
 [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut)
 [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
 ''', encoding="utf-8")
@@ -138,6 +139,7 @@ if ($Foreign) { $shortcut.TargetPath=Join-Path $env:SystemRoot 'notepad.exe'; $s
         self.assertEqual(Path(values["target"]).resolve(), self.root / ".venv" / "Scripts" / "pythonw.exe")
         self.assertEqual(values["arguments"], f'"{self.root / "launch_mira.pyw"}"')
         self.assertEqual(Path(values["directory"]).resolve(), self.root)
+        self.assertEqual(values["appid"], "Jingliu.DesktopCompanion")  # Groups with the running window.
         self.powershell(inspector, "-Link", shortcut, "-OutputFile", output, "-Foreign")
         original = shortcut.read_bytes()
         result = self.powershell(self.root / "scripts" / "Create-Shortcut.ps1", "-Destination", self.root)
