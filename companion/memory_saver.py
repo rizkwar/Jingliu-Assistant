@@ -9,7 +9,7 @@ import sys
 
 
 def trim(pids=()):
-    """Trim this process (after a garbage collection) and any of the given child processes."""
+    """Trim this process (after a garbage collection) and any of the given processes."""
     if sys.platform != "win32":
         return
     import ctypes

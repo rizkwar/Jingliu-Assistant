@@ -1,6 +1,7 @@
 """Qt lifecycle and cancellation for the microphone/transcription process."""
 
 import json
+import time
 from pathlib import Path
 import sys
 from uuid import uuid4
@@ -70,6 +71,8 @@ class MicrophoneController(QObject):
         if self._stopping:
             return
         pending, self._pending = self._pending, []
+        if pending:
+            self.last_used = time.monotonic()
         for command in pending:
             self.process.write((json.dumps(command) + "\n").encode("utf-8"))
 
@@ -105,11 +108,14 @@ class MicrophoneController(QObject):
         self.level.emit(0)
         self._set_state("idle")
 
-    def release(self):
-        """Idle for a long while: close the recognizer to free its model. The next recording starts it again."""
-        if not self.busy and self.process.state() != QProcess.ProcessState.NotRunning:
+    def release(self, idle_seconds):
+        """Unused for `idle_seconds`: close the recognizer to free its model. The next recording starts it again."""
+        if (not self.busy and self.process.state() != QProcess.ProcessState.NotRunning
+                and time.monotonic() - getattr(self, "last_used", 0.0) >= idle_seconds):
             self._stopping = True
             self.process.kill()
+            return True
+        return False
 
     def shutdown(self):
         self.cancel()

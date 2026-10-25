@@ -170,6 +170,18 @@ class SpeechControllerTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(condition(), "Speech process did not finish in time")
 
+    def test_idle_closing_goes_by_real_use_not_by_luck(self):
+        self.speech.speak("Hi", "alba", 70)
+        self.wait_until(lambda: not self.speech.busy)
+        self.assertFalse(self.speech.release(600))  # Just used: stays loaded.
+        self.speech.last_used -= 601
+        self.assertTrue(self.speech.release(600))
+        self.wait_until(lambda: self.speech.process.state() == QProcess.ProcessState.NotRunning)
+        self.assertEqual(self.errors, [])  # Closing an idle engine is not a failure.
+        self.speech.speak("Again", "alba", 70)  # And it simply starts again.
+        self.wait_until(lambda: not self.speech.busy)
+        self.assertEqual(self.errors, [])
+
     def test_two_requests_reuse_one_process(self):
         self.speech.speak("Hi", "alba", 70)
         self.wait_until(lambda: not self.speech.busy)
@@ -414,10 +426,15 @@ class SpeechWarmupTests(unittest.TestCase):
         hints = [c["text"] for c in self.commands() if c.get("action") == "ahead"]
         self.assertEqual(hints, ["First sentence.", "Second sentence."])
 
-    def test_pocket_gets_no_hints_and_no_warmup(self):
+    def test_pocket_gets_no_hints_and_warms_only_when_not_running(self):
         self.speech.engine = "pocket"
         self.speech.warm("alba")
-        self.assertFalse(self.speech.busy)
+        self.assertTrue(self.speech.busy)  # Loading in the background.
+        self.wait_until(lambda: not self.speech.busy)
+        pid = self.speech.process.processId()
+        self.speech.warm("alba")
+        self.assertFalse(self.speech.busy)  # Already loaded: nothing to do.
+        self.assertEqual(self.speech.process.processId(), pid)
         self.speech.speak("Hello there.", "alba", 70)
         self.wait_until(lambda: not self.speech.busy)
         self.assertFalse(any(c.get("action") == "ahead" for c in self.commands()))

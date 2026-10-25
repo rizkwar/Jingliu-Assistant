@@ -122,25 +122,24 @@ class AvatarWindowTests(unittest.TestCase):
         self.assertIsNot(again, widget)
         self.assertEqual((again.x(), again.y()), (123, 145))
 
-    def test_idle_engines_close_and_hidden_memory_is_trimmed(self):
+    def test_engines_close_only_while_hidden_and_the_window_trims_itself(self):
         from unittest.mock import patch
-        released = []
+        asked = []
         for engine in (self.window.speech, self.window.microphone):
-            engine.release = lambda engine=engine: released.append(engine)
+            engine.release = lambda seconds, engine=engine: asked.append((engine, seconds))
         with patch("companion.memory_saver.trim") as trim:
-            self.window._engines_used_at -= 30
             self.window._save_memory_when_idle()
-            self.assertEqual(released, [])  # Used recently.
-            trim.assert_not_called()       # The window is open.
-            self.window._engines_used_at -= 3600
-            self.window.hide()
-            self.window._save_memory_when_idle()  # Just hidden: not yet.
+            self.assertEqual(asked, [])        # The window is open: she stays ready.
             trim.assert_not_called()
+            self.window.hide()
+            self.window._save_memory_when_idle()  # Engines decide by their own last use.
+            self.assertEqual({seconds for _, seconds in asked}, {600})
+            trim.assert_not_called()            # Just hidden: not yet.
             self.window._hidden_at -= 60
             self.window._save_memory_when_idle()
             self.window._save_memory_when_idle()  # Not again within ten minutes.
-        self.assertEqual(set(released), {self.window.speech, self.window.microphone})  # Closing an idle engine again does nothing.
         self.assertEqual(trim.call_count, 1)
+        trim.assert_called_with()                # Only this process; the engines are not paged out.
 
     def test_avatar_stays_visible_in_tray_and_click_reopens_chat(self):
         widget = self.enable()

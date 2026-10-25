@@ -259,8 +259,8 @@ class CompanionWindow(QMainWindow):
         self._reminder_timer.start()
         QTimer.singleShot(4000, self, self._check_reminders)
         # In the background, give memory back: close idle voice/microphone engines, trim RAM.
-        self._engines_used_at = self._hidden_at = time.monotonic()
-        self._trimmed_at = 0.0
+        self._hidden_at = time.monotonic()
+        self._trimmed_at = float("-inf")  # Never: monotonic time starts at boot, so 0 can be recent.
         self._idle_timer = QTimer(self)
         self._idle_timer.setInterval(30_000)
         self._idle_timer.timeout.connect(self._save_memory_when_idle)
@@ -2109,7 +2109,7 @@ class CompanionWindow(QMainWindow):
         if hasattr(self.speech, "set_engine"):
             self.speech.set_engine(engine)
         installed = getattr(self.speech, "chatterbox_installed", lambda: True)()
-        if engine == "chatterbox" and installed:
+        if installed or engine != "chatterbox":
             QTimer.singleShot(2500, self, self._warm_voice)
         self.voice_engine_hint.setText(
             "Kyutai Pocket TTS: starts speaking quickly and runs comfortably on the CPU." if engine != "chatterbox" else
@@ -2121,11 +2121,12 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def _warm_voice(self):
-        """Chatterbox takes a while to load: start it early when her replies will be spoken."""
+        """Loading a voice takes a while (Pocket ~20 s): start it early when her replies will be spoken."""
         from .voice_settings import VOICES
         voice = self._speech_voice()
+        chatterbox = self.settings.tts_engine == "chatterbox"
         if (hasattr(self.speech, "warm") and not self._closing and self.auto_speak.isChecked()
-                and self.volume.value() > 0 and voice not in VOICES):
+                and self.volume.value() > 0 and not (chatterbox and voice in VOICES)):
             self.speech.warm(voice)
 
     def _test_animation(self, name, label):
@@ -2195,27 +2196,25 @@ class CompanionWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
-        if self.settings.tts_engine == "chatterbox":
-            QTimer.singleShot(500, self, self._warm_voice)  # Reloaded if it was closed while idle.
+        QTimer.singleShot(500, self, self._warm_voice)  # Reloads the voice if it was closed while away.
 
     @Slot()
     def _save_memory_when_idle(self):
-        """Every 30 s: close voice and microphone engines unused for 10 minutes, and while the window
-        is hidden or minimized, hand idle memory back to Windows (again every 10 minutes)."""
+        """Every 30 s while the window is hidden or minimized: close voice and microphone engines
+        unused for 10 minutes, and hand the app's idle memory back to Windows (at most every 10
+        minutes). While the window is open, nothing is unloaded: she is ready to answer."""
         now = time.monotonic()
-        if self._worker or self._task is not None or self.speech.busy or self.microphone.busy:
-            self._engines_used_at = now
-        elif now - self._engines_used_at > ENGINE_IDLE_SECONDS:
-            for engine in (self.speech, self.microphone):
-                if hasattr(engine, "release"):
-                    engine.release()
         if self.isVisible() and not self.isMinimized():
             self._hidden_at = now
             return
+        if self._worker or self._task is not None:
+            return
+        for engine in (self.speech, self.microphone):
+            if hasattr(engine, "release"):
+                engine.release(ENGINE_IDLE_SECONDS)
         if now - self._hidden_at >= 30 and now - self._trimmed_at >= TRIM_EVERY_SECONDS:
             from .memory_saver import trim
-            processes = [getattr(engine, "process", None) for engine in (self.speech, self.microphone)]
-            trim([process.processId() for process in processes if process is not None])
+            trim()  # This process only: the engines are either in use or closed.
             self._trimmed_at = now
 
     @Slot()

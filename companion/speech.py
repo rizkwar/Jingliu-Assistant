@@ -39,6 +39,7 @@ class SpeechController(QObject):
         self._session_active = False
         self._current_text = ""
         self._warming = False  # A background model load that new speech waits for, not cancels.
+        self.last_used = time.monotonic()  # Every job and engine event; idle closing goes by this.
         self._voice = "alba"
         self._volume = 70
         self._rate = 100
@@ -122,11 +123,13 @@ class SpeechController(QObject):
         self.process.setProcessEnvironment(env)
 
     def warm(self, voice):
-        """Load Chatterbox in the background (it takes a while) so her first reply starts sooner."""
-        if self.busy or self.engine != "chatterbox":
+        """Load the voice engine in the background (Pocket ~20 s, Chatterbox longer) so her next reply
+        starts sooner. Does nothing while the engine is already running."""
+        if self.busy or self.process.state() != QProcess.ProcessState.NotRunning:
             return
         self._voice = voice
         self._warming = True
+        self._session_active = True  # So it ends with "Voice ready", not a lingering "Loading voice…".
         self._queue.append(("prepare", ""))
         self._advance()
 
@@ -194,6 +197,7 @@ class SpeechController(QObject):
                 self._report("Voice ready", "idle")
             return
         action, text = self._queue.popleft()
+        self.last_used = time.monotonic()
         self._current_text = text
         self._active_id = uuid4().hex
         self._pending = {
@@ -246,11 +250,14 @@ class SpeechController(QObject):
         if was_busy:
             self._report("Voice stopped", "idle")
 
-    def release(self):
-        """Idle for a long while: close the engine to free its model. The next phrase starts it again."""
-        if not self.busy and self.process.state() != QProcess.ProcessState.NotRunning:
+    def release(self, idle_seconds):
+        """Unused for `idle_seconds`: close the engine to free its model. The next phrase starts it again."""
+        if (not self.busy and self.process.state() != QProcess.ProcessState.NotRunning
+                and time.monotonic() - self.last_used >= idle_seconds):
             self._stopping = True
             self.process.kill()
+            return True
+        return False
 
     def shutdown(self):
         self.stop()
@@ -280,6 +287,7 @@ class SpeechController(QObject):
                 state = event.get("state")
                 self._report(labels.get(state, "Preparing speech…"), state if state in labels else "preparing")
             elif kind == "done":
+                self.last_used = time.monotonic()
                 self._warming = False
                 self._reset_playback()
                 self.deadline.stop()

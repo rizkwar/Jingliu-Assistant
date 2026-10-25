@@ -602,9 +602,11 @@ Click the icon to reopen the conversation, or right-click for **Show companion**
 **Light in the background.** While the window is hidden or minimized, the app hands its idle
 memory back to Windows after 30 seconds (and again every 10 minutes); it returns by itself when you
 open the window. A hidden avatar is fully unloaded after 15 seconds and reloads in a few seconds
-when shown. The voice and microphone engines close after 10 idle minutes and start again when
-needed (Chatterbox reloads in the background when you open the window). Measured: about 1.7 GB in
-use with the window and avatar open, about 11 MB with both hidden. Reminders still arrive.
+when shown. While the window is hidden, the voice and microphone engines close once they have
+gone unused for 10 minutes; while it is open they stay loaded. The voice loads in the background
+when the app starts and when you open the window (Pocket takes about 20 seconds from cold), so a
+reply rarely waits for it. Measured: about 1.7 GB in use with the window and avatar open, about
+11 MB with both hidden. Reminders still arrive.
 
 Hiding the window cancels recording or transcription and clears any pending
 automatic send. An existing text reply and its speech can continue in the
