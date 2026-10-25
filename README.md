@@ -3,6 +3,60 @@
 A small Windows desktop companion built in Python with PySide6. We are building
 this one step at a time, following the character, voice, and memory brief.
 
+## What Jingliu can do
+
+**Talk in character**
+- She is **Jingliu**, always in character: reserved, composed, quietly warm. Her profile lives in
+  [character.toml](character.toml); you can edit her or add other characters ([guide](docs/character-guide.md)).
+- **Models:** Claude through your Claude subscription (the local Claude Code CLI, no API key;
+  Sonnet 5.5 by default, also Opus 5.5, Haiku 5.5 and Fable 5.1), Codex with your ChatGPT plan, or
+  OpenRouter. Your choice is remembered ([model providers](docs/model-providers.md)).
+- **Images and files:** paperclip, paste a screenshot (Ctrl+V) or drag files in: images, PDFs,
+  text and code ([details](#share-images-and-files)).
+
+**Remember, remind, keep history**
+- **Memory:** "remember that I take my tea without sugar" — she saves it, and can also keep lasting
+  preferences on her own (Settings → App). Every change shows in the chat with **Undo**; manage all in
+  **⋯ → Memories** ([details](#asking-her-to-remember)).
+- **Reminders:** "remind me at 7 to study", "every weekday at 8, remind me to stretch". She tells
+  you herself when one is due, even after a restart; **⋯ → Reminders** lists them ([details](#reminders)).
+- **Conversations** are saved locally. **⋯ → History** has search, dates, a glimpse of each chat and
+  a delete button on every conversation; **Context** keeps notes for long chats.
+
+**Voice**
+- **Speaks her replies** in two voices (Settings → Voice): **Pocket TTS**, quick on the CPU, or
+  **Chatterbox**, a more human version of her own voice in a calm delivery (best on the NVIDIA GPU; it
+  loads in the background and prepares her next sentences while she speaks) ([details](#try-her-voice)).
+- **Talk to her:** hold the microphone or press **Ctrl+Alt+Space**, or turn on hands-free; speech is
+  transcribed locally ([details](#talk-through-your-microphone)).
+
+**A living desktop avatar** (Live2D, [guide](docs/experimental-live2d.md))
+- She **chooses her own expressions** as she talks (smile, blush, shy, laugh, surprised, a one-eye
+  wink, nods…), with lip-sync to her voice.
+- **She has a life:** greets you, has idle moments, glances at your cursor, grows drowsy and falls
+  asleep with drifting "Zzz", and wakes when you come back. **Pet her** by stroking her head.
+- **While she works on a task** she looks focused, reads, types and checks the screen, with a small
+  panel showing her current step, and a burst of ice crystals when she finishes.
+- **Test every animation** in **Settings → Avatar → Animation tester**, or right-click her → **Expression → Test all animations…**.
+- Drag to move; the corner grip resizes her in proportion. Smooth and flicker-free, and she uses
+  fewer frames (less CPU) while idle or asleep.
+
+**Do things on your computer** ([guide](docs/computer-tasks.md))
+- Ask casually ("my desktop is a mess") or type `/do …`. She proposes a plan and waits for your yes —
+  click **Yes, do it** or just say so. Files, folders, programs, the web, and the screen, mouse and
+  keyboard, through Claude Code on your plan.
+- She **asks before** running commands, changing files or clicking and typing — or turn that off in
+  Settings → App to let her work without asking. **Stop** cancels at any time.
+- **Undo any task:** the task card's **Undo**, "undo that" in chat, `/undo`, or **⋯ → Recent tasks**
+  for the last 7 days. You see exactly what will be reversed first.
+
+**The app**
+- A moonlit **Jingliu theme** with a matching title bar, few buttons, and everything else in **⋯**.
+- In **Windows Search / Start** as **Jingliu**; lives in the **system tray** when closed (Quit from there).
+- Settings are remembered as you change them; your data stays on this PC under `data/`.
+
+**Chat commands:** `/do <task>` · `/undo` · `/remember <fact>` · `/forget <number>` · `/memories`
+
 **Moonlit window design:** the chat window uses a Jingliu-inspired night-and-frost
 theme with message bubbles and formatted replies (bold, lists, code). Where the
 older guides below name a button:
@@ -16,7 +70,9 @@ older guides below name a button:
 | **Speak replies** | the speaker button in the header (also in Settings → Voice) |
 | **Stop** | the red stop button, shown only while something can be stopped |
 
-**Share images and files:** click the paperclip, paste a screenshot (Ctrl+V),
+### Share images and files
+
+Click the paperclip, paste a screenshot (Ctrl+V),
 or drag files onto the window. Up to six per message: images (PNG, JPG, GIF,
 WebP, BMP), PDFs, and text or code files. She sees them with that message;
 later messages keep a short "[Attached …]" note, so they are not resent each
@@ -374,8 +430,12 @@ do it**, or just say "yes" or "go ahead", or answer with changes. Turn confirmat
 - **Asks you first:** running commands, changing files, and clicking or typing.
 
 You answer each request with **Allow once**, **Allow all … for this task** or **Deny**, and
-**Stop** cancels a task. Turn it off in **Settings → App**. See
-[computer tasks](docs/computer-tasks.md).
+**Stop** cancels a task. To let her work without asking, turn off **Ask before she runs commands or
+uses the mouse and keyboard** in **Settings → App** (or turn tasks off entirely there).
+
+Every task can be **undone**: press **Undo this task** on its card, ask her ("undo that"), type
+`/undo`, or open **⋯ → Recent tasks** (the last 7 days, also after a restart). You see exactly what
+will be reversed before anything happens. See [computer tasks](docs/computer-tasks.md).
 
 ## Try her voice
 
