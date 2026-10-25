@@ -260,6 +260,13 @@ class CompanionWindow(QMainWindow):
         self._reminder_timer.timeout.connect(self._check_reminders)
         self._reminder_timer.start()
         QTimer.singleShot(4000, self, self._check_reminders)
+        # Gentle check-ins (off unless chosen): looked at once a minute.
+        from .check_ins import CheckIns
+        self._check_ins = CheckIns(settings.check_in_greeted)
+        self._check_in_timer = QTimer(self)
+        self._check_in_timer.setInterval(60_000)
+        self._check_in_timer.timeout.connect(self._check_in)
+        self._check_in_timer.start()
         # In the background, give memory back: close idle voice/microphone engines, trim RAM.
         self._hidden_at = time.monotonic()
         self._trimmed_at = float("-inf")  # Never: monotonic time starts at boot, so 0 can be recent.
@@ -633,6 +640,14 @@ class CompanionWindow(QMainWindow):
         self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
         self.close_to_tray.setChecked(settings.close_to_tray)
         settings_layout.addWidget(self.close_to_tray)
+        self.check_ins = QCheckBox("Gentle check-ins: a good-morning greeting, and a nudge to rest "
+                                   "after about three hours at the computer")
+        self.check_ins.setChecked(settings.check_ins)
+        self.check_ins.setToolTip("She greets you once each morning and, after about three hours of use without a "
+                                  "ten-minute break, suggests a short rest. Only the time since your last mouse or "
+                                  "keyboard input is read, nothing else.")
+        self.check_ins.toggled.connect(self._check_ins_toggled)
+        settings_layout.addWidget(self.check_ins)
         from . import autostart
         self.start_with_windows = QCheckBox("Start Jingliu when I sign in to Windows (quietly, in the tray)")
         self.start_with_windows.setChecked(autostart.enabled())
@@ -1102,7 +1117,7 @@ class CompanionWindow(QMainWindow):
             return
         self._begin_reply(text, files)
 
-    def _begin_reply(self, text, files=(), reminder=False, looking=False) -> bool:
+    def _begin_reply(self, text, files=(), reminder=False, looking=False, note=None) -> bool:
         """Save the turn and start her reply. A reminder's line comes from the app, not the input box."""
         self._activity_error = False
         self._interrupt_speech()
@@ -1138,7 +1153,9 @@ class CompanionWindow(QMainWindow):
         # Only this turn carries the files themselves; history keeps a short note about them.
         context = [*recent_messages(turns), {"role": "user", "content": text, "attachments": stored}]
         self._reply = ""
-        if reminder:
+        if note:
+            self.transcript.add_memory_note(note[0], can_undo=False, icon=note[1])
+        elif reminder:
             # The clock icon already says it; her message keeps the mark that tells her what this is.
             self.transcript.add_memory_note(text.replace(reminders.MARK, "Reminder"), can_undo=False, icon="clock")
         else:
@@ -1151,7 +1168,8 @@ class CompanionWindow(QMainWindow):
                               confirm_tasks=self.confirm_tasks.isChecked(),
                               memory_cues=True, auto_memory=self.auto_memory.isChecked(),
                               reminders=self._reminder_prompt(),
-                              look=self.look_at_screen.isChecked() and not looking)
+                              look=self.look_at_screen.isChecked() and not looking,
+                              check_ins=self.check_ins.isChecked())
         self._task_request = self._task_offer = None
         self._look_requested = False
         self._looking = looking
@@ -1790,6 +1808,41 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_note(f"She could not see your screen: {exc}", "warning")
             return
         self._begin_reply("[My screen, shared because you asked to look]", [str(path)], looking=True)
+
+    @Slot(bool)
+    def _check_ins_toggled(self, enabled):
+        self.settings = replace(self.settings, check_ins=enabled)
+        try:
+            self.preferences.remember(self.settings, ("check_ins",))
+        except (OSError, ValueError):
+            pass
+
+    @Slot()
+    def _check_in(self):
+        """Once a minute, when chosen: greet in the morning, or suggest a rest after a long stretch."""
+        from . import check_ins
+        if (not self.check_ins.isChecked() or self._closing or self.suspended or self._worker
+                or self._task is not None or self.microphone.busy or self.speech.busy):
+            return
+        now, idle = reminders.now_local(), check_ins.idle_seconds()
+        if self._check_ins.morning(now, idle):
+            self.settings = replace(self.settings, check_in_greeted=self._check_ins.greeted)
+            try:
+                self.preferences.remember(self.settings, ("check_in_greeted",))
+            except (OSError, ValueError):
+                pass
+            self._deliver_check_in(check_ins.morning_message(now), "Check-in · good morning")
+        elif self._check_ins.long_session(time.monotonic(), idle):
+            hours = self._check_ins.hours(time.monotonic())
+            self._deliver_check_in(check_ins.rest_message(now, hours),
+                                   f"Check-in · about {hours} hours at the computer")
+
+    def _deliver_check_in(self, line, label):
+        try:
+            self.settings.validate_connection()
+        except ValueError:
+            return  # Without a model she cannot say it herself; a check-in is not worth an error.
+        self._begin_reply(line, reminder=True, note=(label, "moon"))
 
     @Slot(bool)
     def _start_with_windows_toggled(self, enabled):

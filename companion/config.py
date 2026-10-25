@@ -50,6 +50,8 @@ class Settings:
     auto_memory: bool = True
     look_at_screen: bool = True
     barge_in: bool = True
+    check_ins: bool = False
+    check_in_greeted: str = ""
     character_voice: str = ""
     character_voice_rate: int = 100
     character_voice_description: str = ""
