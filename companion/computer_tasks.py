@@ -205,6 +205,7 @@ class ComputerTask(QObject):
         root = Path(undo_root or UNDO_ROOT)
         cleanup(root)
         self.journal = Journal(root / (time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)))
+        self.journal.describe_task(request=request, started=time.time())
         self.allowed_groups = set()
         # Off in Settings: every step runs at once, still shown as it happens.
         self.ask = getattr(settings, "approve_steps", True)
@@ -332,5 +333,9 @@ class ComputerTask(QObject):
             return
         self.done = True
         self.limit.stop()
+        try:
+            self.journal.describe_task(finished=time.time(), succeeded=bool(succeeded), report=report[:600])
+        except OSError:
+            pass
         self.finished.emit(report, succeeded)
         QTimer.singleShot(0, self.folder.cleanup)

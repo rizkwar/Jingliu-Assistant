@@ -49,9 +49,15 @@ Turn the feature off in **Settings → App → Let her do tasks on this computer
 
 ## Undoing a task
 
-Every task keeps a record of the file changes it makes, so a finished task's card shows
-**Undo this task** (or type `/undo` for the latest one). Undo first lists what it will do and
-asks you to confirm, then reverses the changes, newest first:
+Every task keeps a record of the file changes it makes. To undo one:
+
+- press **Undo this task** on its card in the chat;
+- ask her ("undo that", "put it back the way it was"): she answers and the confirmation appears;
+- type `/undo` for the latest task; or
+- open **⋯ → Recent tasks**, which lists the last 7 days of tasks that changed files, also after a
+  restart, each with **Undo**.
+
+Undo first lists what it will do and asks you to confirm, then reverses the changes, newest first:
 
 - Files she **edited or overwrote** get their original content back (the original is copied just
   before the change is allowed).
@@ -67,8 +73,8 @@ Undo never overwrites something that has changed since: if you created a file wh
 be, or put your own files into a folder she made, that part is skipped and reported. If the
 original of a file cannot be saved, that edit is refused rather than made unrecoverable.
 
-Undo records live in `data/task_undo/` and are removed after 7 days. Undo works for tasks from the
-current session; she is told when you undo, so later replies don't assume the work is still there.
+Undo records live in `data/task_undo/` (with what you asked and how it ended) and are removed after
+7 days. She is told when you undo, so later replies don't assume the work is still there.
 
 ## How it works
 

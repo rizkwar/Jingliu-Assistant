@@ -217,6 +217,33 @@ class Journal:
     def undone(self):
         return any(item.get("op") == "undone" for item in self.entries())
 
+    # What the task was, so it can be found and undone after a restart ---------------
+
+    @property
+    def details(self):
+        try:
+            return json.loads((self.folder / "task.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def describe_task(self, **values):
+        details = {**self.details, **values}
+        (self.folder / "task.json").write_text(json.dumps(details, ensure_ascii=False), encoding="utf-8")
+
+
+def recent(root):
+    """Finished tasks from the last week that changed files, newest first."""
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    journals = []
+    for folder in sorted(root.iterdir(), reverse=True):
+        if folder.is_dir() and (folder / "journal.jsonl").exists():
+            journal = Journal(folder)
+            if journal.undoable() and journal.details.get("finished"):
+                journals.append(journal)
+    return journals
+
 
 def cleanup(root, days=KEEP_DAYS):
     """Forget journals older than a week (their stored copies go with them)."""

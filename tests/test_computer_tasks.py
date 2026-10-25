@@ -237,6 +237,12 @@ class WindowTaskTests(unittest.TestCase):
         FakeTask.created = []
         self.patch = patch("companion.computer_tasks.ComputerTask", FakeTask)
         self.patch.start()
+        import tempfile
+        self.undo_folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.undo_folder.cleanup)
+        undo_root = patch("companion.computer_tasks.UNDO_ROOT", Path(self.undo_folder.name))
+        undo_root.start()
+        self.addCleanup(undo_root.stop)
         self.window = CompanionWindow(SETTINGS)
 
     def tearDown(self):
@@ -367,7 +373,54 @@ class WindowTaskTests(unittest.TestCase):
         self.assertIn("[Task undone by the person]", self.window._messages[-1]["content"])
         self.window.input.setPlainText("/undo")
         self.window._send()
-        self.assertIn("no finished task to undo", self.window.transcript.toPlainText())
+        self.assertIn("no recent task with changes to undo", self.window.transcript.toPlainText())
+
+    def saved_task(self, request="Sort the screenshots"):
+        """A finished task from an earlier session, as it is left on disk."""
+        from companion.task_journal import Journal
+        work = Path(self.undo_folder.name) / "work"
+        work.mkdir(exist_ok=True)
+        (work / "shot.png").write_text("x", encoding="utf-8")
+        journal = Journal(Path(self.undo_folder.name) / "20261024-090000-abc123")
+        journal.describe_task(request=request, started=1.0)
+        journal.move(work / "shot.png", journal.make_folder(work / "Screenshots"))
+        journal.describe_task(finished=__import__("time").time(), succeeded=True, report="Done.")
+        return work, journal
+
+    def test_after_a_restart_slash_undo_and_her_cue_find_the_saved_task(self):
+        from PySide6.QtWidgets import QMessageBox
+        work, journal = self.saved_task()
+        asked = []
+        def question(parent, title, text, *rest):
+            asked.append(text)
+            return QMessageBox.StandardButton.Yes
+        with patch.object(QMessageBox, "question", side_effect=question):
+            self.window._queue_cues([(0, "undotask")])  # "Undo that" in conversation.
+            self.window._apply_memory_actions()
+            self.app.processEvents()
+        self.assertIn("Task: Sort the screenshots", asked[0])
+        self.assertTrue((work / "shot.png").exists())
+        self.assertTrue(journal.undone)
+        self.window.input.setPlainText("/undo")
+        self.window._send()
+        self.assertIn("no recent task with changes to undo", self.window.transcript.toPlainText())
+
+    def test_recent_tasks_dialog_lists_and_undoes(self):
+        from PySide6.QtWidgets import QMessageBox, QPushButton
+        from companion.library_ui import TasksDialog
+        work, journal = self.saved_task("Tidy the desktop")
+        dialog = TasksDialog(Path(self.undo_folder.name), self.window)
+        self.assertEqual(dialog.items.count(), 1)
+        row = dialog.items.itemWidget(dialog.items.item(0))
+        self.assertIn("move 1 item back", row.findChildren(type(dialog.empty))[1].text())
+        dialog.undo_requested.connect(lambda j: self.window._undo_task(None, j) or dialog.refresh())
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+            row.findChild(QPushButton).click()
+        self.assertTrue((work / "shot.png").exists())
+        self.assertEqual(dialog.items.count(), 1)  # Still listed, now marked Undone without a button.
+        row = dialog.items.itemWidget(dialog.items.item(0))
+        self.assertIsNone(row.findChild(QPushButton))
+        dialog.deleteLater()
 
     def test_tasks_can_be_turned_off(self):
         self.window.computer_tasks.setChecked(False)

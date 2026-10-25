@@ -401,3 +401,79 @@ class ReminderDialog(QDialog):
             QMessageBox.warning(self, "Could not remove", "The database could not be updated. Please try again.")
             return
         self.refresh()
+
+
+class TasksDialog(QDialog):
+    """Her computer tasks from the last week, each with Undo for the files it changed."""
+    undo_requested = Signal(object)  # task_journal.Journal
+
+    def __init__(self, root, parent=None):
+        super().__init__(parent)
+        self.root = root
+        self.setWindowTitle("Recent tasks")
+        self.resize(560, 460)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(10)
+        heading = QLabel("Recent tasks")
+        heading.setObjectName("title")
+        layout.addWidget(heading)
+        hint = QLabel("Tasks from the last 7 days that changed files. Undo puts back what she created, edited, moved "
+                      "or deleted; you see exactly what before anything happens. You can also just ask her to undo it.")
+        hint.setObjectName("subtitle")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.items = QListWidget()
+        self.items.setObjectName("history")
+        self.items.setSpacing(3)
+        self.items.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        layout.addWidget(self.items, 1)
+        self.empty = QLabel("No recent tasks with changes to undo.")
+        self.empty.setObjectName("hint")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.empty, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close = QPushButton("Close")
+        close.setObjectName("primary")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+        self.refresh()
+
+    def refresh(self):
+        from .task_journal import recent
+        self.items.clear()
+        journals = recent(self.root)
+        for journal in journals:
+            details = journal.details
+            row = QFrame()
+            row.setObjectName("historyRow")
+            line = QHBoxLayout(row)
+            line.setContentsMargins(14, 10, 10, 10)
+            text = QVBoxLayout()
+            text.setSpacing(2)
+            title = QLabel(details.get("request") or "A task")
+            title.setObjectName("historyTitle")
+            title.setWordWrap(True)
+            title.setTextFormat(Qt.TextFormat.PlainText)
+            text.addWidget(title)
+            finished = datetime.fromtimestamp(details["finished"]).astimezone().isoformat()
+            changes, _ = journal.plan()
+            meta = QLabel(" · ".join(filter(None, (when(finished), "Undone" if journal.undone else ", ".join(changes)))))
+            meta.setObjectName("historyMeta")
+            meta.setWordWrap(True)
+            text.addWidget(meta)
+            line.addLayout(text, 1)
+            if not journal.undone:
+                undo = QPushButton("Undo")
+                undo.setObjectName("taskUndo")
+                undo.setCursor(Qt.CursorShape.PointingHandCursor)
+                undo.clicked.connect(lambda checked=False, journal=journal: self.undo_requested.emit(journal))
+                line.addWidget(undo, 0, Qt.AlignmentFlag.AlignVCenter)
+            item = QListWidgetItem()
+            item.setSizeHint(row.sizeHint())
+            self.items.addItem(item)
+            self.items.setItemWidget(item, row)
+        self.items.setVisible(bool(journals))
+        self.empty.setVisible(not journals)

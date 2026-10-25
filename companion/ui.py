@@ -264,6 +264,8 @@ class CompanionWindow(QMainWindow):
         self.history_button = menu.addAction(glyph_icon("history"), "History")
         self.memory_button = menu.addAction(glyph_icon("memories"), "Memories")
         self.reminders_button = menu.addAction(glyph_icon("clock"), "Reminders")
+        self.tasks_button = menu.addAction(glyph_icon("history"), "Recent tasks")
+        self.tasks_button.setToolTip("Tasks from the last week, with Undo for the files they changed")
         self.context_button = menu.addAction(glyph_icon("context"), "Context and summary")
         self.context_button.setToolTip("Inspect or summarize older exchanges in this conversation")
         menu.addSeparator()
@@ -280,6 +282,7 @@ class CompanionWindow(QMainWindow):
         self.history_button.triggered.connect(self._open_history)
         self.memory_button.triggered.connect(self._open_memories)
         self.reminders_button.triggered.connect(self._open_reminders)
+        self.tasks_button.triggered.connect(self._open_recent_tasks)
         self.suspend_button.triggered.connect(self.toggle_suspended)
         self.new_chat.clicked.connect(self._new_conversation)
         self.reload.clicked.connect(self._reload_settings)
@@ -1605,7 +1608,9 @@ class CompanionWindow(QMainWindow):
     def _apply_memory_actions(self):
         actions, self._memory_actions = self._memory_actions, []
         handlers = {"remember": self._remember, "forget": self._forget,
-                    "remind": self._set_reminder, "unremind": self._cancel_reminder}
+                    "remind": self._set_reminder, "unremind": self._cancel_reminder,
+                    # After her reply is shown, so the confirmation comes after her words.
+                    "undotask": lambda _: QTimer.singleShot(0, self, self._undo_latest)}
         for action, detail in actions:
             handlers[action](detail)
 
@@ -1906,6 +1911,33 @@ class CompanionWindow(QMainWindow):
         dialog.exec()
         dialog.deleteLater()
 
+    def _latest_undo(self):
+        """The newest task whose changes can still be undone: this session's, else one saved earlier."""
+        if self._last_undo is not None:
+            return self._last_undo
+        from .computer_tasks import UNDO_ROOT
+        from .task_journal import recent
+        journal = next((item for item in recent(UNDO_ROOT) if not item.undone), None)
+        return (None, journal) if journal is not None else None
+
+    @Slot()
+    def _undo_latest(self):
+        latest = self._latest_undo()
+        if latest is None:
+            self.transcript.add_note("There is no recent task with changes to undo.")
+        else:
+            self._undo_task(*latest)
+
+    @Slot()
+    def _open_recent_tasks(self) -> None:
+        from .computer_tasks import UNDO_ROOT
+        from .library_ui import TasksDialog
+        dialog = TasksDialog(UNDO_ROOT, self)
+        dialog.undo_requested.connect(lambda journal: self._undo_task(None, journal) or dialog.refresh())
+        self._chrome.watch(dialog)
+        dialog.exec()
+        dialog.deleteLater()
+
     def _undo_task(self, card, journal):
         """Reverse a finished task's file changes, after showing what will happen."""
         if journal.undone or self._task is not None:
@@ -1916,11 +1948,15 @@ class CompanionWindow(QMainWindow):
         text = "This will " + "; ".join(lines) + "." if lines else "There is nothing left to undo."
         if notes:
             text += "\n\nIt cannot reverse " + " or ".join(notes) + "."
+        request = journal.details.get("request")
+        if card is None and request:
+            text = f"Task: {request[:200]}\n\n" + text
         if QMessageBox.question(self, "Undo this task?", text) != QMessageBox.StandardButton.Yes:
             return
         done, problems = journal.undo()
-        card.offer_undo(False)
-        card.set_status("Undone" if not problems else "Partly undone", "undone")
+        if card is not None:
+            card.offer_undo(False)
+            card.set_status("Undone" if not problems else "Partly undone", "undone")
         if self._last_undo and self._last_undo[1] is journal:
             self._last_undo = None
         summary = f"Undid the task: {len(done)} change{'s' if len(done) != 1 else ''} reversed."
@@ -2259,8 +2295,10 @@ class CompanionWindow(QMainWindow):
                 self._task_offer = detail
             elif name in {"remember", "forget", "remind", "unremind"} and detail:
                 self._memory_actions.append((name, detail))
-        cues = [(offset, cue) for offset, cue in cues
-                if cue.partition(":")[0] not in {"task", "offer", "remember", "forget", "remind", "unremind"}]
+            elif name == "undotask":
+                self._memory_actions.append((name, ""))
+        cues = [(offset, cue) for offset, cue in cues if cue.partition(":")[0] not in
+                {"task", "offer", "remember", "forget", "remind", "unremind", "undotask"}]
         # Spoken replies show each expression as the voice reaches it; silent ones show it at once.
         self._pending_cues.extend(cues)
         if not self._streaming_voice:
@@ -2702,10 +2740,7 @@ class CompanionWindow(QMainWindow):
             return True
         if command.lower() == "/undo":
             self.input.clear()
-            if self._last_undo is None:
-                self.transcript.add_note("There is no finished task to undo in this session.")
-            else:
-                self._undo_task(*self._last_undo)
+            self._undo_latest()
             return True
         if command.lower() not in {"/remember", "/forget", "/memories"}:
             return False
