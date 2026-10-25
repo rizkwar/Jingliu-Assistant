@@ -586,6 +586,14 @@ class CompanionWindow(QMainWindow):
         memory_hint.setObjectName("hint")
         memory_hint.setWordWrap(True)
         settings_layout.addWidget(memory_hint)
+        section(settings_layout, "Your screen")
+        self.look_at_screen = QCheckBox("Let her look at my screen when I ask her to")
+        self.look_at_screen.setChecked(settings.look_at_screen)
+        self.look_at_screen.setToolTip("Say \"what do you think of this?\" or \"look at my screen\" and she takes a "
+                                       "screenshot of the monitor you are using. You always see it in the chat. "
+                                       "The screen button in the message box works either way.")
+        settings_layout.addWidget(self.look_at_screen)
+        self.look_at_screen.toggled.connect(self._look_at_screen_toggled)
         section(settings_layout, "Computer tasks")
         self.computer_tasks = QCheckBox("Let her do tasks on this computer when I ask")
         self.computer_tasks.setChecked(settings.computer_tasks)
@@ -827,6 +835,10 @@ class CompanionWindow(QMainWindow):
         self.attach_button = icon_button("attach", "Attach images or files · you can also paste or drag them in")
         self.attach_button.clicked.connect(self._choose_attachments)
         tools.addWidget(self.attach_button)
+        self.screen_button = icon_button("screen", "Show her your screen · attaches a screenshot of the monitor "
+                                                   "you are using; her own windows are left out")
+        self.screen_button.clicked.connect(self._share_screen)
+        tools.addWidget(self.screen_button)
         self.record_button = icon_button("mic", "Hold to talk · or press Ctrl+Alt+Space · up to 60 seconds")
         self.record_button.pressed.connect(self._begin_recording)
         self.record_button.released.connect(self._finish_recording)
@@ -1072,7 +1084,7 @@ class CompanionWindow(QMainWindow):
             return
         self._begin_reply(text, files)
 
-    def _begin_reply(self, text, files=(), reminder=False) -> bool:
+    def _begin_reply(self, text, files=(), reminder=False, looking=False) -> bool:
         """Save the turn and start her reply. A reminder's line comes from the app, not the input box."""
         self._activity_error = False
         self._interrupt_speech()
@@ -1120,8 +1132,11 @@ class CompanionWindow(QMainWindow):
                               computer_tasks=self.computer_tasks.isChecked(),
                               confirm_tasks=self.confirm_tasks.isChecked(),
                               memory_cues=True, auto_memory=self.auto_memory.isChecked(),
-                              reminders=self._reminder_prompt())
+                              reminders=self._reminder_prompt(),
+                              look=self.look_at_screen.isChecked() and not looking)
         self._task_request = self._task_offer = None
+        self._look_requested = False
+        self._looking = looking
         self._memory_actions = []
         self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
         self._worker_kind = "reply"
@@ -1151,6 +1166,7 @@ class CompanionWindow(QMainWindow):
         self.send_button.setEnabled(not busy)
         self.input.setEnabled(not self.microphone.busy)
         self.attach_button.setEnabled(not self.suspended and not self.microphone.busy)
+        self.screen_button.setEnabled(not self.suspended and not self.microphone.busy)
         self._refresh_stop_button()
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
@@ -1279,6 +1295,11 @@ class CompanionWindow(QMainWindow):
         if not worker.error:
             self._apply_memory_actions()
         self._memory_actions = []
+        if (not worker.error and not interrupted and getattr(self, "_look_requested", False)
+                and not getattr(self, "_looking", False) and self.look_at_screen.isChecked()):
+            # She asked to see it: once her words are shown, take the screenshot and send it to her.
+            QTimer.singleShot(300, self, self._look_at_screen)
+        self._look_requested = False
         if not interrupted and self.computer_tasks.isChecked():
             if self._task_request is not None:
                 # Her own description of the agreed job; the person's words are the fallback.
@@ -1721,6 +1742,44 @@ class CompanionWindow(QMainWindow):
                                 f"screen; {steps} Ask in chat, or type /do followed by the task. Stop cancels a task.")
 
     # Memory ----------------------------------------------------------------------
+
+    # Her looking at the screen ----------------------------------------------------
+
+    def _capture_screen(self):
+        from .screen_capture import capture
+        windows = [self, getattr(self.avatar, "widget", None)]
+        panel = getattr(windows[1], "work_panel", None)
+        return capture([window for window in windows + [panel] if window is not None])
+
+    @Slot()
+    def _share_screen(self):
+        """The screen button: a screenshot joins the message being written."""
+        try:
+            path = self._capture_screen()
+        except OSError as exc:
+            self._flash(str(exc))
+            return
+        self._add_attachments([str(path)])
+
+    @Slot()
+    def _look_at_screen(self):
+        """After she asked to look ([[look]]): send her a screenshot as the next turn."""
+        if self._closing or self.suspended or self._worker or self.microphone.busy:
+            return
+        try:
+            path = self._capture_screen()
+        except OSError as exc:
+            self.transcript.add_note(f"She could not see your screen: {exc}", "warning")
+            return
+        self._begin_reply("[My screen, shared because you asked to look]", [str(path)], looking=True)
+
+    @Slot(bool)
+    def _look_at_screen_toggled(self, enabled):
+        self.settings = replace(self.settings, look_at_screen=enabled)
+        try:
+            self.preferences.remember(self.settings, ("look_at_screen",))
+        except (OSError, ValueError):
+            pass
 
     @Slot(bool)
     def _auto_memory_toggled(self, enabled):
@@ -2443,8 +2502,10 @@ class CompanionWindow(QMainWindow):
                 self._memory_actions.append((name, detail))
             elif name == "undotask":
                 self._memory_actions.append((name, ""))
+            elif name == "look":
+                self._look_requested = True
         cues = [(offset, cue) for offset, cue in cues if cue.partition(":")[0] not in
-                {"task", "offer", "remember", "forget", "remind", "unremind", "undotask"}]
+                {"task", "offer", "remember", "forget", "remind", "unremind", "undotask", "look"}]
         # Spoken replies show each expression as the voice reaches it; silent ones show it at once.
         self._pending_cues.extend(cues)
         if not self._streaming_voice:

@@ -48,6 +48,7 @@ class Settings:
     confirm_tasks: bool = True
     approve_steps: bool = True
     auto_memory: bool = True
+    look_at_screen: bool = True
     character_voice: str = ""
     character_voice_rate: int = 100
     character_voice_description: str = ""

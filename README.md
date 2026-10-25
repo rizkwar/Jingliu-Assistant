@@ -13,6 +13,10 @@ this one step at a time, following the character, voice, and memory brief.
   OpenRouter. Your choice is remembered ([model providers](docs/model-providers.md)).
 - **Images and files:** paperclip, paste a screenshot (Ctrl+V) or drag files in: images, PDFs,
   text and code ([details](#share-images-and-files)).
+- **She can look at your screen:** ask "what do you think of this?" or "can you see this error?" and she
+  takes a screenshot of the monitor you are using and answers about it, or press the monitor button
+  in the message box to attach one yourself. Her own windows are left out of it, it always shows in
+  the chat, and Settings → App → **Let her look at my screen when I ask her to** turns her asking off.
 
 **Remember, remind, keep history**
 - **Memory:** "remember that I take my tea without sugar" — she saves it, and can also keep lasting

@@ -25,7 +25,7 @@ ICONS = {
     'stop': '', 'settings': '', 'history': '', 'speaker': '', 'muted': '',
     'handsfree': '', 'memories': '', 'context': '', 'pause': '', 'play': '',
     'moon': '', 'attach': '', 'close': '', 'document': '', 'image': '',
-    'delete': '', 'clock': '', 'back': '', 'rename': '',
+    'delete': '', 'clock': '', 'back': '', 'rename': '', 'screen': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
