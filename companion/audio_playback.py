@@ -33,7 +33,8 @@ def play_chunks(chunks, sample_rate, volume, report, playback):
         # PortAudio timestamps are in its stream clock, translated at callback
         # time into the process-shared monotonic clock used by the Qt controller.
         at = time.monotonic() + max(0., timing.outputBufferDacTime - timing.currentTime)
-        telemetry.append((at, block[1] if block is not None else 0., block is not None))
+        telemetry.append((at, block[1] if block is not None else 0., block is not None,
+                          block[2] if block is not None else 0.))
         if block is None and ended:
             raise sd.CallbackStop  # finished_callback runs after buffered audio drains.
 
@@ -45,11 +46,11 @@ def play_chunks(chunks, sample_rate, volume, report, playback):
                 if not telemetry:
                     reporting_done.wait(.005)
                     continue
-                at, level, has_audio = telemetry.popleft()
+                at, level, has_audio, rms = telemetry.popleft()
                 if has_audio and not announced:
                     report('speaking')
                     announced = True
-                playback(level, at)
+                playback(level, at, rms)
         except Exception:
             reporter_failed = True
 
@@ -71,7 +72,7 @@ def play_chunks(chunks, sample_rate, volume, report, playback):
                 raise RuntimeError('Audio output stopped')
             rms = float(np.sqrt(np.mean(samples * samples)))
             level = min(1., max(0., (rms - .003) * 7.))
-            blocks.append((samples, level))
+            blocks.append((samples, level, rms))
             started = True
 
         pending = np.empty(0, dtype=np.float32)

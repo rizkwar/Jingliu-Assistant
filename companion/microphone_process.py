@@ -7,7 +7,7 @@ import sys
 import threading
 
 from .transcription import Transcriber
-from .voice_activity import AutomaticCapture
+from .voice_activity import AutomaticCapture, EchoGate
 
 
 MAX_SECONDS = 60
@@ -77,6 +77,7 @@ def run(input_stream=None, output_stream=None, capture_factory=Capture, transcri
     output_stream = output_stream or sys.stdout
     transcriber = transcriber or Transcriber()
     commands = queue.Queue()
+    gate = EchoGate()  # Kept between turns: how loudly her voice reaches this microphone.
 
     def read_commands():
         from .pipe_lines import lines
@@ -167,9 +168,16 @@ def run(input_stream=None, output_stream=None, capture_factory=Capture, transcri
                     automatic = bool(command.get("hands_free", False))
                     speaking = False
                     with redirect_stdout(sys.stderr):
-                        capture = (automatic_factory(device, command.get("pause_ms", 1200))
-                                   if automatic else capture_factory(device))
+                        if automatic and command.get("barge"):
+                            capture = automatic_factory(device, command.get("pause_ms", 1200), gate=gate)
+                        else:
+                            capture = (automatic_factory(device, command.get("pause_ms", 1200))
+                                       if automatic else capture_factory(device))
                     emit("status", state="listening" if automatic else "recording")
+                elif action == "echo":
+                    level = command.get("rms", 0)
+                    if type(level) in (int, float) and 0 <= level <= 2:
+                        gate.playing(float(level))
                 elif action == "finish" and command["id"] == job_id and capture is not None:
                     finish()
             except Exception:

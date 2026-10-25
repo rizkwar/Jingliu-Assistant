@@ -2,6 +2,7 @@
 
 from collections import deque
 import math
+import time
 
 
 SAMPLE_RATE = 16000
@@ -28,15 +29,61 @@ class SileroDetector:
         return bool(spans and spans[-1]["end"] > len(self._tail) - len(audio))
 
 
+class EchoGate:
+    """While her voice plays from the speakers, speech counts as the person's only when the
+    microphone is clearly louder than her own echo plus the room's noise would be. How strongly
+    her voice reaches the microphone is learned while she speaks (speakers: strongly; headphones:
+    barely), and the room's noise while she is silent."""
+
+    QUIET = .004       # Her output RMS below this: she is between words.
+    MARGIN = 2.0       # About +6 dB over a cautious estimate of her echo.
+    WINDOW = .35       # Her loudest moment this recent covers timing differences and room echo.
+    LEARN = 5          # Echo measurements needed before she can be interrupted at all.
+
+    def __init__(self):
+        self._played = deque()             # (time, her output RMS)
+        self._ratios = deque(maxlen=60)    # (microphone RMS - noise) / her output RMS, while she plays.
+        self.noise = .002                  # The room, as the microphone hears it while she is silent.
+
+    def playing(self, rms, now=None):
+        now = time.monotonic() if now is None else now
+        self._played.append((now, float(rms)))
+        while self._played and self._played[0][0] < now - 2:
+            self._played.popleft()
+
+    def recent(self, now=None):
+        now = time.monotonic() if now is None else now
+        return max((rms for at, rms in self._played if at >= now - self.WINDOW), default=0.)
+
+    def allows(self, microphone_rms, now=None):
+        """True when this block may be the person speaking."""
+        played = self.recent(now)
+        if played < self.QUIET:
+            # She is silent: learn the room's noise (slowly up, quickly down) and detect normally.
+            rate = .05 if microphone_rms > self.noise else .3
+            self.noise += (microphone_rms - self.noise) * rate
+            return True
+        excess = max(0., microphone_rms - self.noise)
+        ratio = excess / played
+        known = len(self._ratios) >= self.LEARN
+        # A cautious (high) estimate of her echo: the upper quarter of what she alone produced.
+        coupling = sorted(self._ratios)[len(self._ratios) * 3 // 4] if known else None
+        louder = known and excess > max(coupling * played * self.MARGIN, self.noise * 2)
+        if played >= 3 * self.QUIET and not louder:
+            self._ratios.append(ratio)  # Learn only from clear moments of her alone.
+        return louder
+
+
 class UtteranceBuffer:
     """Collect after sustained speech, end after a pause, and bound all retained audio."""
 
-    def __init__(self, pause_ms=1200, max_seconds=30, idle_seconds=30):
+    def __init__(self, pause_ms=1200, max_seconds=30, idle_seconds=30, prefix_seconds=0.7):
         if type(pause_ms) is not int or not 600 <= pause_ms <= 2500:
             raise ValueError("Speech pause must be from 600 to 2,500 milliseconds.")
         self.pause_samples = pause_ms * SAMPLE_RATE // 1000
         self.max_samples = int(max_seconds * SAMPLE_RATE)
         self.idle_samples = int(idle_seconds * SAMPLE_RATE)
+        self.prefix_samples = int(prefix_seconds * SAMPLE_RATE)
         self._prefix = deque()
         self._prefix_size = 0
         self._frames = []
@@ -60,7 +107,7 @@ class UtteranceBuffer:
         if not self.started:
             self._prefix.append(audio.copy())
             self._prefix_size += len(audio)
-            while self._prefix_size - len(self._prefix[0]) >= SAMPLE_RATE * 0.7:
+            while self._prefix_size - len(self._prefix[0]) >= self.prefix_samples:
                 self._prefix_size -= len(self._prefix.popleft())
             self._onset = self._onset + len(audio) if is_speech else 0
             if self._onset >= math.ceil(SAMPLE_RATE * 0.3):
@@ -82,11 +129,15 @@ class UtteranceBuffer:
 
         return np.concatenate(self._frames) if self._frames else np.empty(0, dtype=np.float32)
 
+    def hold(self):
+        """She is speaking: waiting for the person to talk is not idling."""
+        self._elapsed = 0
+
 
 class AutomaticCapture:
     """Keep the audio callback small; run resampling and VAD in the child process loop."""
 
-    def __init__(self, device=None, pause_ms=1200):
+    def __init__(self, device=None, pause_ms=1200, gate=None):
         from math import gcd
         import queue
         import numpy as np
@@ -94,7 +145,9 @@ class AutomaticCapture:
         from scipy.signal import resample_poly
 
         self.detector = SileroDetector()
-        self.utterance = UtteranceBuffer(pause_ms)
+        # With a gate (talking over her), less audio from before the onset: it holds her echo.
+        self.gate = gate
+        self.utterance = UtteranceBuffer(pause_ms, prefix_seconds=0.45 if gate is not None else 0.7)
         self.sample_rate = int(sd.query_devices(device, "input")["default_samplerate"])
         divisor = gcd(self.sample_rate, SAMPLE_RATE)
         self._resample = lambda audio: resample_poly(audio, SAMPLE_RATE // divisor, self.sample_rate // divisor).astype(np.float32)
@@ -133,8 +186,14 @@ class AutomaticCapture:
             except queue.Empty:
                 break
             self._level = min(100, int(float(np.max(np.abs(audio))) * 400))
+            rms = float(np.sqrt(np.mean(audio * audio)))
             audio = self._resample(audio) if self.sample_rate != SAMPLE_RATE else audio
-            self.utterance.feed(audio, self.detector(audio))
+            speech = self.detector(audio)
+            if self.gate is not None and not self.utterance.started:
+                if self.gate.recent() >= EchoGate.QUIET:
+                    self.utterance.hold()
+                speech = speech and self.gate.allows(rms)
+            self.utterance.feed(audio, speech)
 
     @property
     def full(self):

@@ -969,7 +969,7 @@ class WindowTests(unittest.TestCase):
         self.wait_until(lambda: mic.state == "listening")
         return speech, mic
 
-    def test_handsfree_closes_microphone_until_both_reply_and_playback_finish(self):
+    def test_handsfree_listens_over_her_voice_and_keeps_that_turn_open_after(self):
         speech, mic = self.start_handsfree()
         self.window.auto_speak.setChecked(True)
         def handler(request):
@@ -978,20 +978,38 @@ class WindowTests(unittest.TestCase):
             mic.deliver("Hello Mira")
             self.wait_until(lambda: self.window._worker is None)
         self.assertTrue(speech.busy)
-        self.assertEqual(mic.state, "idle")
-        self.assertTrue(self.window.hands_free.isChecked())
-        self.window._arm_handsfree()
-        self.assertEqual(len(mic.starts), 1)
-        speech.busy = False
-        speech.changed.emit("Voice ready")
-        self.assertTrue(self.window._handsfree_timer.isActive())
-        self.assertEqual(self.window._handsfree_timer.interval(), 800)
-        self.assertTrue(self.window.stop_button.isEnabled())
-        self.assertEqual(mic.state, "idle")
-        self.window._handsfree_timer.stop()
-        self.window._arm_handsfree()
+        # While she speaks, the microphone listens in echo-aware mode, so the person can interrupt.
         self.assertEqual(mic.state, "listening")
         self.assertEqual(len(mic.starts), 2)
+        self.assertTrue(mic.starts[-1][1].get("barge"))
+        self.assertTrue(self.window.hands_free.isChecked())
+        speech.busy = False
+        speech.changed.emit("Voice ready")
+        # She finished without being interrupted: the same capture simply becomes the next turn.
+        self.assertEqual(len(mic.starts), 2)
+        self.assertEqual(mic.state, "listening")
+
+    def test_talking_over_her_stops_her_and_becomes_the_next_turn(self):
+        speech, mic = self.start_handsfree()
+        self.window.auto_speak.setChecked(True)
+        mic.state = "idle"  # The person's turn has ended; now she answers aloud.
+        speech.speak("A long answer about the moon.", "alba", 70)
+        self.assertTrue(mic.starts[-1][1].get("barge"))
+        mic.state = "recording"
+        mic.changed.emit("recording")  # The person started talking over her.
+        self.assertFalse(speech.busy)
+        self.assertFalse(self.window._barge)
+        self.assertTrue(self.window._handsfree_capture)
+
+    def test_talking_over_her_can_be_switched_off(self):
+        speech, mic = self.start_handsfree()
+        self.window.auto_speak.setChecked(True)
+        self.window.preferences.remember = lambda *args: None
+        self.window.barge_in.setChecked(False)
+        mic.state = "idle"
+        speech.speak("A long answer about the moon.", "alba", 70)
+        self.assertEqual(mic.state, "idle")  # As before: the microphone waits until she is done.
+        self.assertFalse(self.window._barge)
 
     def test_handsfree_review_mode_leaves_text_editable_and_stops_listening(self):
         _, mic = self.start_handsfree()

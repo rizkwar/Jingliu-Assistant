@@ -218,7 +218,8 @@ def run(input_stream=None, output_stream=None, speaker=None, engine="pocket"):
             # Third-party progress output must never corrupt the JSON protocol.
             with redirect_stdout(sys.stderr):
                 report = lambda state: emit(job_id, "status", state=state)
-                report.playback = lambda level, at: emit(job_id, "playback", level=level, at=at)
+                report.playback = lambda level, at, rms=0.: emit(job_id, "playback", level=level, at=at,
+                                                                  rms=round(rms, 5))
                 report.info = lambda message: emit(job_id, "info", message=message)
                 if command.get("action") == "prepare":
                     speaker.prepare(command["voice"], report)

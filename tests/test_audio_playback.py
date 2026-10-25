@@ -57,7 +57,7 @@ class AudioPlaybackTests(unittest.TestCase):
         device = SimpleNamespace(OutputStream=Output, CallbackStop=CallbackStop, CallbackAbort=CallbackAbort)
         with patch.dict(sys.modules, {'sounddevice': device}):
             play_chunks(chunks, sample_rate, volume, lambda state: events.append(('status', state)),
-                        lambda level, at: events.append(('level', level, at, time.monotonic())))
+                        lambda level, at, rms=0.: events.append(("level", level, at, time.monotonic())))
         return played, streams, events
 
     def test_output_gain_clipping_chunk_order_and_final_padding(self):

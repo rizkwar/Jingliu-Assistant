@@ -107,3 +107,69 @@ class AutomaticCaptureTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             capture.poll()
         capture.close()
+
+
+class EchoGateTests(unittest.TestCase):
+    """Talking over her: her echo alone never counts as the person; louder speech does."""
+
+    def feed(self, gate, seconds, her, microphone, start=0.):
+        results = []
+        for step in range(int(seconds * 10)):
+            now = start + step / 10
+            gate.playing(her(now), now)
+            results.append(gate.allows(microphone(now), now))
+        return results
+
+    def test_her_echo_alone_is_not_the_person_however_loud(self):
+        from companion.voice_activity import EchoGate
+        gate = EchoGate()
+        her = lambda t: .03 + .02 * abs(((t * 3.7) % 2) - 1)  # She varies in loudness.
+        allowed = self.feed(gate, 8, her, lambda t: .002 + .6 * her(t))  # Speakers: strong echo plus room noise.
+        self.assertFalse(any(allowed))
+
+    def test_the_person_speaking_up_over_her_is_heard(self):
+        from companion.voice_activity import EchoGate
+        gate = EchoGate()
+        her = lambda t: .04
+        self.feed(gate, 3, her, lambda t: .002 + .6 * her(t))
+        allowed = self.feed(gate, 1, her, lambda t: .002 + .6 * her(t) + .06, start=3)
+        self.assertTrue(all(allowed))
+
+    def test_while_she_is_silent_detection_is_ordinary_and_the_room_is_learned(self):
+        from companion.voice_activity import EchoGate
+        gate = EchoGate()
+        self.assertTrue(all(self.feed(gate, 4, lambda t: 0., lambda t: .006)))
+        self.assertLess(abs(gate.noise - .006), .001)  # Rises slowly on purpose, so speech cannot pass as noise.
+
+    def test_before_her_echo_is_known_she_cannot_be_interrupted(self):
+        from companion.voice_activity import EchoGate
+        gate = EchoGate()
+        self.assertFalse(any(self.feed(gate, .3, lambda t: .04, lambda t: .5)))
+
+
+class BargeCommandTests(unittest.TestCase):
+    def test_listening_over_her_gives_the_capture_an_echo_gate_fed_by_her_levels(self):
+        import io
+        import json
+        from companion.microphone_process import run
+        made = []
+
+        class FakeCapture:
+            def __init__(self, device, pause_ms, gate=None):
+                self.gate, self.speaking, self.full, self.timed_out = gate, False, False, False
+                made.append(self)
+            def poll(self):
+                pass
+            def level(self):
+                return 0
+            def close(self):
+                pass
+
+        commands = [{"id": "a", "action": "start", "model": "base.en", "hands_free": True, "barge": True},
+                    {"id": "", "action": "echo", "rms": .05},
+                    {"id": "b", "action": "start", "model": "base.en", "hands_free": True}]
+        run(io.StringIO("".join(json.dumps(c) + "\n" for c in commands)), io.StringIO(),
+            transcriber=object(), automatic_factory=FakeCapture)
+        self.assertIsNotNone(made[0].gate)
+        self.assertGreaterEqual(made[0].gate.recent(), .05)  # Her level reached the gate.
+        self.assertIsNone(made[1].gate)                      # An ordinary turn has no gate.

@@ -236,6 +236,7 @@ class CompanionWindow(QMainWindow):
         self.microphone = microphone if microphone is not None else MicrophoneController(self)
         self._mic_draft = ""
         self._handsfree_capture = False
+        self._barge = False  # Hands-free is listening while she speaks: talking interrupts her.
         self._handsfree_timer = QTimer(self)
         self._handsfree_timer.setSingleShot(True)
         self._handsfree_timer.timeout.connect(self._arm_handsfree)
@@ -523,6 +524,9 @@ class CompanionWindow(QMainWindow):
         self.voice_engine.currentIndexChanged.connect(self._voice_engine_changed)
         self._apply_voice_engine(settings.tts_engine)
         self.speech.changed.connect(self._voice_changed)
+        if hasattr(self.speech, "playback_rms"):
+            self.speech.playback_rms.connect(self._forward_echo)
+            self.speech.playback_reset.connect(lambda: self._forward_echo(0.))
         self.speech.failed.connect(self._voice_failed)
         self.speech.spoken.connect(self._phrase_spoken)
         self.auto_speak.toggled.connect(self._speech_toggled)
@@ -567,6 +571,13 @@ class CompanionWindow(QMainWindow):
         self.speech_pause.setCurrentIndex(self.speech_pause.findData(settings.stt_pause_ms))
         pause_row.addWidget(self.speech_pause)
         settings_layout.addLayout(pause_row)
+        self.barge_in = QCheckBox("Hands-free: talk over her to interrupt")
+        self.barge_in.setChecked(settings.barge_in)
+        self.barge_in.setToolTip("While she speaks, the microphone keeps listening. Her own voice from your speakers "
+                                 "is told apart from yours by how loud it reaches the microphone, so with speakers "
+                                 "speak up a little; with headphones any normal voice works.")
+        self.barge_in.toggled.connect(self._barge_in_toggled)
+        settings_layout.addWidget(self.barge_in)
         settings_layout.addStretch()
         settings_layout = app_page
         section(settings_layout, "Memory")
@@ -1774,6 +1785,14 @@ class CompanionWindow(QMainWindow):
         self._begin_reply("[My screen, shared because you asked to look]", [str(path)], looking=True)
 
     @Slot(bool)
+    def _barge_in_toggled(self, enabled):
+        self.settings = replace(self.settings, barge_in=enabled)
+        try:
+            self.preferences.remember(self.settings, ("barge_in",))
+        except (OSError, ValueError):
+            pass
+
+    @Slot(bool)
     def _look_at_screen_toggled(self, enabled):
         self.settings = replace(self.settings, look_at_screen=enabled)
         try:
@@ -2381,9 +2400,29 @@ class CompanionWindow(QMainWindow):
             self._voice_message_id = self._last_reply_id
             self.speech.speak(self._last_reply, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
 
+    @Slot(float)
+    def _forward_echo(self, rms):
+        if self._barge and hasattr(self.microphone, "echo"):
+            self.microphone.echo(rms)
+
+    def _listen_over_her(self):
+        """Hands-free while she speaks: listen, and let the person interrupt by talking."""
+        if (not self.hands_free.isChecked() or not self.barge_in.isChecked() or self._closing or self.suspended
+                or self.microphone.busy
+                or not self.isVisible() or self.isMinimized() or self.input.toPlainText().strip()):
+            return
+        self._mic_draft = ""
+        self._pending_transcription = ""
+        self._handsfree_capture = True
+        self._barge = True
+        self.microphone.start(self.mic_device.currentData(), self.stt_model.currentText(),
+                              hands_free=True, pause_ms=self.speech_pause.currentData(), barge=True)
+
     @Slot(str)
     def _voice_changed(self, state: str) -> None:
         self.voice_status.setText(state)
+        if getattr(self.speech, "state", "") == "speaking":
+            self._listen_over_her()
         if getattr(self.speech, "state", "") == "speaking":
             self._flush_cues()  # Cues at the very start show as the voice begins.
         elif not self.speech.busy:
@@ -2656,6 +2695,18 @@ class CompanionWindow(QMainWindow):
             "transcribing": "Transcribing locally…",
         }
         self.mic_status.setText(labels.get(state, "Microphone off"))
+        if self._barge and state == "listening" and self.speech.busy:
+            self.mic_status.setText(f"Listening while {self.settings.name} speaks · talk to interrupt her.")
+        if self._barge and state == "recording":
+            # The person started talking over her: she stops and listens.
+            self._barge = False
+            if self.speech.busy or self._worker:
+                if self._worker:
+                    self._worker.stop()
+                self._interrupt_speech()
+                self.avatar.cue("surprised") if hasattr(self.avatar, "cue") else None
+        elif state in {"idle", "transcribing", "loading"}:
+            self._barge = False
         if self._handsfree_capture and state == "recording":
             self.mic_status.setText(f"Speech detected… A {self.speech_pause.currentData() / 1000:g}-second pause finishes this turn.")
         manual = not self._handsfree_capture and state in {"opening", "recording"}

@@ -24,6 +24,7 @@ class SpeechController(QObject):
     failed = Signal(str)
     spoken = Signal(str)
     playback_level = Signal(float)
+    playback_rms = Signal(float)  # Her true output level, for telling her echo from the person.
     playback_reset = Signal()
 
     def __init__(self, parent=None):
@@ -315,7 +316,9 @@ class SpeechController(QObject):
             return
         if self._levels and at < self._levels[-1][0]:
             return
-        self._levels.append((at, self._active_id, level))
+        rms = event.get('rms', 0.)
+        rms = float(rms) if type(rms) in (float, int) and math.isfinite(rms) and 0 <= rms <= 2 else 0.
+        self._levels.append((at, self._active_id, level, rms))
         if not self._level_timer.isActive():
             self._deliver_levels()
 
@@ -329,6 +332,7 @@ class SpeechController(QObject):
             # After a blocked UI, skip obsolete mouth frames rather than replaying.
             if now - latest[0] < .2:
                 self.playback_level.emit(latest[2])
+                self.playback_rms.emit(latest[3])
                 self._level_watchdog.start()
             else:
                 self.playback_reset.emit()

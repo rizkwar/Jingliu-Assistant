@@ -81,14 +81,21 @@ class MicrophoneController(QObject):
             self._device_id = uuid4().hex
             self._send({"id": self._device_id, "action": "devices"})
 
-    def start(self, device=None, model="base.en", *, hands_free=False, pause_ms=1200):
+    def start(self, device=None, model="base.en", *, hands_free=False, pause_ms=1200, barge=False):
         if self.busy:
             return
         self._active_id = uuid4().hex
         self._set_state("opening")
         self.deadline.start(15_000)
         self._send({"id": self._active_id, "action": "start", "device": device, "model": model,
-                    "hands_free": hands_free, "pause_ms": pause_ms})
+                    "hands_free": hands_free, "pause_ms": pause_ms, "barge": bool(barge)})
+
+    def echo(self, rms):
+        """Her voice's output level right now, while the microphone listens over her."""
+        if self.state in {"opening", "listening"} and self.process.state() == QProcess.ProcessState.Running:
+            self._send({"id": "", "action": "echo", "rms": round(float(rms), 5)})
+            if self.state == "listening":
+                self.deadline.start(35_000)  # While she talks, waiting for the person is not idling.
 
     def finish(self):
         if self.state not in {"opening", "listening", "recording"}:

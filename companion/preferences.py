@@ -14,7 +14,7 @@ from .voice_settings import validate_rate
 FIELDS = {
     'llm_provider': str, 'openrouter_model': str, 'codex_model': str, 'claude_model': str,
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
-    "tts_rate": int, "tts_engine": str, "computer_tasks": bool, "confirm_tasks": bool, "approve_steps": bool, "auto_memory": bool, "look_at_screen": bool,
+    "tts_rate": int, "tts_engine": str, "computer_tasks": bool, "confirm_tasks": bool, "approve_steps": bool, "auto_memory": bool, "look_at_screen": bool, "barge_in": bool,
     "tts_reference": str,
     "character_path": str,
     "stt_model": str, "stt_auto_send": bool, "stt_microphone": str,

@@ -33,6 +33,10 @@ this one step at a time, following the character, voice, and memory brief.
   loads in the background and prepares her next sentences while she speaks) ([details](#try-her-voice)).
 - **Talk to her:** hold the microphone or press **Ctrl+Alt+Space**, or turn on hands-free; speech is
   transcribed locally ([details](#talk-through-your-microphone)).
+- **Talk over her:** in hands-free mode she stops speaking when you start, and what you say becomes your
+  next turn. Her own voice from the speakers is told apart from yours by how loudly each reaches the
+  microphone, so with headphones any normal voice works; with speakers, speak up a little. Turn it off
+  in Settings → Voice → **Hands-free: talk over her to interrupt**.
 
 **A living desktop avatar** (Live2D, [guide](docs/experimental-live2d.md))
 - She **chooses her own expressions** as she talks (smile, blush, shy, laugh, surprised, a one-eye
