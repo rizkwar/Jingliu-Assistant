@@ -654,6 +654,22 @@ class CompanionWindow(QMainWindow):
         self.start_with_windows.setEnabled(sys.platform == "win32")
         self.start_with_windows.toggled.connect(self._start_with_windows_toggled)
         settings_layout.addWidget(self.start_with_windows)
+        section(settings_layout, "Your data")
+        data_hint = QLabel("Everything stays on this computer. A backup holds your conversations, memories, reminders, "
+                           "shared files, settings and characters in one file; an export is one readable text file.")
+        data_hint.setObjectName("hint")
+        data_hint.setWordWrap(True)
+        settings_layout.addWidget(data_hint)
+        data_row = QHBoxLayout()
+        self.backup_button = QPushButton("Back up everything…")
+        self.backup_button.clicked.connect(self._back_up)
+        self.restore_button = QPushButton("Restore from a backup…")
+        self.restore_button.clicked.connect(self._restore_backup)
+        self.export_button = QPushButton("Export as text…")
+        self.export_button.clicked.connect(self._export_text)
+        for button in (self.backup_button, self.restore_button, self.export_button):
+            data_row.addWidget(button)
+        settings_layout.addLayout(data_row)
         section(settings_layout, "Configuration")
         reload_row = QHBoxLayout()
         reload_hint = QLabel("Re-read .env and the character profile after editing them by hand.")
@@ -1808,6 +1824,76 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_note(f"She could not see your screen: {exc}", "warning")
             return
         self._begin_reply("[My screen, shared because you asked to look]", [str(path)], looking=True)
+
+    # Your data ---------------------------------------------------------------------
+
+    @Slot()
+    def _back_up(self):
+        from . import backup
+        suggested = str(Path.home() / "Documents" / f"Jingliu backup {time.strftime('%Y-%m-%d')}.zip")
+        path, _ = QFileDialog.getSaveFileName(self, "Back up Jingliu", suggested, "Backup (*.zip)")
+        if not path:
+            return
+        try:
+            backup.backup(self.store, path)
+        except (OSError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Backup failed", f"The backup could not be written: {exc}")
+            return
+        self._flash(f"Backed up to {path}")
+
+    @Slot()
+    def _restore_backup(self):
+        from . import backup
+        path, _ = QFileDialog.getOpenFileName(self, "Restore a Jingliu backup", str(Path.home() / "Documents"),
+                                              "Backup (*.zip)")
+        if not path:
+            return
+        try:
+            details = backup.check(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Cannot restore", str(exc))
+            return
+        made = details.get("created", "")[:16].replace("T", " ")
+        if QMessageBox.question(
+                self, "Restore this backup?",
+                f"Replace your conversations, memories, reminders, files and settings with the backup from {made}?\n\n"
+                "What you have now is saved first, in data/backups. Jingliu closes afterwards; open her again "
+                "to continue.") != QMessageBox.StandardButton.Yes:
+            return
+        self._interrupt_speech()
+        if self._worker:
+            self._worker.stop()
+            self._worker.wait()
+        # From here on nothing may write the old session over the restored files.
+        for timer in (self._reminder_timer, self._check_in_timer, self._idle_timer, self._save_timer):
+            timer.stop()
+        self._active_turn = None
+        self.preferences.remember = self.preferences.save = lambda *args, **kwargs: None
+        try:
+            safety = backup.restore(path, PROJECT_ROOT / "data" / "backups", store=self.store)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.critical(self, "Restore failed",
+                                 f"The backup could not be restored: {exc}\nYour previous data is in data/backups.")
+            self.request_quit()
+            return
+        QMessageBox.information(self, "Restored", "The backup is restored. Your previous data was saved as "
+                                                  f"{safety.name} in data/backups.\n\nJingliu will close now; "
+                                                  "open her again to continue.")
+        self.request_quit()
+
+    @Slot()
+    def _export_text(self):
+        from . import backup
+        suggested = str(Path.home() / "Documents" / f"Conversations with {self.settings.name}.md")
+        path, _ = QFileDialog.getSaveFileName(self, "Export as text", suggested, "Markdown (*.md);;Text (*.txt)")
+        if not path:
+            return
+        try:
+            backup.export_text(self.store, path, self.settings.name)
+        except (OSError, sqlite3.Error) as exc:
+            QMessageBox.warning(self, "Export failed", f"The export could not be written: {exc}")
+            return
+        self._flash(f"Exported to {path}")
 
     @Slot(bool)
     def _check_ins_toggled(self, enabled):
