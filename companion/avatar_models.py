@@ -166,6 +166,11 @@ class AvatarModels:
                 raise ValueError()
             if any(not isinstance(value, dict) for value in document['characters'].values()):
                 raise ValueError()
+            # Entries saved under a character's full path follow it after the project folder moves.
+            characters = {}
+            for key, value in sorted(document['characters'].items(), key=lambda item: Path(item[0]).is_absolute()):
+                characters.setdefault(character_key(key) if Path(key).is_absolute() else key, value)
+            document['characters'] = characters
             return document
         except (ValueError, AttributeError):
             raise ValueError('Could not read local avatar models. Check data/avatar_models.json.') from None

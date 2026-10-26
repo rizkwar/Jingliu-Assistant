@@ -8,6 +8,7 @@ import sqlite3
 from uuid import uuid4
 
 from . import attachments
+from .character import character_key
 from .config import PROJECT_ROOT
 from .continuity import MAX_SUMMARY_CHARS
 
@@ -81,6 +82,11 @@ class Store:
                 # JSON list of locally stored copies; the files live under data/attachments.
                 self.connection.execute("ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT ''")
             self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            # Chats saved under a character's full path follow it after the project folder moves.
+            for (key,) in self.connection.execute("SELECT DISTINCT character_key FROM conversations").fetchall():
+                if key and Path(key).is_absolute() and character_key(key) != key:
+                    self.connection.execute("UPDATE conversations SET character_key=? WHERE character_key=?",
+                                            (character_key(key), key))
 
     def close(self):
         if self.connection is not None:

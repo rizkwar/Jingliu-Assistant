@@ -8,6 +8,7 @@ import tempfile
 
 from .config import Settings, VOICES, PROJECT_ROOT, with_character
 from .character import character_key, load_character
+from .paths import portable, resolve
 from .voice_settings import validate_rate
 
 
@@ -70,6 +71,19 @@ def validate(values):
     return clean
 
 
+PATHS = ("tts_reference", "character_path")
+
+
+def _located(values):
+    """Saved paths as real ones; a full path from before the project folder moved is found again."""
+    return {key: str(resolve(value)) if key in PATHS and value else value for key, value in values.items()}
+
+
+def _portable(values):
+    """Paths inside the project folder are saved relative to it."""
+    return {key: portable(value) if key in PATHS and value else value for key, value in values.items()}
+
+
 class Preferences:
     def __init__(self, path: Path | None = None):
         self.path = path
@@ -87,12 +101,15 @@ class Preferences:
                 raise ValueError("Saved preferences could not be read. Use Save defaults to replace them.") from exc
             if not isinstance(document, dict) or document.get("version") != 1:
                 raise ValueError("Saved preferences have an unsupported format.")
-            values = validate(document.get("settings"))
+            values = _located(validate(document.get("settings")))
             voices = document.get("character_voices", {})
             if not isinstance(voices, dict) or any(not isinstance(key, str) or len(key) > 4096 for key in voices):
                 raise ValueError("Saved character voices have an invalid format.")
-            self._voices = {key: {field: value for field, value in validate(audio).items()
-                                 if field in {"tts_voice", "tts_reference", "tts_rate"}} for key, audio in voices.items()}
+            self._voices = {}
+            for key, audio in sorted(voices.items(), key=lambda item: Path(item[0]).is_absolute()):
+                self._voices.setdefault(character_key(key) if Path(key).is_absolute() else key, _located(
+                    {field: value for field, value in validate(audio).items()
+                     if field in {"tts_voice", "tts_reference", "tts_rate"}}))
         else:
             values = self._values
         settings = replace(defaults, **values)
@@ -129,7 +146,7 @@ class Preferences:
             try:
                 document = json.loads(self.path.read_text(encoding="utf-8"))
                 if isinstance(document, dict) and document.get("version") == 1:
-                    values = validate(document.get("settings"))
+                    values = _located(validate(document.get("settings")))
             except (UnicodeError, json.JSONDecodeError):
                 pass  # A damaged file is replaced, as Save defaults would.
         values.update(validate({key: getattr(settings, key) for key in keys}))
@@ -145,7 +162,8 @@ class Preferences:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
                                              prefix="preferences-", suffix=".tmp", delete=False) as output:
                 temporary = Path(output.name)
-                json.dump({"version": 1, "settings": values, "character_voices": voices}, output, indent=2)
+                json.dump({"version": 1, "settings": _portable(values),
+                           "character_voices": {key: _portable(audio) for key, audio in voices.items()}}, output, indent=2)
                 output.write("\n")
                 output.flush()
                 os.fsync(output.fileno())

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tomllib
 
+from .paths import portable, resolve
 from .voice_settings import VOICES, validate_rate
 
 
@@ -131,8 +132,10 @@ def read_profile(path: Path) -> Character:
 
 
 def character_key(path: str) -> str:
-    """A stable archive/preferences key, independent of a character's display name."""
-    return os.path.normcase(str(Path(path).resolve())) if path else ""
+    """A stable archive/preferences key, independent of a character's display name. Profiles in the
+    project folder are keyed by their relative path, so the key survives moving the folder; a key
+    saved as a full path before that is translated to the same relative key."""
+    return os.path.normcase(portable(resolve(path))) if path else ""
 
 
 def load_character(root: Path, selected="", legacy_name="Jinger") -> Character:
