@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 import unittest
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'dev'))
 from render_inochi_rig import decode_tga, interpolate, render
 from PySide6.QtGui import QColor,QImage
 

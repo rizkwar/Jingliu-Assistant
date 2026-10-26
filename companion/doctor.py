@@ -41,7 +41,7 @@ def engine_check(name, module, required=False):
     except (OSError, subprocess.TimeoutExpired):
         pass
     return Check("error" if required else "warning", name,
-                 "Could not load this engine. Run Setup Mira.cmd to repair dependencies.")
+                 "Could not load this engine. Run Setup Jinger.cmd to repair dependencies.")
 
 
 def run_checks(root=ROOT, engines=False):
@@ -73,7 +73,7 @@ def run_checks(root=ROOT, engines=False):
         except metadata.PackageNotFoundError:
             missing_core |= required
             checks.append(Check("error" if required else "warning", package,
-                                "Not installed. Run Setup Mira.cmd."))
+                                "Not installed. Run Setup Jinger.cmd."))
             continue
         checks.append(Check("ok" if installed == expected else "warning", package,
                             f"Installed {installed}; project pins {expected}."))
@@ -104,7 +104,7 @@ def run_checks(root=ROOT, engines=False):
             except VoiceSetupError:
                 checks.append(Check("warning", "Reference audio", "Choose a valid reference WAV in Settings. See docs/reference-voice.md."))
     except ImportError:
-        checks.append(Check("error", "Configuration", "Configuration dependencies are missing. Run Setup Mira.cmd."))
+        checks.append(Check("error", "Configuration", "Configuration dependencies are missing. Run Setup Jinger.cmd."))
     except (OSError, ValueError, UnicodeError):
         checks.append(Check("error", "Configuration", "Check .env values and the selected character profile. See README.md and docs/character-guide.md."))
     try:

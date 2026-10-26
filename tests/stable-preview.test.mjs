@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {advanceFrame} from '../companion/avatar_web/stable-step.js';
-import {previewRuntime} from '../scripts/head-motion-study/preview-runtime.mjs';
+import {previewRuntime} from '../dev/head-motion-study/preview-runtime.mjs';
 
 test('lagged frames keep runtime-style explicit springs stable while drawing once',()=>{
   let position=0,velocity=0,draws=0,time=0;

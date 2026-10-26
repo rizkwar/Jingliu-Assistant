@@ -93,7 +93,7 @@ class Settings:
 def load_settings(root: Path = PROJECT_ROOT) -> Settings:
     # Read afresh so Reload settings works; do not overwrite process environment.
     values = {**dotenv_values(root / ".env", encoding="utf-8"), **os.environ}
-    name = (values.get("COMPANION_NAME") or "Mira").strip() or "Mira"
+    name = (values.get("COMPANION_NAME") or "Jinger").strip() or "Jinger"
     character = load_character(root, (values.get("CHARACTER_PROFILE") or "").strip(), name)
     voice = (values.get("TTS_VOICE") or "alba").strip().lower()
     if voice not in (*VOICES, "reference"):

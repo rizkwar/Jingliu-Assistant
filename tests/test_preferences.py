@@ -9,7 +9,7 @@ from companion.config import DEFAULT_MODEL, Settings
 from companion.preferences import Preferences
 
 
-DEFAULTS = Settings("secret-key", DEFAULT_MODEL, "Mira", "Private character")
+DEFAULTS = Settings("secret-key", DEFAULT_MODEL, "Jinger", "Private character")
 
 
 class PreferenceTests(unittest.TestCase):

@@ -15,7 +15,7 @@ from companion.ui import CompanionWindow
 from qt_test_support import application
 
 
-SETTINGS = Settings("", DEFAULT_MODEL, "Mira", "Hi", tts_enabled=False)
+SETTINGS = Settings("", DEFAULT_MODEL, "Jinger", "Hi", tts_enabled=False)
 
 
 class ActivityTests(unittest.TestCase):

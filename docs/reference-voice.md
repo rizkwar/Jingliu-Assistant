@@ -101,7 +101,7 @@ Relative paths resolve against the project. Saved app preferences take precedenc
 over `.env` audio defaults, as before; selecting the file in Settings and saving
 is the most direct way to replace a previously saved stock-voice choice.
 
-**Check Setup.cmd** checks reference-file validity when reference mode is selected,
+**More\Check Setup.cmd** checks reference-file validity when reference mode is selected,
 without downloading a model or capturing audio. **Preview** is the actual test of
 model access and generated sound. A successful setup test does not certify similarity.
 

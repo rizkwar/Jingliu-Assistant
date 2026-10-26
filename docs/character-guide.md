@@ -8,7 +8,7 @@ companion. All sample dialogue is newly written, rather than copied game lines.
 
 ## Apply and personalize
 
-1. Launch using **Start Mira.cmd**; the existing script name still works for any character.
+1. Launch using **Start Jinger.cmd**; the existing script name still works for any character.
 2. Open **Settings > Add character**. Give them a name and describe their identity,
    personality, background, interests, speaking style, reactions, and relationship
    with you. Add example conversations and behaviors to avoid in the same text.
@@ -69,7 +69,7 @@ CHARACTER_PROFILE=characters/my-jingliu.toml
 ```
 
 Absolute paths also work. A TOML profile's `identity.name` is authoritative,
-including when an older `.env` still contains `COMPANION_NAME=Mira`. Your existing
+including when an older `.env` still contains `COMPANION_NAME=Jinger`. Your existing
 `.env` is not rewritten. No API key belongs in the character file.
 An app-saved character selection takes precedence over `CHARACTER_PROFILE`.
 The selector lists the original profile, the active profile, library profiles,

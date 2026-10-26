@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {RigReview} from '../scripts/head-motion-study/rig-review.js';
+import {RigReview} from '../dev/head-motion-study/rig-review.js';
 
 test('rig review covers gaze limits and combined head poses while staying finite',()=>{
   const review=new RigReview(),samples=[];

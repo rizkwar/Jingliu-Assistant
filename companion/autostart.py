@@ -18,7 +18,7 @@ def command():
     python = PROJECT_ROOT / ".venv" / "Scripts" / "pythonw.exe"
     if not python.exists():
         python = Path(sys.executable).with_name("pythonw.exe")
-    return f'"{python}" "{PROJECT_ROOT / "launch_mira.pyw"}" {BACKGROUND}'
+    return f'"{python}" "{PROJECT_ROOT / "launch_jinger.pyw"}" {BACKGROUND}'
 
 
 def _key(write=False):
@@ -27,16 +27,27 @@ def _key(write=False):
     return winreg.OpenKey(winreg.HKEY_CURRENT_USER, KEY, 0, access)
 
 
-def enabled():
-    if sys.platform != "win32":
-        return False
+def _value():
     import winreg
     try:
         with _key() as key:
-            value, _ = winreg.QueryValueEx(key, NAME)
+            return str(winreg.QueryValueEx(key, NAME)[0])
     except OSError:
-        return False
-    return BACKGROUND in str(value) and "launch_mira.pyw" in str(value)
+        return ""
+
+
+def enabled():
+    # Any of our entries counts, including one from an older launcher name or project folder.
+    return sys.platform == "win32" and BACKGROUND in _value() and ".pyw" in _value()
+
+
+def refresh():
+    """Point an existing entry at this project's current launcher (after a rename or a move)."""
+    if enabled() and _value() != command():
+        try:
+            set_enabled(True)
+        except OSError:
+            pass
 
 
 def set_enabled(on):

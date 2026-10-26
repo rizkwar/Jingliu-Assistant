@@ -10,12 +10,12 @@ $ErrorActionPreference = 'Stop'
 if ($StartMenu) { $Destination = Join-Path ([Environment]::GetFolderPath('StartMenu')) 'Programs' }
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $pythonWindowed = Join-Path $projectRoot '.venv\Scripts\pythonw.exe'
-$launchScript = Join-Path $projectRoot 'launch_mira.pyw'
+$launchScript = Join-Path $projectRoot 'launch_jinger.pyw'
 $shell = $null
 $shortcut = $null
 try {
-    if (-not (Test-Path -LiteralPath $pythonWindowed -PathType Leaf)) { throw 'Run Setup Mira.cmd before creating the shortcut.' }
-    if (-not (Test-Path -LiteralPath $launchScript -PathType Leaf)) { throw 'launch_mira.pyw is missing. Restore the project files.' }
+    if (-not (Test-Path -LiteralPath $pythonWindowed -PathType Leaf)) { throw 'Run Setup Jinger.cmd before creating the shortcut.' }
+    if (-not (Test-Path -LiteralPath $launchScript -PathType Leaf)) { throw 'launch_jinger.pyw is missing. Restore the project files.' }
     if (-not $Destination -or -not (Test-Path -LiteralPath $Destination -PathType Container)) { throw 'The shortcut destination folder does not exist.' }
     $shortcutPath = Join-Path $Destination ($Name + '.lnk')
     $shell = New-Object -ComObject WScript.Shell

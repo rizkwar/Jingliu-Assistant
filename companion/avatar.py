@@ -70,7 +70,7 @@ class DesktopAvatar(QWidget):
                      | QRegion(18, 140, 132, 26))
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.state = "ready"
-        self.name = "Mira"
+        self.name = "Jinger"
         self.animated = True
         self.voice_level = 0.
         self._phase = 0
@@ -372,12 +372,12 @@ class AvatarController(QObject):
                 return MeshDesktopAvatar(path)
         except (ImportError, OSError, ValueError):
             widget = DesktopAvatar()
-            widget.setToolTip('Mesh avatar unavailable. See docs/avatar-stage4.md; using the simple mascot.')
+            widget.setToolTip('Mesh avatar unavailable. See Troubleshooting in README.md; using the simple mascot.')
             # A visible message as well as a tooltip, without blocking chat startup.
             from PySide6.QtWidgets import QLabel
             widget.clearMask()
             widget.setFixedSize(260, 235)
-            notice = QLabel('Mesh avatar unavailable.\nSee docs/avatar-stage4.md.', widget)
+            notice = QLabel('Mesh avatar unavailable.\nSee Troubleshooting in README.md.', widget)
             notice.setGeometry(0, 174, 260, 60)
             notice.setStyleSheet('background:#222633; color:#eceaf5; padding:6px')
             notice.setAlignment(Qt.AlignmentFlag.AlignCenter)

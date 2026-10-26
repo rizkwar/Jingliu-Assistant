@@ -69,7 +69,7 @@ class SegmentationTests(unittest.TestCase):
 
     def test_chunk_boundaries_do_not_change_spoken_output(self):
         examples = [
-            "Dr. Mira measured 3.14 units. That worked!",
+            "Dr. Jinger measured 3.14 units. That worked!",
             "First sentence. ```python\nprint('Do not read. ')\n``` Next sentence. Final words",
             "See [this example](https://example.com/a.b) now. Then continue.",
             "Use `call(1.2)` before continuing. Yes.",
@@ -88,8 +88,8 @@ class SegmentationTests(unittest.TestCase):
         self.assertEqual(phrases, ["Start here."])
 
     def test_abbreviations_decimals_and_urls_are_not_read_in_pieces(self):
-        phrases = self.phrases("Dr. Mira used 3.14 units. Visit https://example.com/a.b for details. Done.")
-        self.assertEqual(phrases, ["Dr. Mira used 3.14 units.", "Visit for details.", "Done."])
+        phrases = self.phrases("Dr. Jinger used 3.14 units. Visit https://example.com/a.b for details. Done.")
+        self.assertEqual(phrases, ["Dr. Jinger used 3.14 units.", "Visit for details.", "Done."])
 
     def test_total_spoken_preview_is_bounded_across_many_sentences(self):
         phrases = self.phrases("Another complete sentence with useful words. " * 200)

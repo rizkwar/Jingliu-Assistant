@@ -118,7 +118,7 @@ class ProtocolTests(unittest.TestCase):
         class Transcriber:
             def transcribe(self, *args):
                 self.assert_closed = instances[-1].closed
-                return "Hello Mira"
+                return "Hello Jinger"
         transcriber = Transcriber()
         commands = []
         for i in range(2):
@@ -163,7 +163,7 @@ for line in sys.stdin:
     elif c['action'] == 'start':
         event = {'type': 'status', 'state': 'recording'}
     else:
-        event = {'type': 'transcript', 'text': 'Hello Mira'}
+        event = {'type': 'transcript', 'text': 'Hello Jinger'}
     print(json.dumps({'id': c['id'], **event}), flush=True)
 '''
 
@@ -199,7 +199,7 @@ class ControllerTests(unittest.TestCase):
         self.mic.start()
         self.mic.finish()
         self.wait_until(lambda: bool(self.texts))
-        self.assertEqual(self.texts, ["Hello Mira"])
+        self.assertEqual(self.texts, ["Hello Jinger"])
         self.assertFalse(self.mic.busy)
         self.assertEqual(self.errors, [])
 

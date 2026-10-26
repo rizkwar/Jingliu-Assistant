@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {authorPoint} from '../scripts/jingliu_inochi_keyforms.mjs';
+import {authorPoint} from '../dev/jingliu_inochi_keyforms.mjs';
 
 test('abutting hair parts share a continuous head and sway field',()=>{
   for(const pose of [{angleX:-10,angleY:3,angleZ:-3},{angleX:10,angleY:-3,angleZ:3}]){

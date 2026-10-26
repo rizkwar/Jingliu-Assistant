@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 import unittest
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'dev'))
 from avatar_rig_data import RigStore
 from inochi_idle_motion import blink_keys,lane,lane_value,Pendulum,inspection_data
 

@@ -19,15 +19,17 @@ class WindowsLauncherTests(unittest.TestCase):
     def setUp(self):
         artifacts = ROOT / "artifacts"
         artifacts.mkdir(exist_ok=True)
-        folder = tempfile.TemporaryDirectory(prefix="Mira launch ! & ü ", dir=artifacts)
+        folder = tempfile.TemporaryDirectory(prefix="Jinger launch ! & ü ", dir=artifacts)
         self.addCleanup(folder.cleanup)
         self.root = Path(folder.name).resolve()
         self.assertTrue(self.root.is_relative_to(artifacts.resolve()))
-        for name in ("Start Mira.cmd", "Setup Mira.cmd", "Check Setup.cmd"):
+        for name in ("Start Jinger.cmd", "Setup Jinger.cmd"):
             shutil.copyfile(ROOT / name, self.root / name)
+        (self.root / "More").mkdir()
+        shutil.copyfile(ROOT / "More" / "Check Setup.cmd", self.root / "More" / "Check Setup.cmd")
         scripts = self.root / "scripts"
         scripts.mkdir()
-        for name in ("Create-Shortcut.ps1", "ShortcutAppId.ps1", "Setup-Mira.ps1"):
+        for name in ("Create-Shortcut.ps1", "ShortcutAppId.ps1", "Setup-Jinger.ps1"):
             shutil.copyfile(ROOT / "scripts" / name, scripts / name)
         python = Path(sys.executable)
         if not python.with_name("pythonw.exe").exists():
@@ -38,7 +40,7 @@ class WindowsLauncherTests(unittest.TestCase):
         shutil.copyfile(python.with_name("pythonw.exe"), target / "pythonw.exe")
         (self.root / ".venv" / "pyvenv.cfg").write_text(
             f"home = {sys.base_prefix}\ninclude-system-site-packages = false\n", encoding="utf-8")
-        (self.root / "launch_mira.pyw").write_text(
+        (self.root / "launch_jinger.pyw").write_text(
             "import json,os,sys\nfrom pathlib import Path\n"
             "Path(__file__).with_name('launched.json').write_text(json.dumps({'args':sys.argv,'cwd':os.getcwd(),'pid':os.getpid(),'parent':os.getppid()}),encoding='utf-8')\n",
             encoding="utf-8",
@@ -69,7 +71,7 @@ class WindowsLauncherTests(unittest.TestCase):
                 kernel.CloseHandle(handle)
 
     def test_double_click_launcher_handles_spaces_punctuation_and_another_working_directory(self):
-        command = f'cmd.exe /d /s /c ""{self.root / "Start Mira.cmd"}""'
+        command = f'cmd.exe /d /s /c ""{self.root / "Start Jinger.cmd"}""'
         result = subprocess.run(command, input=b"\n", cwd=self.root.parent, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         output = self.root / "launched.json"
@@ -81,21 +83,27 @@ class WindowsLauncherTests(unittest.TestCase):
         self.wait_for_process(values["pid"])
         self.wait_for_process(values["parent"])
         self.assertEqual(Path(values["cwd"]).resolve(), self.root)
-        self.assertEqual(Path(values["args"][0]).resolve(), self.root / "launch_mira.pyw")
+        self.assertEqual(Path(values["args"][0]).resolve(), self.root / "launch_jinger.pyw")
+
+    def test_launchers_in_the_more_folder_run_from_the_project_folder(self):
+        command = f'cmd.exe /d /s /c ""{self.root / "More" / "Check Setup.cmd"}""'
+        result = subprocess.run(command, input=b"\n", cwd=self.root.parent, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(b"Isolated diagnostic stub", result.stdout)
 
     def test_setup_check_only_does_not_install_or_overwrite_env(self):
         original = (self.root / ".env").read_bytes()
-        result = self.powershell(self.root / "scripts" / "Setup-Mira.ps1", "-CheckOnly")
+        result = self.powershell(self.root / "scripts" / "Setup-Jinger.ps1", "-CheckOnly")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(b"Isolated diagnostic stub", result.stdout)
         self.assertEqual((self.root / ".env").read_bytes(), original)
 
     def test_missing_environment_reports_setup_instead_of_trying_system_python(self):
         (self.root / ".venv" / "Scripts" / "pythonw.exe").unlink()
-        command = f'cmd.exe /d /s /c ""{self.root / "Start Mira.cmd"}""'
+        command = f'cmd.exe /d /s /c ""{self.root / "Start Jinger.cmd"}""'
         result = subprocess.run(command, input=b"\n", cwd=self.root.parent, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 1)
-        self.assertIn(b"Setup Mira.cmd", result.stdout)
+        self.assertIn(b"Setup Jinger.cmd", result.stdout)
         self.assertFalse((self.root / "launched.json").exists())
 
     def test_setup_preserves_existing_env_and_creates_template_only_when_missing(self):
@@ -104,7 +112,7 @@ class WindowsLauncherTests(unittest.TestCase):
                                          "with Path('pip-actions.jsonl').open('a') as output: output.write(json.dumps(sys.argv[1:])+'\\n')\n")
         (self.root / ".env.example").write_text("OPENROUTER_API_KEY=your_key_here\n")
         original = (self.root / ".env").read_bytes()
-        script = self.root / "scripts" / "Setup-Mira.ps1"
+        script = self.root / "scripts" / "Setup-Jinger.ps1"
         result = self.powershell(script)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.root / ".env").read_bytes(), original)
@@ -137,7 +145,7 @@ $item=(New-Object -ComObject Shell.Application).NameSpace((Split-Path $Link)).Pa
         self.assertEqual(result.returncode, 0, result.stderr)
         values = json.loads(output.read_text(encoding="utf-8-sig"))
         self.assertEqual(Path(values["target"]).resolve(), self.root / ".venv" / "Scripts" / "pythonw.exe")
-        self.assertEqual(values["arguments"], f'"{self.root / "launch_mira.pyw"}"')
+        self.assertEqual(values["arguments"], f'"{self.root / "launch_jinger.pyw"}"')
         self.assertEqual(Path(values["directory"]).resolve(), self.root)
         self.assertEqual(values["appid"], "Jingliu.DesktopCompanion")  # Groups with the running window.
         self.powershell(inspector, "-Link", shortcut, "-OutputFile", output, "-Foreign")

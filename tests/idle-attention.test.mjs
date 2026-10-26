@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {IdleAttention,cursorTarget} from '../scripts/head-motion-study/idle-attention.js';
+import {IdleAttention,cursorTarget} from '../dev/head-motion-study/idle-attention.js';
 
 function random(seed=37){let state=seed;return ()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296;};}
 function advance(controller,seconds,fps=30){let out;for(let i=0;i<Math.round(seconds*fps);i++)out=controller.update(1/fps);return out;}

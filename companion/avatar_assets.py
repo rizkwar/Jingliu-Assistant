@@ -68,7 +68,7 @@ class AvatarAssets:
             raise ValueError('Unsupported avatar renderer.')
         for name, (path, mime) in paths.items():
             if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
-                raise ValueError("Avatar files are missing or too large. See docs/avatar-stage4.md.")
+                raise ValueError("Avatar files are missing or too large. See Troubleshooting in README.md.")
             assets[name] = (path.read_bytes(), mime)
         self.prefix = "/" + secrets.token_urlsafe(24) + "/"
         prefix = self.prefix

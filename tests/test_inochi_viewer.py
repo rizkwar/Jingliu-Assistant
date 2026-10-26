@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'dev'))
 from avatar_rig_data import RigStore
 from prepare_inochi_viewer import export_bundle, validate_supported
 from render_inochi_rig import encoded_png

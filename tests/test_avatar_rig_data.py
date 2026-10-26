@@ -5,7 +5,7 @@ import struct
 import tempfile
 import unittest
 
-from scripts.avatar_rig_data import MAGIC, RigStore
+from dev.avatar_rig_data import MAGIC, RigStore
 
 
 class RigStoreTests(unittest.TestCase):

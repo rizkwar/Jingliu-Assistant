@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 import unittest
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'dev'))
 from avatar_rig_data import RigStore
 from build_inochi_mouth import mesh_for,open_offsets,form_offsets,jaw_offsets,points,transfer_affine
 

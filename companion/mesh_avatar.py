@@ -287,12 +287,12 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.setFixedSize(280, 280)
             self.notice.setText(
                 'Live2D unavailable. Choose AI portrait in Settings to restore it.\n'
-                'Check the model and run Setup Live2D.cmd.\nSee docs/experimental-live2d.md.'
+                'Check the model and run More\\Setup Live2D.cmd.\nSee docs/live2d-avatar.md.'
                 if self.kind == 'live2d' else
                 'Layered avatar unavailable. Choose AI portrait in Settings to restore it.\n'
-                'Rebuild the local art files. See docs/ai-layered-rig.md.'
+                'Rebuild the local art files. See dev/README.md.'
                 if self.kind == 'layered' else
-                'Avatar unavailable. Using the simple mascot.\nCheck local files / graphics support.\nSee docs/avatar-stage4.md.')
+                'Avatar unavailable. Using the simple mascot.\nCheck local files / graphics support.\nSee Troubleshooting in README.md.')
             self.notice.show()
             # Leave space above the error message for the native mascot.
             self.layout().insertSpacing(0, 174)

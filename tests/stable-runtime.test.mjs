@@ -43,7 +43,7 @@ test('bundled runtime contains only the reviewed HD and stable-frame patch', () 
 test('Python patch reproduces the exact bundle from all supported versions and rejects unknown input', () => {
   const venv = fileURLToPath(new URL(process.platform === 'win32' ? '../.venv/Scripts/python.exe' : '../.venv/bin/python', import.meta.url));
   const python = existsSync(venv) ? venv : process.platform === 'win32' ? 'python' : 'python3';
-  const apply = input => execFileSync(python, ['-c', 'import sys; from scripts.patch_avatar_runtime import patch; sys.stdout.buffer.write(patch(sys.stdin.buffer.read()))'], {cwd: root, input, stdio: ['pipe', 'pipe', 'pipe']});
+  const apply = input => execFileSync(python, ['-c', 'import sys; from dev.patch_avatar_runtime import patch; sys.stdout.buffer.write(patch(sys.stdin.buffer.read()))'], {cwd: root, input, stdio: ['pipe', 'pipe', 'pipe']});
   for (const input of [pristine, hd, source, source.replace(/\n/g, '\r\n')]) {
     assert.equal(apply(input).toString(), source);
   }

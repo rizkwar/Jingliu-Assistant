@@ -12,7 +12,7 @@ from test_reference_voice import write_reference
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULTS = Settings("private-api-key", DEFAULT_MODEL, "Mira", "old prompt", hf_token="private-hf-token")
+DEFAULTS = Settings("private-api-key", DEFAULT_MODEL, "Jinger", "old prompt", hf_token="private-hf-token")
 
 
 class CharacterLibraryTests(unittest.TestCase):

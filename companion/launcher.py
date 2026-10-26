@@ -50,12 +50,12 @@ def launch():
         if errors:
             record_failure("preflight")
             notify("The companion could not start:\n\n" + "\n".join(f"- {check.name}: {check.detail}" for check in errors)
-                   + "\n\nRun Setup Mira.cmd, then Check Setup.cmd for details.")
+                   + "\n\nRun Setup Jinger.cmd, then More\\Check Setup.cmd for details.")
             return 1
         from .__main__ import main
         return main()
     except Exception as exc:
         record_failure("startup", exc)
-        notify("The companion could not start. Run Check Setup.cmd or Setup Mira.cmd.\n\n"
+        notify("The companion could not start. Run More\\Check Setup.cmd or Setup Jinger.cmd.\n\n"
                "A minimal error record is in data/startup-error.log. It contains no exception messages, API keys, or conversations.")
         return 1

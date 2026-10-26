@@ -8,7 +8,7 @@ from companion.config import DEFAULT_MODEL, Settings
 from companion.llm import ChatError, sse_payloads, stream_reply
 
 
-SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.")
+SETTINGS = Settings("test-key", DEFAULT_MODEL, "Jinger", "You are Jinger.")
 
 
 def event(content=None, finish=None, **extra):
@@ -38,7 +38,7 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.collect(body), ["Hello ", "there 👋"])
         payload = json.loads(self.request.content)
         self.assertEqual(payload["model"], DEFAULT_MODEL)
-        self.assertEqual(payload["messages"][0], {"role": "system", "content": "You are Mira."})
+        self.assertEqual(payload["messages"][0], {"role": "system", "content": "You are Jinger."})
         self.assertEqual(self.request.headers["Authorization"], "Bearer test-key")
 
     async def test_sse_multiline_data_and_final_event_without_blank_line(self):

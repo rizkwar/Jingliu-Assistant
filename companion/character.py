@@ -135,7 +135,7 @@ def character_key(path: str) -> str:
     return os.path.normcase(str(Path(path).resolve())) if path else ""
 
 
-def load_character(root: Path, selected="", legacy_name="Mira") -> Character:
+def load_character(root: Path, selected="", legacy_name="Jinger") -> Character:
     path = root / (selected or "character.toml")
     if selected or path.exists():
         if path.suffix.lower() == ".toml":

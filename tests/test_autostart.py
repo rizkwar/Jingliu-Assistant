@@ -25,10 +25,24 @@ class AutostartTests(unittest.TestCase):
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:
             value, _ = winreg.QueryValueEx(key, autostart.NAME)
         self.assertIn("pythonw.exe", value)
-        self.assertTrue(value.endswith("launch_mira.pyw\" --background"))
+        self.assertTrue(value.endswith("launch_jinger.pyw\" --background"))
         autostart.set_enabled(False)
         self.assertFalse(autostart.enabled())
         autostart.set_enabled(False)  # Already off: nothing to remove, no error.
+
+    def test_an_entry_from_an_old_name_or_folder_is_repaired(self):
+        import winreg
+        old = r'"C:\Old\.venv\Scripts\pythonw.exe" "C:\Old\launch_mira.pyw" --background'
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TEST_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, autostart.NAME, 0, winreg.REG_SZ, old)
+        self.assertTrue(autostart.enabled())
+        autostart.refresh()
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:
+            self.assertEqual(winreg.QueryValueEx(key, autostart.NAME)[0], autostart.command())
+
+    def test_refresh_does_not_turn_it_on(self):
+        autostart.refresh()
+        self.assertFalse(autostart.enabled())
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ class ChatterboxSpeaker:
             getattr(report, "info", lambda *_: None)(
                 "Chatterbox is using the GPU." if device == "cuda" else
                 "Chatterbox is running on the CPU, so she will start speaking slowly. "
-                "Switch on the NVIDIA GPU and run Setup Chatterbox.cmd for real-time speech.")
+                "Switch on the NVIDIA GPU and run More\\Setup Chatterbox.cmd for real-time speech.")
         if self.reference_key != reference.fingerprint:
             report("preparing")
             self.model.prepare_conditionals(reference.path, exaggeration=self.EXAGGERATION)

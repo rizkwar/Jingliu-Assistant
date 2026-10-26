@@ -9,7 +9,7 @@ $lab = Join-Path $projectRoot '.cache\voice-lab'
 $python = Join-Path $lab 'venv\Scripts\python.exe'
 try {
     if ($CheckOnly) {
-        if (-not (Test-Path -LiteralPath $python)) { Write-Host 'Chatterbox is not installed. Run Setup Chatterbox.cmd.'; exit 1 }
+        if (-not (Test-Path -LiteralPath $python)) { Write-Host 'Chatterbox is not installed. Run More\Setup Chatterbox.cmd.'; exit 1 }
         & $python -c "import torch, chatterbox, sounddevice; print('Chatterbox ready on', 'GPU (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else 'CPU only (slow)')"
         exit $LASTEXITCODE
     }

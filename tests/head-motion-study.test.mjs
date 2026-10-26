@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {HeadTurnStudy,DURATION,SEQUENCE} from '../scripts/head-motion-study/motion.js';
+import {HeadTurnStudy,DURATION,SEQUENCE} from '../dev/head-motion-study/motion.js';
 
 test('study reaches both directions, vertical looks, combined tilts and settled rest',()=>{
   const study=new HeadTurnStudy(),samples=[];

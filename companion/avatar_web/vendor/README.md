@@ -10,7 +10,7 @@ preserved at the top of the bundle. No character artwork is included here.
 To reproduce from that checkout, install its locked dependencies and run its
 runtime build (`npm run build --workspace=mesh-avatar`); copy
 `packages/runtime/dist/index.js` and `packages/runtime/LICENSE` here, then run
-`python scripts/patch_avatar_runtime.py`. The patch verifies the pinned source
+`python dev/patch_avatar_runtime.py`. The patch verifies the pinned source
 hash and adds bounded supersampling plus full-resolution texture sampling in HD
 mode. Balanced mode retains the original mipmap filtering. It also adds the
 optional `advanceStable(seconds)` API: motion and hair springs advance in steps

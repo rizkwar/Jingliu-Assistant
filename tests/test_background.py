@@ -19,7 +19,7 @@ class TrayTests(unittest.TestCase):
         cls.app = application()
 
     def setUp(self):
-        self.window = CompanionWindow(Settings("", DEFAULT_MODEL, "Mira", "Hi"))
+        self.window = CompanionWindow(Settings("", DEFAULT_MODEL, "Jinger", "Hi"))
         self.tray = TrayController(self.window)
 
     def tearDown(self):

@@ -32,7 +32,7 @@ class CharacterTests(unittest.TestCase):
         self.addCleanup(environment.stop)
 
     def test_profile_sets_identity_despite_legacy_name_and_rereads_edits(self):
-        (self.root / ".env").write_text("COMPANION_NAME=Mira\nTTS_VOICE=vera\n", encoding="utf-8")
+        (self.root / ".env").write_text("COMPANION_NAME=Jinger\nTTS_VOICE=vera\n", encoding="utf-8")
         settings = load_settings(self.root)
         self.assertEqual(settings.name, "Jingliu")
         self.assertEqual(settings.tts_voice, "vera")  # Character does not silently choose a voice.

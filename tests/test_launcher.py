@@ -9,12 +9,12 @@ from companion.launcher import launch, record_failure
 
 class LaunchTests(unittest.TestCase):
     def test_fatal_preflight_shows_actionable_error_without_starting_app(self):
-        with patch("companion.doctor.run_checks", return_value=[Check("error", "httpx", "Run Setup Mira.cmd.")]), \
+        with patch("companion.doctor.run_checks", return_value=[Check("error", "httpx", "Run Setup Jinger.cmd.")]), \
              patch("companion.launcher.notify") as notify, patch("companion.launcher.record_failure"), \
              patch("companion.__main__.main") as app:
             self.assertEqual(launch(), 1)
         app.assert_not_called()
-        self.assertIn("Setup Mira.cmd", notify.call_args.args[0])
+        self.assertIn("Setup Jinger.cmd", notify.call_args.args[0])
 
     def test_warnings_allow_offline_startup(self):
         with patch("companion.doctor.run_checks", return_value=[Check("warning", "API configuration", "No key")]), \

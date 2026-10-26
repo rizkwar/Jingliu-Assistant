@@ -356,7 +356,7 @@ class SpeechController(QObject):
     @Slot(QProcess.ProcessError)
     def _process_error(self, error):
         if error == QProcess.ProcessError.FailedToStart:
-            self._fail("Chatterbox is not installed yet. Run Setup Chatterbox.cmd, or switch the voice engine to "
+            self._fail("Chatterbox is not installed yet. Run More\\Setup Chatterbox.cmd, or switch the voice engine to "
                        "Pocket TTS in Settings." if self.engine == "chatterbox" else
                        "Could not start the voice engine. Check your Python environment.")
 

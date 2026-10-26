@@ -23,7 +23,7 @@ from companion.summary_ui import SummaryDialog
 from qt_test_support import application
 
 
-SETTINGS = Settings("test-key", DEFAULT_MODEL, "Mira", "You are Mira.", tts_enabled=False)
+SETTINGS = Settings("test-key", DEFAULT_MODEL, "Jinger", "You are Jinger.", tts_enabled=False)
 REAL_CLIENT = httpx.AsyncClient
 
 
@@ -334,7 +334,7 @@ class WindowTests(unittest.TestCase):
         speech = FakeSpeech()
         self.replace_window(replace(SETTINGS, api_key=""), speech=speech)
         self.window._preview_voice()
-        self.assertIn("Mira", speech.calls[0][0])
+        self.assertIn("Jinger", speech.calls[0][0])
         speech.busy = False
         speech.changed.emit("Voice unavailable")
         speech.failed.emit("No speaker available")
@@ -494,9 +494,9 @@ class WindowTests(unittest.TestCase):
         with self.mock_client(handler):
             self.window._begin_recording()
             self.window._finish_recording()
-            mic.deliver("Hello Mira")
+            mic.deliver("Hello Jinger")
             self.wait_until(lambda: self.window._worker is None)
-        self.assertEqual(self.window._messages[0]["content"], "Hello Mira")
+        self.assertEqual(self.window._messages[0]["content"], "Hello Jinger")
 
     def test_empty_transcript_and_cancel_do_not_send_anything(self):
         _, mic = self.use_fake_microphone()
@@ -975,7 +975,7 @@ class WindowTests(unittest.TestCase):
         def handler(request):
             return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"Hello there."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
         with self.mock_client(handler):
-            mic.deliver("Hello Mira")
+            mic.deliver("Hello Jinger")
             self.wait_until(lambda: self.window._worker is None)
         self.assertTrue(speech.busy)
         # While she speaks, the microphone listens in echo-aware mode, so the person can interrupt.

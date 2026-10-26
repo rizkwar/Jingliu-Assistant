@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {request} from 'node:http';
-import {laneValue, interpolate, Pendulum, RigPlayer, deformParts} from '../scripts/inochi-viewer/model.js';
-import {createViewerServer} from '../scripts/preview_inochi_avatar.mjs';
+import {laneValue, interpolate, Pendulum, RigPlayer, deformParts} from '../dev/inochi-viewer/model.js';
+import {createViewerServer} from '../dev/preview_inochi_avatar.mjs';
 
 function fixture() {
   const head = {uuid: 4, name: 'Head', is_vec2: false, min: [-1, 0], max: [1, 1], defaults: [0, 0], axis_points: [[0, 1], [0]], bindings: [

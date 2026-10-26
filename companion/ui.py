@@ -644,6 +644,7 @@ class CompanionWindow(QMainWindow):
         self.close_to_tray.setChecked(settings.close_to_tray)
         switch(settings_layout, self.close_to_tray, "Quit from the tray icon to close her fully.")
         from . import autostart
+        autostart.refresh()
         self.start_with_windows = QCheckBox("Start Jingliu when I sign in to Windows (quietly, in the tray)")
         self.start_with_windows.setChecked(autostart.enabled())
         self.start_with_windows.setEnabled(sys.platform == "win32")
@@ -2329,7 +2330,7 @@ class CompanionWindow(QMainWindow):
             "background when the app opens, and prepares her next sentences while she is still speaking, so on this "
             "laptop's RTX 4060 the pauses between sentences are short (on the CPU, much longer). The first use "
             "downloads about 3 GB."
-            + ("" if installed else " Not installed yet: run Setup Chatterbox.cmd in the project folder."))
+            + ("" if installed else " Not installed yet: run More\\Setup Chatterbox.cmd in the project folder."))
 
     @Slot()
     def _warm_voice(self):

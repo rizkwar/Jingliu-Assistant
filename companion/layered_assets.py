@@ -69,4 +69,4 @@ def layered_bundle(source):
         resources['layered.json'] = json.dumps(document, ensure_ascii=True, allow_nan=False).encode()
         return resources
     except (KeyError, TypeError, AttributeError, ValueError, OverflowError):
-        raise ValueError('Invalid layered avatar. Rebuild it with scripts/build_layered_jingliu.py.') from None
+        raise ValueError('Invalid layered avatar. Rebuild it with dev/build_layered_jingliu.py.') from None

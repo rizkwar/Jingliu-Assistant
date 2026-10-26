@@ -96,14 +96,14 @@ class CharacterWindowTests(unittest.TestCase):
         with patch("companion.ui.load_settings", return_value=SETTINGS):
             self.assertTrue(self.window._activate_character(legacy))
             legacy_conversation = self.window._conversation_id
-            self.assertEqual(self.window.settings.name, "Mira")
+            self.assertEqual(self.window.settings.name, "Jinger")
             self.assertFalse(self.window.edit_character.isEnabled())
             self.assertTrue(self.window._activate_character(self.first))
             available = [self.window.character_select.itemData(i) for i in range(self.window.character_select.count())]
             self.assertIn(str(legacy.resolve()), available)
             self.assertTrue(self.window._activate_character(legacy))
         self.assertEqual(self.window._conversation_id, legacy_conversation)
-        self.assertIn("You are Mira, an old friend.", self.window.settings.system_prompt)
+        self.assertIn("You are Jinger, an old friend.", self.window.settings.system_prompt)
 
     def test_switch_keeps_histories_summaries_and_voice_separate_at_http_boundary(self):
         original_id = self.window._conversation_id

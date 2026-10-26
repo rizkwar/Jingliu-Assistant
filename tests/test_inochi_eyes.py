@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import unittest
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'dev'))
 from avatar_rig_data import RigStore
 from build_inochi_eyes import blink_offsets
 
