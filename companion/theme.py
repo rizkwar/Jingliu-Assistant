@@ -40,6 +40,9 @@ QMainWindow, QDialog {{ background: {NIGHT}; }}
 QWidget#column, QWidget#chatBody, QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QStackedWidget#pages, QWidget#panel, QWidget#panelBody, QDialog[embedded="true"] {{ background: transparent; }}
 QListWidget#nav {{ background: transparent; border: none; padding: 0; outline: none; }}
+QWidget#settingRow {{ background: transparent; border-bottom: 1px solid rgba(168, 212, 255, 0.06); }}
+QLabel#rowTitle {{ font-size: 14px; color: {FROST}; }}
+QLabel#rowHint {{ font-size: 12px; color: {DIM}; }}
 QListWidget#nav::item {{ color: {MUTED}; padding: 7px 12px; margin-bottom: 2px; border-radius: 6px;
     border-left: 2px solid transparent; }}
 QListWidget#nav::item:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.05); }}
