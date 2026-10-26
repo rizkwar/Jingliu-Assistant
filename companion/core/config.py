@@ -52,6 +52,7 @@ class Settings:
     barge_in: bool = True
     check_ins: bool = False
     check_in_greeted: str = ""
+    message_style: str = "plain"
     character_voice: str = ""
     character_voice_rate: int = 100
     character_voice_description: str = ""

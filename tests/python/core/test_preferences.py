@@ -44,6 +44,7 @@ class PreferenceTests(unittest.TestCase):
                      '{"version":1,"settings":{"tts_rate":79}}',
                      '{"version":1,"settings":{"tts_voice":"missing"}}',
                      '{"version":1,"settings":{"stt_model":"missing"}}',
+                     '{"version":1,"settings":{"message_style":"neon"}}',
                      '{"version":1,"settings":{"stt_pause_ms":true}}',
                      '{"version":1,"settings":{"stt_pause_ms":2501}}',
                      '{"version":1,"settings":{"avatar_x":true,"avatar_y":0}}',

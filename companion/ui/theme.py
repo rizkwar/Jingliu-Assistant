@@ -26,6 +26,8 @@ ICONS = {
     'handsfree': '', 'memories': '', 'context': '', 'pause': '', 'play': '',
     'moon': '', 'attach': '', 'close': '', 'document': '', 'image': '',
     'delete': '', 'clock': '', 'back': '', 'rename': '', 'screen': '',
+    'compose': '', 'sidebar': '', 'search': '', 'pin': '', 'copy': '',
+    'chevron': '', 'shield': '', 'bell': '', 'quote': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -50,7 +52,7 @@ QListWidget#nav::item:selected {{ color: {FROST}; background: rgba(168, 212, 255
 QLabel {{ background: transparent; }}
 QToolTip {{ background: #111b31; color: {FROST}; border: 1px solid #2a3b5e; padding: 6px 8px; border-radius: 6px; }}
 
-QLabel#title {{ font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; font-size: 26px; letter-spacing: 1px; }}
+QLabel#title {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 22px; }}
 QLabel#seal {{ font-family: 'Microsoft YaHei UI Light'; font-size: 15px; color: {ICE_DEEP}; padding-top: 6px; }}
 QLabel#subtitle {{ color: {MUTED}; font-size: 12px; }}
 QLabel#hint, QLabel#footer {{ color: {DIM}; font-size: 12px; }}
@@ -141,7 +143,7 @@ QLabel#error {{ color: #f3b3bd; font-size: 13px; }}
 QLabel#note {{ color: {MUTED}; font-size: 12px; background: transparent; border: none; padding: 2px 12px; }}
 QLabel#note[tone="warning"] {{ color: {AMBER}; border-color: rgba(230, 194, 140, 0.30); }}
 QLabel#note[tone="error"] {{ color: #f3b3bd; border-color: rgba(226, 86, 110, 0.35); }}
-QLabel#welcomeTitle {{ font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; font-size: 22px; color: {FROST}; }}
+QLabel#welcomeTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 26px; color: {FROST}; }}
 QLabel#welcomeText {{ color: {MUTED}; font-size: 13px; }}
 QLabel#welcomeMoon {{ font-family: '{ICON_FONT}'; font-size: 40px; color: {ICE}; }}
 QFrame#attachment {{ background: rgba(168, 212, 255, 0.07); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 10px; }}
@@ -196,6 +198,52 @@ QCheckBox::indicator:checked {{ image: url("{ASSETS}/switch-on.svg"); }}QCheckBo
 QSlider::groove:horizontal {{ height: 4px; background: rgba(168, 212, 255, 0.14); border-radius: 2px; }}
 QSlider::sub-page:horizontal {{ background: {ICE_DEEP}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {FROST}; width: 14px; height: 14px; margin: -6px 0; border-radius: 7px; border: 2px solid {ICE_DEEP}; }}
+
+/* Sidebar: who she is, new chat, quick pages and the conversation list. */
+QFrame#sidebar {{ background: rgba(5, 9, 19, 0.62); border: none; border-right: 1px solid rgba(168, 212, 255, 0.07); }}
+QLabel#sideTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 17px; color: {FROST}; }}
+QFrame#sidebar QLabel#seal {{ font-size: 13px; padding-top: 2px; }}
+QPushButton#sideNew, QToolButton#sideItem {{ background: transparent; border: none; border-radius: 8px; text-align: left;
+    padding: 5px 8px; color: #d5e2f4; font-size: 14px; }}
+QToolButton#sideItem {{ min-width: 222px; max-width: 244px; }}
+QPushButton#sideNew:hover, QToolButton#sideItem:hover {{ background: rgba(168, 212, 255, 0.07); color: {FROST}; }}
+QPushButton#sideNew:pressed, QToolButton#sideItem:pressed {{ background: rgba(168, 212, 255, 0.12); }}
+QPushButton#sideIcon {{ font-family: '{ICON_FONT}'; font-size: 14px; padding: 0; border-radius: 8px; border: none;
+    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; color: {MUTED}; background: transparent; }}
+QPushButton#sideIcon:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.08); }}
+QLabel#sideSection {{ color: {DIM}; font-size: 12px; font-weight: 600; }}
+QPushButton#sideLink {{ background: transparent; border: none; color: {DIM}; font-size: 12px; padding: 0 4px; }}
+QPushButton#sideLink:hover {{ color: {ICE}; }}
+QLineEdit#sideSearch {{ background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(168, 212, 255, 0.14);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; }}
+QListWidget#sideList {{ background: transparent; border: none; padding: 0; outline: none; }}
+QListWidget#sideList::item {{ color: #c3d3ea; padding: 0 10px; border-radius: 8px; border: none; }}
+QListWidget#sideList::item:hover {{ background: rgba(168, 212, 255, 0.06); color: {FROST}; }}
+QListWidget#sideList::item:selected {{ background: rgba(168, 212, 255, 0.11); color: {FROST}; }}
+
+/* Header above the conversation. */
+QWidget#header {{ background: transparent; border-bottom: 1px solid rgba(168, 212, 255, 0.06); }}
+QLabel#chatTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 15px; color: {FROST}; }}
+QLabel#chatGlyph {{ font-family: '{ICON_FONT}'; font-size: 14px; color: {ICE}; }}
+
+/* Her messages as plain text (like Codex), the alternative to the bubble. */
+QFrame#assistant[plain="true"] {{ background: transparent; border: none; }}
+QFrame#assistant[plain="true"] QLabel#speaker {{ letter-spacing: 1.5px; }}
+QPushButton#replyAction {{ font-family: '{ICON_FONT}'; font-size: 13px; padding: 0; border-radius: 6px; border: none;
+    min-width: 26px; max-width: 26px; min-height: 26px; max-height: 26px; color: {DIM}; background: transparent; }}
+QPushButton#replyAction:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.08); }}
+QLabel#replyTime {{ color: {DIM}; font-size: 11px; padding-left: 4px; }}
+
+/* Composer: + menu, a toggle chip, model picker, microphone, hands-free and send. */
+QFrame#composer {{ border-radius: 22px; }}
+QPushButton#chipToggle {{ background: transparent; border: 1px solid transparent; border-radius: 14px;
+    padding: 4px 11px 4px 9px; color: {MUTED}; font-size: 13px; }}
+QPushButton#chipToggle:hover {{ background: rgba(168, 212, 255, 0.07); color: {FROST}; }}
+QPushButton#chipToggle:checked {{ color: {ICE}; border-color: rgba(168, 212, 255, 0.30); background: rgba(111, 168, 232, 0.12); }}
+QPushButton#modelPicker {{ background: transparent; border: none; border-radius: 12px; padding: 4px 10px;
+    color: {MUTED}; font-size: 13px; }}
+QPushButton#modelPicker:hover {{ background: rgba(168, 212, 255, 0.07); color: {FROST}; }}
+QPushButton#modelPicker::menu-indicator {{ image: none; width: 0; }}
 """
 
 

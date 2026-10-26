@@ -49,6 +49,11 @@ current character is **Jingliu**, always in character: reserved, composed, quiet
 - **Undo any task:** the task card's **Undo**, "undo that", `/undo`, or **⋯ → Recent tasks** (7 days).
 
 **The app**
+- **A Codex-style window** under the moonlit sky: a sidebar with New chat, Memories, Reminders, Recent tasks
+  and your conversations (right-click to **pin** one under a crescent, rename or delete it), **search**
+  (Ctrl+K), a model picker and an **Approve for me** switch in the message box, and copy / read aloud under
+  each reply. Select part of a reply and right-click → **Quote in reply**. Her messages can be plain text
+  or bubbles (Settings → App → Window). Shortcuts: Ctrl+N new chat, Ctrl+B sidebar, Ctrl+, settings.
 - Lives in the **system tray** when closed (Quit from there); in Windows Search / Start as **Jingliu**.
 - **Start with Windows** (quietly, in the tray) and **gentle check-ins** (off by default: a greeting
   that fits the time of day, and a nudge to rest after about three hours) in Settings → App.

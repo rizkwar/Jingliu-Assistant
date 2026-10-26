@@ -14,7 +14,7 @@ from ..chat.continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 STOP_WORDS = set("a an and are as at be been but by can do for from have how i in is it me my of on or that the this to was we what with you your".split())
 
 
@@ -77,6 +77,8 @@ class Store:
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(conversations)")}
             if "character_key" not in columns:
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN character_key TEXT NOT NULL DEFAULT ''")
+            if "pinned" not in columns:
+                self.connection.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(messages)")}
             if "attachments" not in columns:
                 # JSON list of locally stored copies; the files live under data/attachments.
@@ -141,6 +143,10 @@ class Store:
         with self.connection:
             self.connection.execute("UPDATE conversations SET title=? WHERE id=?", (title, conversation_id))
         return title
+
+    def pin_conversation(self, conversation_id, pinned=True):
+        with self.connection:
+            self.connection.execute("UPDATE conversations SET pinned=? WHERE id=?", (int(bool(pinned)), conversation_id))
 
     def touch_conversation(self, conversation_id):
         with self.connection:

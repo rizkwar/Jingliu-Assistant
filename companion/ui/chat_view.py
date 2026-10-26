@@ -2,11 +2,14 @@
 from pathlib import Path
 import re
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QPixmap, QTextBlockFormat, QTextCursor, QTextDocument
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from datetime import datetime
 
-from .theme import ICONS
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextBlockFormat, QTextCursor, QTextDocument
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
+                               QWidget)
+
+from .theme import ICONS, glyph_icon
 
 _FEATURES = QTextDocument.MarkdownFeature(QTextDocument.MarkdownFeature.MarkdownDialectGitHub.value
                                           | QTextDocument.MarkdownFeature.MarkdownNoHTML.value)
@@ -19,7 +22,7 @@ def markdown_html(text):
     document = QTextDocument()
     document.setMarkdown(text, _FEATURES)
     spacing = QTextBlockFormat()
-    spacing.setLineHeight(125,QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+    spacing.setLineHeight(145,QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
     cursor = QTextCursor(document)
     cursor.select(QTextCursor.SelectionType.Document)
     cursor.mergeBlockFormat(spacing)
@@ -83,17 +86,30 @@ class AttachmentCard(QFrame):
         super().mouseReleaseEvent(event)
 
 
+def _clock(timestamp):
+    try:
+        return datetime.fromisoformat(timestamp).astimezone().strftime('%H:%M') if timestamp else ''
+    except ValueError:
+        return ''
+
+
 class Bubble(QFrame):
-    def __init__(self, role, speaker, parent=None, attachments=()):
+    speak = Signal(str)
+    quote = Signal(str)
+
+    def __init__(self, role, speaker, parent=None, attachments=(), plain=False, when=''):
         super().__init__(parent)
         self.role = role
         self.speaker = speaker
         self.text = ''
         self.attachments = list(attachments)
         self.setObjectName('user' if role == 'user' else 'assistant')
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.setProperty('plain', plain and role != 'user')
+        self.setSizePolicy(QSizePolicy.Policy.Expanding if self.property('plain') else QSizePolicy.Policy.Maximum,
+                           QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(*((16, 11, 16, 12) if role != 'user' else (15, 9, 15, 10)))
+        layout.setContentsMargins(*((2, 4, 8, 4) if self.property('plain') else
+                                    (16, 11, 16, 12) if role != 'user' else (15, 9, 15, 10)))
         layout.setSpacing(4)
         if role != 'user':
             name = QLabel(speaker.upper())
@@ -111,6 +127,8 @@ class Bubble(QFrame):
         self.body.setTextFormat(Qt.TextFormat.PlainText if role == 'user' else Qt.TextFormat.RichText)
         self.body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.body.setCursor(Qt.CursorShape.IBeamCursor)
+        self.body.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.body.customContextMenuRequested.connect(self._menu)
         layout.addWidget(self.body)
         self.notice = QLabel()
         self.notice.setObjectName('notice')
@@ -123,6 +141,54 @@ class Bubble(QFrame):
         self.error.setTextFormat(Qt.TextFormat.PlainText)
         self.error.hide()
         layout.addWidget(self.error)
+        self.actions = QWidget()
+        actions = QHBoxLayout(self.actions)
+        actions.setContentsMargins(0, 2, 0, 0)
+        actions.setSpacing(2)
+        for glyph, tip, slot in (('copy', 'Copy', self._copy), ('speaker', 'Read aloud', lambda: self.speak.emit(self.text))):
+            button = QPushButton(ICONS[glyph])
+            button.setObjectName('replyAction')
+            button.setToolTip(tip)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(slot)
+            actions.addWidget(button)
+        self.time = QLabel(_clock(when))
+        self.time.setObjectName('replyTime')
+        actions.addWidget(self.time)
+        actions.addStretch()
+        self.actions.hide()
+        layout.addWidget(self.actions)
+
+    def set_plain(self, plain):
+        if self.role != 'user':
+            self.setProperty('plain', plain)
+            self.style().unpolish(self)
+            self.style().polish(self)
+            self.layout().setContentsMargins(*((2, 4, 8, 4) if plain else (16, 11, 16, 12)))
+            self.setSizePolicy(QSizePolicy.Policy.Expanding if plain else QSizePolicy.Policy.Maximum,
+                               QSizePolicy.Policy.Preferred)
+
+    def finish(self, when=''):
+        """A complete reply of hers: show copy, read aloud and the time beneath it."""
+        if self.role != 'user' and self.text:
+            if when:
+                self.time.setText(_clock(when))
+            self.actions.show()
+
+    def _copy(self):
+        QGuiApplication.clipboard().setText(self.text)
+
+    def _menu(self, position):
+        selected = self.body.selectedText().strip()
+        menu = QMenu(self)
+        if selected:
+            menu.addAction(glyph_icon('quote'), 'Quote in reply', lambda: self.quote.emit(selected))
+            menu.addAction(glyph_icon('copy'), 'Copy', lambda: QGuiApplication.clipboard().setText(selected))
+        else:
+            menu.addAction(glyph_icon('copy'), 'Copy message', self._copy)
+        if self.role != 'user' and self.text:
+            menu.addAction(glyph_icon('speaker'), 'Read aloud', lambda: self.speak.emit(selected or self.text))
+        menu.exec(self.body.mapToGlobal(position))
 
     def set_text(self, text):
         self.text = text
@@ -314,7 +380,10 @@ class Welcome(QWidget):
         layout.setSpacing(8)
         moon = QLabel(ICONS['moon'])
         moon.setObjectName('welcomeMoon')
-        title = QLabel(f'{name} is here.')
+        from ..chat.check_ins import part_of_day
+        part = part_of_day(datetime.now())
+        greeting = 'It is late. ' if part == 'late night' else f'Good {part}. '
+        title = QLabel(f'{greeting}{name} is here.')
         title.setObjectName('welcomeTitle')
         self.text = QLabel('Say anything, or hold the microphone to speak. '
                            'Conversations are saved on this computer; /remember keeps a note across chats.')
@@ -344,6 +413,9 @@ class Welcome(QWidget):
 class ChatView(QScrollArea):
     """Drop-in for the old transcript: clear(), toPlainText() and verticalScrollBar() still work."""
     suggestion = Signal(str)
+    speak_requested = Signal(str)
+    quote_requested = Signal(str)
+    plain = False  # Her replies as plain text (like Codex) instead of bubbles.
     SUGGESTIONS = ('I’m back. How have you been?', 'Help me focus for a while', 'Tell me about yourself')
 
     def __init__(self, parent=None):
@@ -373,14 +445,33 @@ class ChatView(QScrollArea):
         bar.valueChanged.connect(lambda value: setattr(self, '_stick', value >= bar.maximum() - 48))
         bar.rangeChanged.connect(lambda _low, high: self._stick and bar.setValue(high))
 
-    def _bubble_width(self):
+    def _bubble_width(self, item=None):
+        if isinstance(item, Bubble) and item.property('plain'):
+            return max(260, self.viewport().width() - 24)
         return max(260, int(self.viewport().width() * 0.82))
+
+    def set_plain(self, plain):
+        self.plain = plain
+        for item in self._items:
+            if isinstance(item, Bubble):
+                item.set_plain(plain)
+                item.setMaximumWidth(self._bubble_width(item))
+                row = self._row_of(item)
+                if row is not None and item.role != 'user':
+                    row.setStretchFactor(item, 1 if plain else 0)
+
+    def _row_of(self, widget):
+        for index in range(self.rows.count() - 1):
+            row = self.rows.itemAt(index).layout()
+            if row is not None and row.indexOf(widget) >= 0:
+                return row
+        return None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         for item in self._items:
             if isinstance(item, (Bubble, TaskCard, OfferCard)):
-                item.setMaximumWidth(self._bubble_width())
+                item.setMaximumWidth(self._bubble_width(item))
                 if isinstance(item, Bubble):
                     item.fit()
 
@@ -418,11 +509,15 @@ class ChatView(QScrollArea):
         welcome.suggestion.connect(self.suggestion)
         self._add(welcome, 'center')
 
-    def add_message(self, role, speaker, text, notice='', attachments=()):
-        bubble = Bubble(role, speaker, attachments=attachments)
-        bubble.setMaximumWidth(self._bubble_width())
+    def add_message(self, role, speaker, text, notice='', attachments=(), when=''):
+        bubble = Bubble(role, speaker, attachments=attachments, plain=self.plain, when=when)
+        bubble.setMaximumWidth(self._bubble_width(bubble))
         bubble.set_text(text)
         bubble.set_notice(notice)
+        bubble.speak.connect(self.speak_requested)
+        bubble.quote.connect(self.quote_requested)
+        if text:
+            bubble.finish()
         return self._add(bubble, 'right' if role == 'user' else 'left')
 
     def add_offer(self, description):
@@ -476,6 +571,7 @@ class ChatView(QScrollArea):
         live.set_text(live.text)
         live.set_notice(notice)
         live.set_error(error)
+        live.finish(datetime.now().astimezone().isoformat())
 
     def _render_live(self):
         if self._live is not None:

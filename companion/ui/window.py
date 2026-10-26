@@ -6,8 +6,9 @@ from pathlib import Path
 import tempfile
 import time
 
-from PySide6.QtCore import QEvent, QSignalBlocker, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QImage, QKeyEvent
+from PySide6.QtCore import QEvent, QSignalBlocker, QSize, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import (QAction, QCloseEvent, QDesktopServices, QImage, QKeyEvent, QKeySequence, QShortcut,
+                           QTextCursor)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMenu,
     QMessageBox,
@@ -38,6 +39,7 @@ from ..voice.reference import inspect_reference, VoiceSetupError
 from ..chat import attachments
 from ..chat import reminders
 from .chat_view import AttachmentCard, ChatView
+from .sidebar import Sidebar
 from .theme import ACTIVITY_COLORS, ICONS, STYLE, NightSky, WindowChrome, glyph_icon, icon_button, moon_icon, repolish
 
 
@@ -294,53 +296,64 @@ class CompanionWindow(QMainWindow):
         self.setWindowIcon(moon_icon())
         self._chrome = WindowChrome(self)
         self._chrome.watch(self)
-        self.resize(780, 860)
+        self.resize(1180, 820)
         self.setMinimumSize(460, 560)
         self.setStyleSheet(STYLE)
 
+        # Pages and actions shared by the sidebar and the ⋯ menu.
+        def action(glyph, text, tip=""):
+            item = QAction(glyph_icon(glyph), text, self)
+            item.setToolTip(tip or text)
+            return item
+        self.history_button = action("history", "History", "Every conversation, with search, previews and dates")
+        self.memory_button = action("memories", "Memories", "What she remembers about you")
+        self.reminders_button = action("bell", "Reminders", "Everything upcoming")
+        self.tasks_button = action("clock", "Recent tasks", "Tasks from the last week, with Undo for the files they changed")
+        self.context_button = action("context", "Context and summary", "Inspect or summarize older exchanges in this conversation")
+        self.settings_button = action("settings", "Settings", "Settings · Ctrl+,")
+        self.suspend_button = action("pause", "Suspend")
+
         root = NightSky()
         self.setCentralWidget(root)
-        centring = QHBoxLayout(root)
-        centring.setContentsMargins(0, 0, 0, 0)
-        # One window: the conversation, and pages such as Settings or History in its place.
-        self.pages = QStackedWidget()
-        self.pages.setObjectName("pages")
-        self.pages.setMaximumWidth(900)  # Keep lines readable on a maximized window.
-        column = QWidget()
-        column.setObjectName("column")
-        self.chat_page = column
-        self.pages.addWidget(column)
-        centring.addStretch(1)
-        centring.addWidget(self.pages, 100)
-        centring.addStretch(1)
-        layout = QVBoxLayout(column)
-        layout.setContentsMargins(22, 18, 22, 12)
-        layout.setSpacing(12)
+        shell = QHBoxLayout(root)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+        self.sidebar = Sidebar(settings.name, SEALS.get(settings.name.lower(), ""),
+                               (self.memory_button, self.reminders_button, self.tasks_button))
+        self.sidebar.add_bottom(self.settings_button)
+        self.title, self.seal, self.new_chat = self.sidebar.title, self.sidebar.seal, self.sidebar.new_chat
+        self.sidebar.open_conversation.connect(self._switch_conversation)
+        self.sidebar.pin_requested.connect(self._pin_conversation)
+        self.sidebar.rename_requested.connect(self._rename_conversation)
+        self.sidebar.delete_requested.connect(self._delete_conversation)
+        self.sidebar.show_all.connect(self._open_history)
+        self.sidebar.collapse.connect(self._toggle_sidebar)
+        self._sidebar_wanted = True
+        shell.addWidget(self.sidebar)
 
-        heading = QHBoxLayout()
-        heading.setSpacing(12)
-        emblem = QLabel(ICONS["moon"])
-        emblem.setObjectName("emblem")
-        emblem.setFixedSize(44, 44)
-        emblem.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        heading.addWidget(emblem)
-        names = QVBoxLayout()
-        names.setSpacing(0)
-        title_row = QHBoxLayout()
-        title_row.setSpacing(10)
-        self.title = QLabel(settings.name)
-        self.title.setObjectName("title")
-        title_row.addWidget(self.title)
-        self.seal = QLabel(SEALS.get(settings.name.lower(), ""))
-        self.seal.setObjectName("seal")
-        title_row.addWidget(self.seal)
-        title_row.addStretch()
-        names.addLayout(title_row)
+        main = QWidget()
+        main.setObjectName("column")
+        main_layout = QVBoxLayout(main)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        shell.addWidget(main, 1)
+        header = QWidget()
+        header.setObjectName("header")
+        header.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        heading = QHBoxLayout(header)
+        heading.setContentsMargins(14, 10, 14, 10)
+        heading.setSpacing(8)
+        self.show_sidebar = icon_button("sidebar", "Show the sidebar · Ctrl+B", name="sideIcon")
+        self.show_sidebar.clicked.connect(self._toggle_sidebar)
+        self.show_sidebar.hide()
+        heading.addWidget(self.show_sidebar)
+        glyph = QLabel(ICONS["moon"])
+        glyph.setObjectName("chatGlyph")
+        heading.addWidget(glyph)
         self.conversation_title = QLabel("New conversation")
-        self.conversation_title.setObjectName("subtitle")
+        self.conversation_title.setObjectName("chatTitle")
         self.conversation_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        names.addWidget(self.conversation_title)
-        heading.addLayout(names, 1)
+        heading.addWidget(self.conversation_title, 1)
         pill = QFrame()
         pill.setObjectName("pill")
         self.status_pill = pill
@@ -354,29 +367,52 @@ class CompanionWindow(QMainWindow):
         pill_row.addWidget(self.status)
         heading.addWidget(pill, 0, Qt.AlignmentFlag.AlignVCenter)
         self.speak_toggle = icon_button("speaker", "Speak replies aloud", checkable=True)
-        self.new_chat = icon_button("new", "New conversation · the current one stays in History")
-        self.more_button = icon_button("more", "History, memories and settings")
-        for button in (self.speak_toggle, self.new_chat, self.more_button):
+        self.more_button = icon_button("more", "This conversation, history and settings")
+        for button in (self.speak_toggle, self.more_button):
             heading.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addLayout(heading)
+        main_layout.addWidget(header)
+
+        centring = QHBoxLayout()
+        centring.setContentsMargins(0, 0, 0, 0)
+        # One window: the conversation, and pages such as Settings or History in its place.
+        self.pages = QStackedWidget()
+        self.pages.setObjectName("pages")
+        self.pages.setMaximumWidth(900)  # Keep lines readable on a maximized window.
+        column = QWidget()
+        column.setObjectName("column")
+        self.chat_page = column
+        self.pages.addWidget(column)
+        centring.addStretch(1)
+        centring.addWidget(self.pages, 100)
+        centring.addStretch(1)
+        main_layout.addLayout(centring, 1)
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(22, 6, 22, 12)
+        layout.setSpacing(10)
         self.context_hint = Note(self)
         self.context_hint.hide()  # Its summary state is shown on the Context menu item.
 
         menu = QMenu(self)
-        self.history_button = menu.addAction(glyph_icon("history"), "History")
-        self.memory_button = menu.addAction(glyph_icon("memories"), "Memories")
-        self.reminders_button = menu.addAction(glyph_icon("clock"), "Reminders")
-        self.tasks_button = menu.addAction(glyph_icon("history"), "Recent tasks")
-        self.tasks_button.setToolTip("Tasks from the last week, with Undo for the files they changed")
-        self.context_button = menu.addAction(glyph_icon("context"), "Context and summary")
-        self.context_button.setToolTip("Inspect or summarize older exchanges in this conversation")
+        menu.addAction(self.history_button)
+        menu.addAction(self.memory_button)
+        menu.addAction(self.reminders_button)
+        menu.addAction(self.tasks_button)
+        menu.addAction(self.context_button)
         menu.addSeparator()
-        self.settings_button = menu.addAction(glyph_icon("settings"), "Settings")
-        self.suspend_button = menu.addAction(glyph_icon("pause"), "Suspend")
+        menu.addAction(glyph_icon("rename"), "Rename this conversation…",
+                       lambda: self._rename_conversation(self._conversation_id))
+        menu.addAction(glyph_icon("delete", color="#f3a5b3"), "Delete this conversation…",
+                       lambda: self._delete_conversation(self._conversation_id))
+        menu.addSeparator()
+        menu.addAction(self.settings_button)
+        menu.addAction(self.suspend_button)
         menu.addSeparator()
         menu.addAction("Quit", self.request_quit)
         menu.setToolTipsVisible(True)
         self.more_button.setMenu(menu)
+        for keys, slot in (("Ctrl+N", self._new_conversation), ("Ctrl+K", self._search_conversations),
+                           ("Ctrl+B", self._toggle_sidebar), ("Ctrl+,", self.open_settings)):
+            QShortcut(QKeySequence(keys), self, slot)
         self.reload = QPushButton("Reload .env + character")
         self.reload.setToolTip("Reload connection and character; keep saved app preferences")
         self.settings_button.triggered.connect(self.open_settings)
@@ -640,6 +676,13 @@ class CompanionWindow(QMainWindow):
         self.computer_tasks.toggled.connect(self._computer_tasks_toggled)
         self._describe_tasks()
         section(settings_layout, "Window")
+        self.message_style = QComboBox()
+        self.message_style.addItem("Plain text, like Codex", "plain")
+        self.message_style.addItem("In a bubble", "bubble")
+        self.message_style.setCurrentIndex(max(0, self.message_style.findData(settings.message_style)))
+        self.message_style.currentIndexChanged.connect(self._message_style_changed)
+        row(settings_layout, "Her messages", self.message_style,
+            hint="Plain text reads like a document; a bubble sets each reply apart.")
         self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
         self.close_to_tray.setChecked(settings.close_to_tray)
         switch(settings_layout, self.close_to_tray, "Quit from the tray icon to close her fully.")
@@ -832,6 +875,7 @@ class CompanionWindow(QMainWindow):
         settings_outer.addLayout(settings_actions)
 
         self.transcript = ChatView()
+        self.transcript.plain = settings.message_style == "plain"
         self.transcript.suggestion.connect(self._use_suggestion)
         layout.addWidget(self.transcript, 1)
 
@@ -857,21 +901,35 @@ class CompanionWindow(QMainWindow):
         composer_layout.addWidget(self.input)
         tools = QHBoxLayout()
         tools.setSpacing(4)
+        # Attaching a file or the screen lives behind "+", like Codex; the buttons stay for their state.
         self.attach_button = icon_button("attach", "Attach images or files · you can also paste or drag them in")
         self.attach_button.clicked.connect(self._choose_attachments)
-        tools.addWidget(self.attach_button)
         self.screen_button = icon_button("screen", "Show her your screen · attaches a screenshot of the monitor "
                                                    "you are using; her own windows are left out")
         self.screen_button.clicked.connect(self._share_screen)
-        tools.addWidget(self.screen_button)
+        self.plus_button = icon_button("new", "Attach files or show her your screen")
+        plus = QMenu(self)
+        self.attach_action = plus.addAction(glyph_icon("attach"), "Attach images or files…", self.attach_button.click)
+        self.screen_action = plus.addAction(glyph_icon("screen"), "Show her my screen", self.screen_button.click)
+        plus.setToolTipsVisible(True)
+        self.plus_button.setMenu(plus)
+        tools.addWidget(self.plus_button)
+        tools.addWidget(self.screen_button)  # One click, as before; also in the + menu.
+        self.approve_chip = QPushButton("Approve for me")
+        self.approve_chip.setObjectName("chipToggle")
+        self.approve_chip.setIcon(glyph_icon("shield", color="#8fa3c2"))
+        self.approve_chip.setIconSize(QSize(20, 20))
+        self.approve_chip.setCheckable(True)
+        self.approve_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.approve_chip.setToolTip("On: she runs commands, changes files and uses the mouse and keyboard for a task "
+                                     "without asking you first. Each step still shows in the chat, and tasks can be undone.")
+        tools.addWidget(self.approve_chip)
         self.record_button = icon_button("mic", "Hold to talk · or press Ctrl+Alt+Space · up to 60 seconds")
         self.record_button.pressed.connect(self._begin_recording)
         self.record_button.released.connect(self._finish_recording)
-        tools.addWidget(self.record_button)
         self.hands_free = icon_button(
             "handsfree", "Hands-free: listen for a turn, pause during replies, then listen again", checkable=True)
         self.hands_free.toggled.connect(self._handsfree_toggled)
-        tools.addWidget(self.hands_free)
         self.mic_level = QProgressBar()
         self.mic_level.setRange(0, 100)
         self.mic_level.setValue(0)
@@ -881,6 +939,18 @@ class CompanionWindow(QMainWindow):
         tools.addSpacing(6)
         tools.addWidget(self.mic_level, 0, Qt.AlignmentFlag.AlignVCenter)
         tools.addStretch()
+        self.model_picker = QPushButton()
+        self.model_picker.setObjectName("modelPicker")
+        self.model_picker.setIcon(glyph_icon("chevron", color="#8fa3c2"))
+        self.model_picker.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # The chevron after the name.
+        self.model_picker.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.model_picker.setToolTip("Which model she replies with")
+        self.model_menu = QMenu(self)
+        self.model_menu.aboutToShow.connect(self._fill_model_menu)
+        self.model_picker.setMenu(self.model_menu)
+        tools.addWidget(self.model_picker)
+        tools.addWidget(self.record_button)
+        tools.addWidget(self.hands_free)
         self.stop_button = icon_button("stop", "Stop the reply, voice or recording")
         repolish(self.stop_button, danger=True)
         self.stop_button.setEnabled(False)
@@ -892,6 +962,16 @@ class CompanionWindow(QMainWindow):
         tools.addWidget(self.send_button)
         composer_layout.addLayout(tools)
         layout.addWidget(self.composer)
+        self.attach_button.setParent(self.composer)
+        self.attach_button.hide()
+        self.approve_chip.setChecked(not settings.approve_steps)
+        self.approve_chip.setVisible(settings.computer_tasks)
+        self.approve_chip.toggled.connect(lambda on: self.approve_steps.setChecked(not on))
+        self.approve_steps.toggled.connect(lambda ask: self.approve_chip.setChecked(not ask))
+        self.computer_tasks.toggled.connect(self.approve_chip.setVisible)
+        self.transcript.speak_requested.connect(self._read_aloud)
+        self.transcript.quote_requested.connect(self._quote)
+        self._refresh_model_picker()
         self.setAcceptDrops(True)
         self.drop_hint = QWidget(self.centralWidget())
         self.drop_hint.setObjectName("dropHint")
@@ -1074,6 +1154,7 @@ class CompanionWindow(QMainWindow):
         self._interrupt_speech()
         self.settings = replace(self.settings, **self.connection.values())
         self.status.setText('Add API key' if self.settings.missing_key() else 'Ready')
+        self._refresh_model_picker()
         try:
             # The response model is remembered immediately; other settings still wait for Save defaults.
             self.preferences.remember(self.settings, ('llm_provider', 'openrouter_model', 'codex_model', 'claude_model'))
@@ -1195,6 +1276,8 @@ class CompanionWindow(QMainWindow):
         self.input.setEnabled(not self.microphone.busy)
         self.attach_button.setEnabled(not self.suspended and not self.microphone.busy)
         self.screen_button.setEnabled(not self.suspended and not self.microphone.busy)
+        self.attach_action.setEnabled(self.attach_button.isEnabled())
+        self.screen_action.setEnabled(self.screen_button.isEnabled())
         self._refresh_stop_button()
         self.new_chat.setEnabled(not busy)
         self.reload.setEnabled(not busy)
@@ -1383,7 +1466,181 @@ class CompanionWindow(QMainWindow):
         except sqlite3.Error:
             self.privacy.setText("Could not create a conversation. Please try again.")
             return
+        self._leave_pages()
         self._restore_conversation(conversation_id)
+
+    # Sidebar ------------------------------------------------------------------------------
+
+    def _leave_pages(self):
+        """Back to the conversation from any page; a page waiting like a dialog is cancelled."""
+        page = self.pages.currentWidget()
+        if page is self.settings_dialog:
+            self._close_panel()
+        elif isinstance(page, PanelPage):
+            for dialog in page.body.findChildren(QDialog):
+                dialog.reject()
+
+    def _refresh_sidebar(self):
+        try:
+            rows = self.store.conversations(character_key(self.settings.character_path))
+        except sqlite3.Error:
+            return
+        # Like Codex, a new conversation joins the list once something is said in it.
+        rows = [row for row in rows if row["message_count"] or row["id"] == self._conversation_id]
+        self.sidebar.set_conversations(rows, self._conversation_id)
+
+    @Slot(str)
+    def _switch_conversation(self, conversation_id):
+        if conversation_id == self._conversation_id and self.pages.currentWidget() is self.chat_page:
+            return
+        self._end_handsfree()
+        if self._worker or self.microphone.busy:
+            self._flash("Let her finish, or press Stop, before switching conversations.")
+            self._refresh_sidebar()
+            return
+        self._interrupt_speech()
+        if self._active_turn and not self._save_active_turn():
+            return
+        self._leave_pages()
+        try:
+            self._restore_conversation(conversation_id)
+        except sqlite3.Error:
+            self._flash("That conversation could not be opened. Please try again.")
+
+    @Slot(str, bool)
+    def _pin_conversation(self, conversation_id, pinned):
+        try:
+            self.store.pin_conversation(conversation_id, pinned)
+        except sqlite3.Error:
+            self._flash("Could not pin that conversation. Please try again.")
+        self._refresh_sidebar()
+
+    def _rename_conversation(self, conversation_id):
+        conversation = self.store.conversation(conversation_id)
+        if not conversation:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        title, accepted = QInputDialog.getText(self, "Rename conversation", "Name", text=conversation["title"])
+        if not accepted or not title.strip():
+            return
+        try:
+            self.store.rename_conversation(conversation_id, title)
+        except (ValueError, sqlite3.Error) as exc:
+            self._flash(str(exc) if isinstance(exc, ValueError) else "Could not rename it. Please try again.")
+            return
+        self._update_conversation_title()
+
+    def _delete_conversation(self, conversation_id):
+        conversation = self.store.conversation(conversation_id)
+        if not conversation:
+            return
+        current = conversation_id == self._conversation_id
+        if current and (self._worker or self.microphone.busy):
+            self._flash("Let her finish, or press Stop, before deleting this conversation.")
+            return
+        if QMessageBox.question(self, "Delete conversation?",
+                                f"Delete “{conversation['title']}” and everything shared in it? This cannot be undone."
+                                ) != QMessageBox.StandardButton.Yes:
+            return
+        if current:
+            self._end_handsfree()
+            self._interrupt_speech()
+            self._active_turn = None
+        try:
+            self.store.delete_conversation(conversation_id)
+            if current:
+                key = character_key(self.settings.character_path)
+                rest = self.store.conversations(key)
+                self._restore_conversation(rest[0]["id"] if rest else self.store.create_conversation(key))
+        except sqlite3.Error:
+            self._flash("Could not delete that conversation. Please try again.")
+        self._refresh_sidebar()
+
+    def _toggle_sidebar(self):
+        self._sidebar_wanted = not self.sidebar.isVisible()
+        self._place_sidebar()
+
+    def _place_sidebar(self):
+        # On a narrow window the conversation keeps the room; Ctrl+B still opens the sidebar.
+        visible = self._sidebar_wanted and (self.width() >= 760 or self.sidebar.search.hasFocus())
+        self.sidebar.setVisible(visible)
+        self.show_sidebar.setVisible(not visible)
+
+    def _search_conversations(self):
+        self._sidebar_wanted = True
+        self.sidebar.show()
+        self.show_sidebar.hide()
+        self.sidebar.start_search()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "sidebar"):
+            self._place_sidebar()
+
+    # Messages and model -------------------------------------------------------------------
+
+    @Slot(int)
+    def _message_style_changed(self, _index):
+        style = self.message_style.currentData()
+        self.settings = replace(self.settings, message_style=style)
+        self.transcript.set_plain(style == "plain")
+        try:
+            self.preferences.remember(self.settings, ("message_style",))
+        except (OSError, ValueError):
+            pass
+
+    @Slot(str)
+    def _read_aloud(self, text):
+        if not text or self.suspended or self._closing:
+            return
+        self._activity_error = False
+        self._end_handsfree()
+        self._interrupt_speech()
+        self._voice_for_reply = False
+        self.speech.speak(text, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
+
+    @Slot(str)
+    def _quote(self, text):
+        quoted = "\n".join("> " + line for line in text.splitlines() if line.strip())
+        draft = self.input.toPlainText().strip()
+        self.input.setPlainText(quoted + "\n\n" + (draft + "\n" if draft else ""))
+        self.input.moveCursor(QTextCursor.MoveOperation.End)
+        self.input.setFocus()
+
+    def _model_name(self):
+        provider = self.settings.llm_provider
+        if provider == "claude":
+            from ..chat.claude import CLAUDE_MODELS, DEFAULT_CLAUDE_MODEL
+            model = self.settings.claude_model or DEFAULT_CLAUDE_MODEL
+            return dict((key, name) for name, key in CLAUDE_MODELS).get(model, model).removeprefix("Claude ")
+        if provider == "codex":
+            return self.settings.codex_model or "ChatGPT"
+        return (self.settings.openrouter_model or self.settings.model).split("/")[-1].split(":")[0] or "OpenRouter"
+
+    def _refresh_model_picker(self):
+        self.model_picker.setText(self._model_name())
+        self.model_picker.setToolTip(self._model_label())
+
+    def _fill_model_menu(self):
+        menu, combo = self.model_menu, self.connection.model
+        menu.clear()
+        if combo.isEditable():  # OpenRouter: any model ID, typed in Settings.
+            item = menu.addAction(combo.currentText() or "No model chosen")
+            item.setCheckable(True)
+            item.setChecked(True)
+            item.setEnabled(False)
+        else:
+            for index in range(combo.count()):
+                item = menu.addAction(combo.itemText(index))
+                item.setCheckable(True)
+                item.setChecked(index == combo.currentIndex())
+                item.triggered.connect(lambda _=False, index=index: combo.setCurrentIndex(index))
+        menu.addSeparator()
+        menu.addAction(glyph_icon("settings"), "Change service…", self._open_model_settings)
+
+    def _open_model_settings(self):
+        self.open_settings()
+        self.settings_tabs.setCurrentIndex(0)
 
     def _reset_conversation_view(self) -> None:
         self._activity_error = False
@@ -1434,6 +1691,7 @@ class CompanionWindow(QMainWindow):
         settings = active_character_voice(settings)
         self.settings = settings
         self.connection.apply(settings)
+        self._refresh_model_picker()
         self._refresh_character_label()
         self._refresh_characters()
         self._refresh_avatar_models()
@@ -2359,7 +2617,7 @@ class CompanionWindow(QMainWindow):
         self.open_settings()
         self.settings_tabs.setCurrentIndex(2)
         scroll = self.settings_tabs.currentWidget()
-        QTimer.singleShot(0, lambda: scroll.ensureWidgetVisible(self.animation_tester, 0, 0))
+        QTimer.singleShot(0, scroll, lambda: scroll.ensureWidgetVisible(self.animation_tester, 0, 0))
 
     def _set_sleep_option(self, minutes):
         if self.avatar_sleep.findData(minutes) < 0:
@@ -2929,6 +3187,7 @@ class CompanionWindow(QMainWindow):
         if conversation:
             self.conversation_title.setText(conversation["title"])
             self.conversation_title.setToolTip(conversation["title"])
+        self._refresh_sidebar()
 
     def _restore_conversation(self, conversation_id) -> None:
         rows = self.store.messages(conversation_id)
@@ -2944,7 +3203,8 @@ class CompanionWindow(QMainWindow):
             if row["status"] == "pending":
                 notice = "Interrupted during a previous session"
             self.transcript.add_message(row["role"], name, row["display"], notice or "",
-                                        attachments=attachments.loads(row.get("attachments", "")))
+                                        attachments=attachments.loads(row.get("attachments", "")),
+                                        when=row.get("created_at", ""))
             if row["role"] == "assistant" and row["display"] and row["status"] != "local":
                 self._last_reply = row["display"]
                 self._last_reply_id = row["id"]
