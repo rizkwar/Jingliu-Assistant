@@ -14,7 +14,7 @@ from ..chat.continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 PROJECT_COLORS = ("ice", "frost", "crimson", "amber", "jade", "violet")
 PROJECT_KINDS = ("project", "study")
 CARD_LIMITS = (500, 2000)  # Characters on the front and back of a flashcard.
@@ -112,8 +112,12 @@ class Store:
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(projects)")}
             if "kind" not in columns:  # "project", or "study": a subject with flashcards and an exam date.
                 self.connection.execute("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
-            if "exam_date" not in columns:
+            if "exam_date" not in columns:  # No longer used; kept so databases from that version stay valid.
                 self.connection.execute("ALTER TABLE projects ADD COLUMN exam_date TEXT NOT NULL DEFAULT ''")
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(project_files)")}
+            if "source" not in columns:  # Where a material came from, to notice a newer version there.
+                self.connection.execute("ALTER TABLE project_files ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+                self.connection.execute("ALTER TABLE project_files ADD COLUMN source_mtime REAL NOT NULL DEFAULT 0")
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(messages)")}
             if "attachments" not in columns:
                 # JSON list of locally stored copies; the files live under data/attachments.
@@ -188,10 +192,6 @@ class Store:
                 if value not in PROJECT_COLORS:
                     raise ValueError("Choose one of the project colours.")
                 values[field] = value
-            elif field == "exam_date":
-                if value:
-                    datetime.strptime(value, "%Y-%m-%d")  # ValueError for anything but a date.
-                values[field] = value or ""
             elif field in PROJECT_LIMITS:
                 values[field] = self._project_text(field, value)
             else:
@@ -227,13 +227,25 @@ class Store:
         return [dict(row) for row in self.connection.execute(
             "SELECT * FROM project_files WHERE project_id=? ORDER BY added_at, id", (project_id,))]
 
-    def add_project_file(self, project_id, name, path, kind, size=0):
+    def add_project_file(self, project_id, name, path, kind, size=0, source="", source_mtime=0.0):
+        """A stored copy of a file. `source` is where it was copied from, so a newer version there can be noticed."""
         with self.connection:
             cursor = self.connection.execute(
-                "INSERT INTO project_files(project_id,name,path,kind,size,added_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (project_id, name, path, kind, int(size), now()))
+                "INSERT INTO project_files(project_id,name,path,kind,size,added_at,source,source_mtime) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (project_id, name, path, kind, int(size), now(), source, float(source_mtime)))
             self.connection.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
         return cursor.lastrowid
+
+    def update_project_file(self, file_id, name, path, kind, size, source, source_mtime):
+        """A newer version of a material, in the same place in the list. Returns the row as it was."""
+        before = self.connection.execute("SELECT * FROM project_files WHERE id=?", (file_id,)).fetchone()
+        if before:
+            with self.connection:
+                self.connection.execute(
+                    "UPDATE project_files SET name=?, path=?, kind=?, size=?, source=?, source_mtime=?, added_at=? WHERE id=?",
+                    (name, path, kind, int(size), source, float(source_mtime), now(), file_id))
+                self.connection.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), before["project_id"]))
+        return dict(before) if before else None
 
     # Study: flashcards (spaced repetition) and events (focus minutes, quiz answers) per subject.
 

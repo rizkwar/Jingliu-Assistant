@@ -54,6 +54,7 @@ class Settings:
     check_in_greeted: str = ""
     message_style: str = "plain"
     sidebar_tab: str = "chats"
+    last_conversation: str = ""
     chat_tools: str = field(default="", repr=False)  # --mcp-config JSON of servers allowed in conversation
     character_voice: str = ""
     character_voice_rate: int = 100

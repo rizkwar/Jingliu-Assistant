@@ -35,6 +35,23 @@ def store_file(source, project_id, root=PROJECT_ROOT_FOLDER):
     return source.name, portable(target), kind, target.stat().st_size
 
 
+def origin(source):
+    """Where a material was copied from and when that file last changed, to notice a newer version later."""
+    source = Path(source).resolve()
+    return str(source), source.stat().st_mtime
+
+
+def newer_at_source(item):
+    """True when the file a material was copied from has changed since (and still exists)."""
+    source = item.get("source")
+    if not source:
+        return False
+    try:
+        return Path(source).stat().st_mtime > float(item.get("source_mtime") or 0) + 1
+    except OSError:
+        return False
+
+
 def remove_stored(files, root=PROJECT_ROOT_FOLDER):
     """Delete stored copies, never anything outside the projects folder."""
     root = Path(root).resolve()

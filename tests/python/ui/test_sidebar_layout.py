@@ -117,6 +117,48 @@ class SidebarLayoutTests(unittest.TestCase):
         self.window._read_aloud("Examples first.")
         self.assertEqual(self.speech.calls[-1][0], "Examples first.")
 
+    def test_opening_a_chat_keeps_its_place_and_is_reopened_next_time(self):
+        before = self.titles()
+        bottom = self.window.sidebar.list.findItems(before[-1], Qt.MatchFlag.MatchExactly)[0]
+        chosen = bottom.data(Qt.ItemDataRole.UserRole)
+        self.window.sidebar.list.itemClicked.emit(bottom)
+        self.assertEqual(self.titles(), before)  # Only a new message moves a chat up.
+        self.assertEqual(self.window.settings.last_conversation, chosen)
+        again = CompanionWindow(self.window.settings, speech=FakeSpeech(), microphone=FakeMicrophone(), store=self.store)
+        self.addCleanup(again.deleteLater)
+        self.assertEqual(again._conversation_id, chosen)
+
+    def test_folders_show_a_chevron_and_open_with_their_chats(self):
+        from companion.ui.sidebar import ICONS
+        project = self.window._new_project()
+        self.window._new_chat_in_project(project)
+        self.window.store.start_turn(self.window._conversation_id, "Hello")
+        self.window._refresh_sidebar()
+        tree = self.window.sidebar.trees["project"]
+        item = tree.topLevelItem(0)
+        self.assertEqual(tree.indentation(), 0)  # No indentation area to paint in another blue.
+        self.assertTrue(item.isExpanded())
+        self.assertEqual(item.text(1), ICONS["chevron"])  # A symbol, not a number.
+        tree.itemClicked.emit(item, 1)  # The chevron only folds…
+        self.assertFalse(item.isExpanded())
+        self.assertEqual(item.text(1), ICONS["chevron_right"])
+        self.assertIs(self.window.pages.currentWidget(), self.window.chat_page)  # …it doesn't open the page.
+
+    def test_rows_offer_buttons_on_hover(self):
+        sidebar = self.window.sidebar
+        chat = sidebar.list.findItems("Study plan for finals", Qt.MatchFlag.MatchExactly)[0]
+        self.assertEqual([glyph for glyph, _, _ in sidebar._buttons_for(chat)], ["pin", "more"])
+        heading = next(sidebar.list.item(row) for row in range(sidebar.list.count())
+                       if not sidebar.list.item(row).data(Qt.ItemDataRole.UserRole))
+        self.assertEqual(sidebar._buttons_for(heading), [])
+        dict(((glyph, callback) for glyph, _, callback in sidebar._buttons_for(chat)))["pin"](chat, None)
+        self.assertTrue(self.store.conversation(self.older)["pinned"])
+        project = self.window._new_project("study")
+        folder = sidebar.trees["study"].topLevelItem(0)
+        self.assertEqual([glyph for glyph, _, _ in sidebar._buttons_for(folder)], ["compose", "more"])
+        dict(((glyph, callback) for glyph, _, callback in sidebar._buttons_for(folder)))["compose"](folder, None)
+        self.assertEqual(self.store.conversation(self.window._conversation_id)["project_id"], project)
+
     def test_sidebar_hides_on_a_narrow_window_and_comes_back(self):
         self.window.resize(600, 700)
         self.app.processEvents()

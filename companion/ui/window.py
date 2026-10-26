@@ -287,7 +287,9 @@ class CompanionWindow(QMainWindow):
         key = character_key(settings.character_path)
         self.store.claim_legacy_conversations(key)
         conversations = self.store.conversations(key)
-        self._conversation_id = conversations[0]["id"] if conversations else self.store.create_conversation(key)
+        # The conversation open when the app last closed comes back; otherwise the latest one.
+        last = next((row["id"] for row in conversations if row["id"] == settings.last_conversation), None)
+        self._conversation_id = last or (conversations[0]["id"] if conversations else self.store.create_conversation(key))
         self._active_turn = None
         self._reply_status = "pending"
         self._reply_notice = ""
@@ -341,6 +343,8 @@ class CompanionWindow(QMainWindow):
         self.sidebar.new_project.connect(self._new_project)
         self.sidebar.new_chat_in_project.connect(self._new_chat_in_project)
         self.sidebar.review_cards.connect(self._review_cards)
+        self.sidebar.rename_project.connect(self._rename_project)
+        self.sidebar.delete_project.connect(self._delete_project)
         self.sidebar.tab_changed.connect(self._sidebar_tab_changed)
         self.sidebar.show_tab(settings.sidebar_tab)
         self._sidebar_wanted = True
@@ -1557,9 +1561,8 @@ class CompanionWindow(QMainWindow):
         for project in projects:
             if project["kind"] == "study":
                 try:
-                    extras[project["id"]] = {"exam": study.exam_text(project["exam_date"]),
-                                             "due": study.stats(self.store, project["id"])["due"]}
-                except (sqlite3.Error, ValueError):
+                    extras[project["id"]] = {"due": study.stats(self.store, project["id"])["due"]}
+                except sqlite3.Error:
                     pass
         self.sidebar.set_conversations(rows, self._conversation_id, projects, current, page, extras)
 
@@ -3296,7 +3299,9 @@ class CompanionWindow(QMainWindow):
         try:
             files = self.store.project_files(project["id"])
             if project["kind"] == "study":
-                return study.context(project, files, study.stats(self.store, project["id"]))
+                # A subject is a folder of sessions: she remembers what was covered in its other sessions.
+                earlier = study.recall(self.store, project, self._conversation_id, character_key(self.settings.character_path))
+                return study.context(project, files, study.stats(self.store, project["id"]), earlier)
             return projects.context(project, files)
         except sqlite3.Error:
             return None
@@ -3312,6 +3317,31 @@ class CompanionWindow(QMainWindow):
         self.pages.setCurrentWidget(self.project_page)
         self._show_tab_for(self.store.project(project_id))
         self._refresh_sidebar()
+
+    def _rename_project(self, project_id):
+        project = self.store.project(project_id)
+        if not project:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        title = "Rename subject" if project["kind"] == "study" else "Rename project"
+        name, accepted = QInputDialog.getText(self, title, "Name", text=project["name"])
+        if not accepted or not name.strip():
+            return
+        try:
+            self.store.update_project(project_id, name=name)
+        except (ValueError, sqlite3.Error) as exc:
+            self._flash(str(exc) if isinstance(exc, ValueError) else "Could not rename it. Please try again.")
+            return
+        if self.project_page.project_id == project_id:
+            self.project_page.show_project(project_id)
+        self._project_changed()
+
+    def _delete_project(self, project_id):
+        """From the sidebar's ⋯: the same choice as on the page (keep its chats, or delete them too)."""
+        if not self.store.project(project_id):
+            return
+        self._open_project(project_id)
+        self.project_page._delete()
 
     def _show_tab_for(self, project):
         """The sidebar shows the tab a conversation or page belongs to."""
@@ -3609,7 +3639,14 @@ class CompanionWindow(QMainWindow):
     def _restore_conversation(self, conversation_id) -> None:
         rows = self.store.messages(conversation_id)
         context = self.store.context(conversation_id)
-        self.store.touch_conversation(conversation_id)
+        # Opening a conversation keeps its place in the list (only a new message moves it up);
+        # which one is open is remembered for the next start.
+        if self.settings.last_conversation != conversation_id:
+            self.settings = replace(self.settings, last_conversation=conversation_id)
+            try:
+                self.preferences.remember(self.settings, ("last_conversation",))
+            except (OSError, ValueError):
+                pass
         self._reset_conversation_view()
         self._conversation_id = conversation_id
         self._active_turn = None

@@ -1,4 +1,4 @@
-"""Study subjects: spaced repetition, the exam countdown, her study cues, and the window's study tools."""
+"""Study subjects: shared memory across sessions, spaced repetition, her study cues and the study tools."""
 
 from dataclasses import replace
 from datetime import date, timedelta
@@ -33,12 +33,6 @@ class ScheduleTests(unittest.TestCase):
         self.assertTrue(study.schedule(known, "again", DAY)[3])           # A lapse on a known card
         self.assertGreaterEqual(study.schedule({"interval": 3, "ease": 1.3}, "again", DAY)[2], 1.3)
 
-    def test_exam_countdown_reads_naturally(self):
-        for offset, text in ((0, "Exam today"), (1, "Exam tomorrow"), (12, "Exam in 12 days"),
-                             (-1, "Exam was 1 day ago"), (-3, "Exam was 3 days ago")):
-            self.assertEqual(study.exam_text((DAY + timedelta(days=offset)).isoformat(), DAY), text)
-        self.assertEqual(study.exam_text(""), "")
-
     def test_card_cues_need_a_question_and_an_answer(self):
         self.assertEqual(study.parse_card(" What is a limit? || The value approached. "),
                          ("What is a limit?", "The value approached."))
@@ -56,10 +50,6 @@ class StudyStorageTests(unittest.TestCase):
         self.store.create_project("Website")
         self.assertEqual([p["name"] for p in self.store.projects("study")], ["Statistika"])
         self.assertEqual([p["name"] for p in self.store.projects("project")], ["Website"])
-        self.store.update_project(self.subject, exam_date="2026-11-07")
-        self.assertEqual(self.store.project(self.subject)["exam_date"], "2026-11-07")
-        with self.assertRaises(ValueError):
-            self.store.update_project(self.subject, exam_date="next week")
         with self.assertRaises(ValueError):
             self.store.create_project("Odd", "hobby")
 
@@ -75,11 +65,49 @@ class StudyStorageTests(unittest.TestCase):
         progress = study.stats(self.store, self.subject)
         self.assertEqual((progress["cards"], progress["due"], progress["focus_week"], progress["right"], progress["answers"]),
                          (2, 1, 25, 2, 3))
-        context = study.context(dict(self.store.project(self.subject), exam_date=""), [], progress)
+        context = study.context(self.store.project(self.subject), [], progress)
         self.assertIn('study session for the user\'s subject "Statistika"', context)
         self.assertIn("[[card: question || answer]]", context)
         self.assertIn("2 of 3 recent quiz answers right", context)
         self.assertNotIn("this conversation belongs to the user's project", context)
+
+
+class SubjectMemoryTests(unittest.TestCase):
+    """A subject is a folder of sessions: in one, she remembers what was covered in the others."""
+
+    def setUp(self):
+        self.store = Store(":memory:")
+        self.addCleanup(self.store.close)
+        self.subject = self.store.project(self.store.create_project("Statistika", "study"))
+
+    def session(self, title, user, reply, character="me"):
+        conversation = self.store.create_conversation(character)
+        self.store.rename_conversation(conversation, title)
+        self.store.set_conversation_project(conversation, self.subject["id"])
+        turn = self.store.start_turn(conversation, user)
+        self.store.save_turn(turn, reply, reply, "complete")
+        return conversation
+
+    def test_a_new_session_remembers_the_earlier_ones(self):
+        first = self.session("Mean and median", "What is the median?", "The middle value when sorted.")
+        noted = self.session("Variance", "Explain variance", "The average squared distance from the mean.")
+        self.store.save_summary(noted, "Covered variance and standard deviation; struggled with squaring.")
+        current = self.session("Today", "Hello", "Welcome back.")
+        memory = study.recall(self.store, self.subject, current, "me")
+        self.assertIn("The middle value when sorted.", memory)          # Last exchanges of a session
+        self.assertIn("struggled with squaring", memory)               # Saved notes when there are any
+        self.assertNotIn("The average squared distance", memory)        # ...instead of its messages
+        self.assertNotIn("Welcome back.", memory)                       # Not the session itself
+        self.assertLess(memory.index("Variance"), memory.index("Mean and median"))  # Newest first
+        self.assertIn(memory, study.context(self.subject, [], None, memory))
+        self.assertEqual(study.recall(self.store, self.subject, first, "someone else"), "")  # Another character's
+
+    def test_memory_stays_within_its_budget(self):
+        for number in range(30):
+            self.session(f"Session {number}", "Q" * 500, "A" * 600)
+        memory = study.recall(self.store, self.subject, "", "me")
+        self.assertLessEqual(len(memory), study.RECALL_CHARS + 1000)
+        self.assertLessEqual(memory.count('"session"'), study.RECALL_SESSIONS)
 
 
 class StudyWindowTests(unittest.TestCase):
@@ -122,6 +150,12 @@ class StudyWindowTests(unittest.TestCase):
         self.assertEqual(self.window.settings.sidebar_tab, "projects")  # Remembered.
         self.window._new_conversation()
         self.assertFalse(self.window.type_bar.isVisible())  # Everyday chats have no study tools.
+
+    def test_a_new_session_in_the_subject_remembers_the_last_one(self):
+        turn = self.store.start_turn(self.window._conversation_id, "Teach me the mean")
+        self.store.save_turn(turn, "The mean is the sum divided by the count.", "x", "complete")
+        self.window._new_chat_in_project(self.subject)
+        self.assertIn("The mean is the sum divided by the count.", self.window._project_context())
 
     def test_study_sessions_have_their_tools(self):
         self.assertTrue(self.window.type_bar.isVisible())

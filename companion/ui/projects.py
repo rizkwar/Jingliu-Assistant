@@ -3,9 +3,9 @@ from datetime import datetime
 from pathlib import Path
 import sqlite3
 
-from PySide6.QtCore import QDate, QSignalBlocker, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (QBoxLayout, QDateEdit, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+from PySide6.QtWidgets import (QBoxLayout, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
                                QVBoxLayout, QWidget)
 
@@ -22,6 +22,7 @@ KIND_LABELS = {"image": "Image", "pdf": "PDF", "text": "Text"}
 PROJECT_WORDS = {
     "name": "Project name", "description": "What is this project about? (optional)", "start": "New chat in {name}",
     "chats": "Conversations", "no_chats": "No conversations yet. Start one above; it stays in this project.",
+    "chats_hint": "",
     "instructions": "Instructions",
     "instructions_hint": "She follows these in every conversation of this project. For example: “I'm a beginner, "
                          "use examples first” or “answer in Indonesian”.",
@@ -29,9 +30,11 @@ PROJECT_WORDS = {
     "files": "Files", "files_hint": "Notes, documents and code she should know. Text and PDFs are read and kept in "
                                     "mind; you can also drop files here."}
 STUDY_WORDS = {
-    "name": "Subject name", "description": "What are you studying for? e.g. “Midterm: chapters 1–5”",
+    "name": "Subject name", "description": "What does this subject cover? e.g. “Chapters 1–5: probability”",
     "start": "New study session in {name}", "chats": "Sessions",
     "no_chats": "No sessions yet. Start one above: ask her to teach, quiz you, or make flashcards.",
+    "chats_hint": "Every session here shares her memory of this subject: in a new one she remembers what you "
+                  "covered before and picks up from there.",
     "instructions": "How she teaches you",
     "instructions_hint": "She tutors you in every session of this subject. For example: “explain in Indonesian”, "
                          "“I learn best from worked examples” or “be strict with my quiz answers”.",
@@ -167,25 +170,8 @@ class ProjectPage(QWidget):
         self.columns.addLayout(left, 3)
         self.columns.addLayout(right, 2)
 
-        # Study subjects only: the exam, flashcards, focus time and quiz results.
+        # Study subjects only: flashcards, focus time and quiz results.
         self.progress_card, progress, _ = _card("Progress")
-        exam = QHBoxLayout()
-        exam.setSpacing(8)
-        self.exam = QLabel()
-        self.exam.setObjectName("examCountdown")
-        exam.addWidget(self.exam, 1)
-        self.exam_date = QDateEdit()
-        self.exam_date.setCalendarPopup(True)
-        self.exam_date.setDisplayFormat("d MMM yyyy")
-        self.exam_date.setToolTip("The exam date")
-        self.exam_date.dateChanged.connect(self._exam_changed)
-        exam.addWidget(self.exam_date)
-        self.clear_exam = QPushButton("No exam")
-        self.clear_exam.setObjectName("chip")
-        self.clear_exam.setToolTip("Clear the exam date")
-        self.clear_exam.clicked.connect(lambda: self._update(exam_date=""))
-        exam.addWidget(self.clear_exam)
-        progress.addLayout(exam)
         self.progress = QLabel()
         self.progress.setObjectName("progressText")
         self.progress.setWordWrap(True)
@@ -200,6 +186,10 @@ class ProjectPage(QWidget):
 
         card, chats, self.chats_header = _card("Conversations")
         self.chats_title = card.findChild(QLabel, "cardTitle")
+        self.chats_hint = QLabel()
+        self.chats_hint.setObjectName("rowHint")
+        self.chats_hint.setWordWrap(True)
+        chats.addWidget(self.chats_hint)
         self.chats = QListWidget()
         self.chats.setObjectName("projectChats")
         self.chats.setFrameShape(QFrame.Shape.NoFrame)
@@ -236,6 +226,12 @@ class ProjectPage(QWidget):
                                     "and kept in mind; you can also drop files here.")
         self.files_title = card.findChild(QLabel, "cardTitle")
         self.files_hint = card.findChild(QLabel, "rowHint")
+        self.refresh_all = QPushButton()
+        self.refresh_all.setObjectName("chip")
+        self.refresh_all.setToolTip("Bring in the newer versions of files that changed since they were added")
+        self.refresh_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_all.clicked.connect(self._refresh_all)
+        header.addWidget(self.refresh_all)
         add = QPushButton("Add files…")
         add.setObjectName("chip")
         add.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -320,12 +316,17 @@ class ProjectPage(QWidget):
             self.chats.addItem(item)
         self.chats_title.setText(f"{words['chats']} ({len(rows)})" if rows else words["chats"])
         self.no_chats.setText(words["no_chats"])
+        self.chats_hint.setText(words["chats_hint"])
+        self.chats_hint.setVisible(bool(words["chats_hint"]))
         self.no_chats.setVisible(not rows)
         files = self.store.project_files(project["id"])
         self.files.clear()
         for item in files:
             self._file_row(item)
         self.files_title.setText(f"{words['files']} ({len(files)})" if files else words["files"])
+        stale = sum(knowledge.newer_at_source(item) for item in files)
+        self.refresh_all.setText(f"Refresh all ({stale})")
+        self.refresh_all.setVisible(stale > 1)
         self.files.setVisible(bool(files))
         readable, characters = knowledge.summary(files)
         self.knowledge.setText("" if not files else
@@ -340,11 +341,6 @@ class ProjectPage(QWidget):
     def _show_progress(self, project):
         from ..chat import study
         progress = study.stats(self.store, project["id"])
-        self.exam.setText(study.exam_text(project["exam_date"]) or "No exam date set")
-        with QSignalBlocker(self.exam_date):
-            self.exam_date.setDate(QDate.fromString(project["exam_date"], "yyyy-MM-dd") if project["exam_date"]
-                                   else QDate.currentDate().addDays(14))
-        self.clear_exam.setVisible(bool(project["exam_date"]))
         accuracy = (f"{progress['right']} of {progress['answers']} recent quiz answers right"
                     if progress["answers"] else "No quiz answers yet")
         self.progress.setText(f"{progress['cards']} flashcards · {progress['due']} due today\n"
@@ -353,11 +349,6 @@ class ProjectPage(QWidget):
         self.review.setText(f"Review flashcards ({progress['due']} due)" if progress["due"] else
                             "Browse flashcards" if progress["cards"] else "No flashcards yet")
         self.review.setEnabled(bool(progress["cards"]))
-
-    def _exam_changed(self, date):
-        project = self._project()
-        if project and date.toString("yyyy-MM-dd") != project["exam_date"]:
-            self._update(exam_date=date.toString("yyyy-MM-dd"))
 
     def _file_row(self, item):
         row = QWidget()
@@ -373,13 +364,29 @@ class ProjectPage(QWidget):
         line.addWidget(name, 1)
         meta = QLabel(f"{KIND_LABELS.get(item['kind'], 'File')} · {_size(item['size'])}")
         meta.setObjectName("rowHint")
+        meta.setToolTip(f"This version added {_when(item['added_at'])}")
         line.addWidget(meta)
-        remove = QPushButton(ICONS["close"])
-        remove.setObjectName("remove")
-        remove.setToolTip("Remove from the project")
-        remove.setCursor(Qt.CursorShape.PointingHandCursor)
-        remove.clicked.connect(lambda: self._remove_file(item["id"]))
-        line.addWidget(remove)
+        if knowledge.newer_at_source(item):
+            refresh = QPushButton("Refresh")
+            refresh.setObjectName("chip")
+            refresh.setToolTip(f"The original changed since it was added:\n{item['source']}")
+            refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+            refresh.clicked.connect(lambda: self._replace_file(item, item["source"]))
+            line.addWidget(refresh)
+        more = QPushButton(ICONS["more"])
+        more.setObjectName("remove")
+        more.setToolTip("Open, replace or remove")
+        more.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu = QMenu(more)
+        menu.addAction(glyph_icon("open"), "Open", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(resolve(item["path"])))))
+        menu.addAction(glyph_icon("rename"), "Replace with a newer version…", lambda: self._choose_replacement(item))
+        if item.get("source") and Path(item["source"]).exists():
+            menu.addAction(glyph_icon("folder"), "Show the original",
+                           lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(item["source"]).parent))))
+        menu.addSeparator()
+        menu.addAction(glyph_icon("delete", color="#f3a5b3"), "Remove", lambda: self._remove_file(item["id"]))
+        more.clicked.connect(lambda: menu.exec(more.mapToGlobal(more.rect().bottomLeft())))
+        line.addWidget(more)
         entry = QListWidgetItem()
         entry.setSizeHint(QSize(0, 34))
         self.files.addItem(entry)
@@ -447,7 +454,7 @@ class ProjectPage(QWidget):
         for path in paths[:max(0, knowledge.MAX_FILES - existing)]:
             try:
                 name, stored, kind, size = knowledge.store_file(path, self.project_id, self.files_root)
-                self.store.add_project_file(self.project_id, name, stored, kind, size)
+                self.store.add_project_file(self.project_id, name, stored, kind, size, *knowledge.origin(path))
             except AttachmentError as exc:
                 problems.append(str(exc))
             except (OSError, sqlite3.Error):
@@ -458,6 +465,45 @@ class ProjectPage(QWidget):
         self.changed.emit()
         if problems:
             QMessageBox.information(self, "Some files were not added", "\n".join(problems[:8]))
+
+    def _choose_replacement(self, item):
+        start = item.get("source") if item.get("source") and Path(item["source"]).exists() else str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(self, f"Replace {item['name']}", start, FILE_FILTER)
+        if path:
+            self._replace_file(item, path)
+
+    def _replace_file(self, item, path, quiet=False):
+        """A newer version of a material takes its place; the old copy is removed."""
+        try:
+            name, stored, kind, size = knowledge.store_file(path, self.project_id, self.files_root)
+        except AttachmentError as exc:
+            if not quiet:
+                QMessageBox.information(self, "Could not update", str(exc))
+            return False
+        except OSError:
+            if not quiet:
+                QMessageBox.information(self, "Could not update", f"{Path(path).name} could not be copied.")
+            return False
+        try:
+            before = self.store.update_project_file(item["id"], name, stored, kind, size, *knowledge.origin(path))
+        except sqlite3.Error:
+            knowledge.remove_stored([{"path": stored}], self.files_root)
+            return False
+        if before:
+            knowledge.remove_stored([before], self.files_root)
+        if not quiet:
+            self.refresh()
+            self.changed.emit()
+        return True
+
+    def _refresh_all(self):
+        changed = [item for item in self.store.project_files(self.project_id) if knowledge.newer_at_source(item)]
+        updated = sum(self._replace_file(item, item["source"], quiet=True) for item in changed)
+        self.refresh()
+        self.changed.emit()
+        if updated < len(changed):
+            QMessageBox.information(self, "Some files were not updated",
+                                    f"{len(changed) - updated} of {len(changed)} could not be read again.")
 
     def _remove_file(self, file_id):
         try:

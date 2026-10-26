@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from unittest.mock import patch
@@ -78,6 +79,33 @@ class ProjectWindowTests(unittest.TestCase):
         context = self.window._project_context()
         self.assertIn("Worked examples first.", context)
         self.assertIn("A limit is what a function approaches.", context)
+
+    def test_materials_can_be_updated(self):
+        from companion.chat import projects as knowledge
+        from companion.core.paths import resolve
+        project = self.make_project()
+        page = self.window.project_page
+        notes = self.folder / "lecture.md"
+        notes.write_text("Week 1: the mean.", encoding="utf-8")
+        page.add_files([str(notes)])
+        item = self.store.project_files(project)[0]
+        self.assertFalse(knowledge.newer_at_source(item))
+        notes.write_text("Week 1: the mean. Week 2: the variance.", encoding="utf-8")
+        os.utime(notes, (time.time() + 60, time.time() + 60))  # Edited later.
+        item = self.store.project_files(project)[0]
+        self.assertTrue(knowledge.newer_at_source(item))
+        old_copy = resolve(item["path"])
+        page._replace_file(item, item["source"])  # Refresh
+        updated = self.store.project_files(project)
+        self.assertEqual(len(updated), 1)
+        self.assertFalse(knowledge.newer_at_source(updated[0]))
+        self.assertFalse(old_copy.exists())  # The old version is gone, not kept alongside.
+        self.window._new_chat_in_project(project)
+        self.assertIn("Week 2: the variance.", self.window._project_context())
+        other = self.folder / "slides.md"
+        other.write_text("Slides: distributions.", encoding="utf-8")
+        page._replace_file(updated[0], str(other))  # Replace with another file
+        self.assertEqual(self.store.project_files(project)[0]["name"], "slides.md")
 
     def test_moving_a_chat_in_and_out_of_a_project(self):
         project = self.make_project()

@@ -14,7 +14,11 @@ from .window import DesktopAvatar
 
 class ShapeGrip(QSizeGrip):
     """The corner grip, resizing her window in her own proportions as it is dragged.
-    (A plain grip sets any size; correcting it afterwards made the two fight and the window jitter.)"""
+    (A plain grip sets any size; correcting it afterwards made the two fight and the window jitter.)
+    It draws nothing: her corner stays clean, and the resize cursor shows where to drag."""
+
+    def paintEvent(self, event):
+        pass
 
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
@@ -223,6 +227,7 @@ class MeshDesktopAvatar(DesktopAvatar):
         # Floats over the corner rather than taking a row of its own below her.
         self.grip = ShapeGrip(self)
         self.grip.setFixedSize(18, 18)
+        self.grip.setToolTip("Drag to resize her")
         self.work_panel = WorkPanel(self)
         # Off-the-record profile: no cookies or cache persisted into user data.
         self.profile = QWebEngineProfile(self)

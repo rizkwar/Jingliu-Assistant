@@ -30,6 +30,7 @@ ICONS = {
     'chevron': '', 'shield': '', 'bell': '', 'quote': '',
     'tool': '', 'folder': '', 'project': '', 'open': '', 'plug': '',
     'study': '', 'cards': '', 'timer': '', 'quiz': '', 'idea': '', 'notes': '',
+    'folder_open': '', 'chevron_right': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -252,7 +253,12 @@ QTreeWidget#sideTree {{ background: transparent; border: none; padding: 0; outli
 QTreeWidget#sideTree::item {{ color: #c3d3ea; padding: 0 6px; border-radius: 8px; border: none; }}
 QTreeWidget#sideTree::item:hover {{ background: rgba(168, 212, 255, 0.06); color: {FROST}; }}
 QTreeWidget#sideTree::item:selected {{ background: rgba(168, 212, 255, 0.11); color: {FROST}; }}
-QTreeWidget#sideTree {{ show-decoration-selected: 0; }}
+QTreeWidget#sideTree {{ show-decoration-selected: 0; selection-background-color: transparent; }}
+QListWidget#sideList {{ selection-background-color: transparent; }}
+QFrame#rowActions {{ background: #141f37; border-radius: 7px; }}
+QPushButton#rowAction {{ font-family: '{ICON_FONT}'; font-size: 12px; padding: 0; border: none; border-radius: 6px;
+    min-width: 24px; max-width: 24px; min-height: 22px; max-height: 22px; color: {MUTED}; background: transparent; }}
+QPushButton#rowAction:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.12); }}
 QTreeWidget#sideTree::branch, QTreeWidget#sideTree::branch:selected, QTreeWidget#sideTree::branch:hover {{
     background: transparent; image: none; border: none; }}
 QTreeWidget#sideTree::item:first {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}

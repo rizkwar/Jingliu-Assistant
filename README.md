@@ -47,9 +47,12 @@ Pinned / Today / Yesterday / Previous 7 days / Older), **Projects** and **Study*
 shows its tab; New chat is an everyday chat.
 
 **Study**
-- A **subject** per course or exam: an **exam date with a countdown**, **materials** she teaches and quizzes
-  from (text and PDFs are read), and **how she teaches you**. She tutors in its sessions: explains step by
-  step, checks your understanding and grounds answers in your materials.
+- A **subject** is a folder of study sessions that **share her memory**: in a new session she remembers what
+  you covered in the others (your saved notes, or their last exchanges) and picks up from there.
+- **Materials** she teaches and quizzes from (text and PDFs are read) and **how she teaches you**. Update a
+  material any time: **Replace…** with a newer version, or when the original file changes, **Refresh** (or
+  **Refresh all**) brings the new version in. She tutors in its sessions: explains step by step, checks
+  your understanding and grounds answers in your materials.
 - Above the message box: **Quiz me** (one question at a time, scored: *Quiz 4/5*), **Make flashcards**,
   **Explain simpler**, **Summarize**, and a **Focus timer** (25 minutes, or ask her: "let's focus for 40
   minutes"). When it ends she tells you herself and the minutes count toward the subject.

@@ -1,15 +1,16 @@
 """The left sidebar: who she is, new chat, search, quick pages, and three tabs of conversations:
 everyday chats, projects and study subjects."""
 from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtCore import QEvent, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QCursor, QDesktopServices, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMenu, QPushButton, QStackedWidget, QToolButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .projects import project_icon
-from .theme import DIM, glyph_icon, icon_button
+from .theme import DIM, ICON_FONT, ICONS, glyph_icon, icon_button
 
 RECENT_LIMIT = 60          # The full archive stays in History.
 PROJECT_CHATS = 6          # Under an open project; its page lists them all.
@@ -40,6 +41,66 @@ def _group(timestamp):
     return "Today" if days <= 0 else "Yesterday" if days == 1 else "Previous 7 days" if days < 7 else "Older"
 
 
+class RowActions(QFrame):
+    """Buttons over the row under the pointer (pin, new chat, ⋯), as ChatGPT and Codex show them.
+    `buttons_for(item)` lists (glyph, tooltip, callback(item, button)) for a row, or nothing."""
+
+    def __init__(self, view, buttons_for):
+        super().__init__(view.viewport())
+        self.setObjectName("rowActions")
+        self.view, self.buttons_for, self.item = view, buttons_for, None
+        self.row = QHBoxLayout(self)
+        self.row.setContentsMargins(2, 0, 2, 0)
+        self.row.setSpacing(0)
+        view.viewport().setMouseTracking(True)
+        view.viewport().installEventFilter(self)
+        view.verticalScrollBar().valueChanged.connect(self.dismiss)
+        self.hide()
+
+    def eventFilter(self, watched, event):
+        kind = event.type()
+        if kind == QEvent.Type.MouseMove:
+            self._hover(event.position().toPoint())
+        elif kind == QEvent.Type.Leave and not self.underMouse():
+            self.dismiss()
+        return False
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        if not self.view.viewport().rect().contains(self.view.viewport().mapFromGlobal(QCursor.pos())):
+            self.dismiss()
+
+    def dismiss(self):
+        self.item = None
+        self.hide()
+
+    def _hover(self, position):
+        item = self.view.itemAt(position)
+        buttons = self.buttons_for(item) if item is not None else []
+        if not buttons:
+            self.dismiss()
+            return
+        if item is not self.item:
+            self.item = item
+            while self.row.count():
+                widget = self.row.takeAt(0).widget()
+                if widget is not None:
+                    widget.deleteLater()
+            for glyph, tip, callback in buttons:
+                button = QPushButton(ICONS[glyph])
+                button.setObjectName("rowAction")
+                button.setToolTip(tip)
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.clicked.connect(lambda _=False, callback=callback, button=button: callback(item, button))
+                self.row.addWidget(button)
+            self.adjustSize()
+        rect = self.view.visualItemRect(item)
+        self.setFixedHeight(rect.height() - 6)
+        self.move(self.view.viewport().width() - self.width() - 4, rect.top() + 3)
+        self.show()
+        self.raise_()
+
+
 class Sidebar(QFrame):
     open_conversation = Signal(str)
     pin_requested = Signal(str, bool)
@@ -49,6 +110,8 @@ class Sidebar(QFrame):
     open_project = Signal(str)
     new_project = Signal(str)              # kind: "project" or "study"
     new_chat_in_project = Signal(str)
+    rename_project = Signal(str)
+    delete_project = Signal(str)
     review_cards = Signal(str)
     tab_changed = Signal(str)
     show_all = Signal()
@@ -59,6 +122,11 @@ class Sidebar(QFrame):
         super().__init__(parent)
         self.setObjectName("sidebar")
         self.setFixedWidth(264)
+        self._glyph_font = QFont(ICON_FONT)
+        self._glyph_font.setPixelSize(11)
+        blank = QPixmap(20, 20)
+        blank.fill(Qt.GlobalColor.transparent)
+        self._indent = QIcon(blank)  # Sets a folder's chats in, under its name.
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 12, 10, 10)
         layout.setSpacing(2)
@@ -130,8 +198,8 @@ class Sidebar(QFrame):
         self.trees, self.empty = {}, {}
         for kind, title, hint, action in (
                 ("project", "Projects", "A project keeps chats, instructions, files and a folder together.", "New project"),
-                ("study", "Study", "A subject for a course or exam: lessons with her, quizzes, flashcards and a "
-                                   "focus timer.", "New subject")):
+                ("study", "Study", "A subject is a folder of study sessions she remembers together, with your "
+                                   "materials, quizzes, flashcards and a focus timer.", "New subject")):
             page = QWidget()
             page_layout = QVBoxLayout(page)
             page_layout.setContentsMargins(0, 0, 0, 0)
@@ -154,7 +222,9 @@ class Sidebar(QFrame):
             tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
             tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
             tree.setFrameShape(QFrame.Shape.NoFrame)
-            tree.setIndentation(14)
+            # No indentation area: Qt paints it in its own highlight colour. Children are set in
+            # by a blank icon instead, lined up under their folder's name.
+            tree.setIndentation(0)
             tree.setRootIsDecorated(False)
             tree.setIconSize(QSize(20, 20))
             tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -162,6 +232,8 @@ class Sidebar(QFrame):
             tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             tree.customContextMenuRequested.connect(lambda position, tree=tree: self._tree_menu(tree, position))
             tree.itemClicked.connect(self._tree_clicked)
+            tree.itemExpanded.connect(lambda item: self._folded(item, True))
+            tree.itemCollapsed.connect(lambda item: self._folded(item, False))
             page_layout.addWidget(tree, 1)
             empty = QWidget()
             empty_layout = QVBoxLayout(empty)
@@ -180,6 +252,8 @@ class Sidebar(QFrame):
             self.trees[kind], self.empty[kind] = tree, empty
             self.stack.addWidget(page)
         self.tree = self.trees["project"]
+        self.row_actions = [RowActions(self.list, self._buttons_for)]
+        self.row_actions += [RowActions(tree, self._buttons_for) for tree in self.trees.values()]
 
         # The tab bar sits just above Settings.
         bar = QFrame()
@@ -259,7 +333,7 @@ class Sidebar(QFrame):
 
     def set_conversations(self, rows, current, projects=(), current_project="", page_project=None, extras=None):
         """`rows`: this character's conversations, newest first. `projects`: projects and subjects.
-        `extras`: per subject, {"exam": "Exam in 12 days", "due": cards due}."""
+        `extras`: per subject, {"due": flashcards due}."""
         self._everything, self._projects, self._extras = list(rows), list(projects), dict(extras or {})
         self._chats = {}
         for row in rows:
@@ -281,27 +355,31 @@ class Sidebar(QFrame):
         projects = [project for project in self._projects if project.get("kind", "project") == kind]
         for project in projects:
             extra = self._extras.get(project["id"], {})
-            item = QTreeWidgetItem([project["name"], self._badge(extra)])
-            item.setIcon(0, project_icon(project["color"], glyph="study" if kind == "study" else "folder"))
+            count = len(self._chats.get(project["id"], []))
+            item = QTreeWidgetItem([project["name"], ""])
             item.setData(0, ID, project["id"])
             item.setData(0, KIND, "project")
+            item.setData(0, PROJECT, project)
+            item.setFont(1, self._glyph_font)
             item.setForeground(1, QBrush(QColor(DIM)))
             tips = [project.get("description") or project["name"]]
-            tips += [text for text in (extra.get("exam"), f"{extra['due']} flashcards due" if extra.get("due") else "") if text]
+            tips += [f"{count} {'session' if kind == 'study' else 'chat'}{'s' if count != 1 else ''}"] if count else []
+            tips += [f"{extra['due']} flashcards due"] if extra.get("due") else []
             item.setToolTip(0, " · ".join(tips))
             item.setSizeHint(0, QSize(0, ROW))
             tree.addTopLevelItem(item)
             if kind == "study" and extra.get("due"):
-                review = QTreeWidgetItem([f"Review flashcards", str(extra["due"])])
+                review = QTreeWidgetItem([f"Review flashcards · {extra['due']} due"])
                 review.setIcon(0, glyph_icon("cards"))
                 review.setData(0, ID, project["id"])
                 review.setData(0, KIND, "review")
-                review.setForeground(1, QBrush(QColor(DIM)))
                 review.setSizeHint(0, QSize(0, ROW - 4))
                 item.addChild(review)
+                review.setFirstColumnSpanned(True)
             chats = self._chats.get(project["id"], [])
             for row in chats[:PROJECT_CHATS]:
                 child = QTreeWidgetItem([row["title"]])
+                child.setIcon(0, self._indent)
                 child.setData(0, ID, row["id"])
                 child.setData(0, KIND, "chat")
                 child.setData(0, PINNED, bool(row.get("pinned")))
@@ -314,23 +392,18 @@ class Sidebar(QFrame):
                     tree.setCurrentItem(child)
             if len(chats) > PROJECT_CHATS:
                 more = QTreeWidgetItem([f"All {len(chats)} {'sessions' if kind == 'study' else 'chats'}…"])
+                more.setIcon(0, self._indent)
                 more.setData(0, ID, project["id"])
                 more.setData(0, KIND, "more")
                 more.setSizeHint(0, QSize(0, ROW - 4))
                 item.addChild(more)
                 more.setFirstColumnSpanned(True)
             item.setExpanded(project["id"] in self._expanded)
+            self._decorate(item)
             if project["id"] == self._page_project:
                 tree.setCurrentItem(item)
         tree.setVisible(bool(projects))
         self.empty[kind].setVisible(not projects)
-
-    @staticmethod
-    def _badge(extra):
-        exam = extra.get("exam", "")
-        if exam.startswith("Exam in "):
-            return exam.removeprefix("Exam in ").replace(" days", "d")
-        return {"Exam today": "today", "Exam tomorrow": "1d"}.get(exam, "")
 
     def _filter(self, text=""):
         words = text.casefold().split()
@@ -393,11 +466,52 @@ class Sidebar(QFrame):
         if item.data(ID):
             self.open_conversation.emit(item.data(ID))
 
-    def _tree_clicked(self, item, _column=0):
-        kind, identifier = item.data(0, KIND), item.data(0, ID)
+    def _decorate(self, item):
+        """A folder opens when its chats show; the chevron says it holds some, and which way it is folded."""
+        project = item.data(0, PROJECT)
+        study = project.get("kind") == "study"
+        glyph = "study" if study else "folder_open" if item.isExpanded() else "folder"
+        item.setIcon(0, project_icon(project["color"], glyph=glyph))
+        item.setText(1, (ICONS["chevron"] if item.isExpanded() else ICONS["chevron_right"]) if item.childCount() else "")
+
+    def _folded(self, item, expanded):
+        if item.data(0, KIND) != "project":
+            return
+        (self._expanded.add if expanded else self._expanded.discard)(item.data(0, ID))
+        self._decorate(item)
+
+    def _buttons_for(self, item):
+        """The hover buttons of a row: pin and ⋯ on a chat; new chat and ⋯ on a project or subject."""
+        if isinstance(item, QListWidgetItem):
+            if not item.data(ID):
+                return []  # A date heading.
+            return [("pin", "Unpin" if item.data(PINNED) else "Pin to the top",
+                     lambda item, _button: self.pin_requested.emit(item.data(ID), not item.data(PINNED))),
+                    ("more", "More", lambda item, button: self._chat_menu(
+                        item.data(ID), item.data(PINNED), item.data(PROJECT), self._below(button)))]
+        kind = item.data(0, KIND)
+        if kind == "chat":
+            return [("pin", "Unpin" if item.data(0, PINNED) else "Pin to the top",
+                     lambda item, _button: self.pin_requested.emit(item.data(0, ID), not item.data(0, PINNED))),
+                    ("more", "More", lambda item, button: self._chat_menu(
+                        item.data(0, ID), item.data(0, PINNED), item.data(0, PROJECT), self._below(button)))]
         if kind == "project":
+            study = item.data(0, PROJECT).get("kind") == "study"
+            return [("compose", "New study session" if study else "New chat in this project",
+                     lambda item, _button: self.new_chat_in_project.emit(item.data(0, ID))),
+                    ("more", "More", lambda item, button: self._project_menu(item, self._below(button)))]
+        return []
+
+    @staticmethod
+    def _below(button):
+        return button.mapToGlobal(button.rect().bottomLeft())
+
+    def _tree_clicked(self, item, column=0):
+        kind, identifier = item.data(0, KIND), item.data(0, ID)
+        if kind == "project" and column == 1 and item.childCount():
+            item.setExpanded(not item.isExpanded())  # The chevron only folds.
+        elif kind == "project":
             # A click opens it and shows its chats beneath it.
-            self._expanded.add(identifier)
             item.setExpanded(True)
             self.open_project.emit(identifier)
         elif kind == "more":
@@ -415,19 +529,31 @@ class Sidebar(QFrame):
         if kind == "chat":
             self._chat_menu(identifier, item.data(0, PINNED), item.data(0, PROJECT), tree.viewport().mapToGlobal(position))
             return
-        if kind != "project":
-            return
-        study = tree is self.trees["study"]
+        if kind == "project":
+            self._project_menu(item, tree.viewport().mapToGlobal(position))
+
+    def _project_menu(self, item, where):
+        project, identifier = item.data(0, PROJECT), item.data(0, ID)
+        study = project.get("kind") == "study"
         menu = QMenu(self)
         menu.addAction(glyph_icon("open"), "Open subject" if study else "Open project",
                        lambda: self.open_project.emit(identifier))
         menu.addAction(glyph_icon("compose"), "New study session" if study else "New chat in this project",
                        lambda: self.new_chat_in_project.emit(identifier))
+        menu.addAction(glyph_icon("rename"), "Rename…", lambda: self.rename_project.emit(identifier))
         if study:
             menu.addAction(glyph_icon("cards"), "Review flashcards", lambda: self.review_cards.emit(identifier))
-        if item.isExpanded():
-            menu.addAction("Collapse", lambda: (self._expanded.discard(identifier), item.setExpanded(False)))
-        menu.exec(tree.viewport().mapToGlobal(position))
+        if project.get("folder"):
+            menu.addAction(glyph_icon("folder_open"), "Open in Explorer",
+                           lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(project["folder"])))
+            menu.actions()[-1].setEnabled(Path(project["folder"]).is_dir())
+        if item.childCount():
+            menu.addAction(glyph_icon("chevron"), "Collapse" if item.isExpanded() else "Expand",
+                           lambda: item.setExpanded(not item.isExpanded()))
+        menu.addSeparator()
+        menu.addAction(glyph_icon("delete", color="#f3a5b3"), "Delete subject…" if study else "Delete project…",
+                       lambda: self.delete_project.emit(identifier))
+        menu.exec(where)
 
     def _list_menu(self, position):
         item = self.list.itemAt(position)
