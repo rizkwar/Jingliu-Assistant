@@ -19,8 +19,8 @@ from .config import PROJECT_ROOT
 
 DATA = PROJECT_ROOT / "data"
 DATABASE = "companion.sqlite3"
-FILES = ("preferences.json", "avatars.json", "avatar_models.json")
-FOLDERS = ("attachments", "characters")
+FILES = ("preferences.json", "avatars.json", "avatar_models.json", "mcp_servers.json")
+FOLDERS = ("attachments", "characters", "projects")
 PROFILE = "character.toml"
 MANIFEST = "jingliu-backup.json"
 README = """This is a backup of Jingliu, your desktop companion.
@@ -113,11 +113,20 @@ def export_text(store, target, name="Jingliu"):
     upcoming = store.reminders()
     lines += ["", "## Reminders", ""]
     lines += [f"- {item['text']} — {describe(item)}" for item in upcoming] or ["(none)"]
+    projects = {project["id"]: project for project in store.projects()}
+    if projects:
+        lines += ["", "## Projects", ""]
+        for project in projects.values():
+            lines += [f"- **{project['name']}**" + (f" — {project['description']}" if project["description"] else "")]
+            if project["instructions"]:
+                lines += ["  Instructions: " + " ".join(project["instructions"].split())]
     for conversation in store.conversations():
         messages = [m for m in store.messages(conversation["id"]) if m.get("display")]
         if not messages:
             continue
-        lines += ["", f"## {conversation['title']}", "", f"_{_when(conversation['created_at'])}_", ""]
+        project = projects.get(conversation.get("project_id"))
+        place = f" · in {project['name']}" if project else ""
+        lines += ["", f"## {conversation['title']}", "", f"_{_when(conversation['created_at'])}{place}_", ""]
         for message in messages:
             speaker = "You" if message["role"] == "user" else name
             files = attachments.loads(message.get("attachments") or "")

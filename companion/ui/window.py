@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import datetime, timezone
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -39,7 +40,9 @@ from ..voice.reference import inspect_reference, VoiceSetupError
 from ..chat import attachments
 from ..chat import reminders
 from .chat_view import AttachmentCard, ChatView
+from .projects import ProjectPage, project_icon
 from .sidebar import Sidebar
+from .tools import ToolsPanel
 from .theme import ACTIVITY_COLORS, ICONS, STYLE, NightSky, WindowChrome, glyph_icon, icon_button, moon_icon, repolish
 
 
@@ -210,8 +213,13 @@ class CompanionWindow(QMainWindow):
     activity_changed = Signal(str)
     notify = Signal(str, str)  # title, message: a desktop notification (the tray shows it).
 
-    def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None, models=None):
+    def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None,
+                 models=None, mcp_config=None, projects_root=None):
         super().__init__()
+        from ..chat.projects import PROJECT_ROOT_FOLDER
+        from ..core.mcp import CONFIG
+        self._mcp_path = mcp_config or CONFIG
+        self._projects_root = projects_root or PROJECT_ROOT_FOLDER
         settings = active_character_voice(settings)
         self.settings = settings
         self.activity = "ready"
@@ -328,6 +336,13 @@ class CompanionWindow(QMainWindow):
         self.sidebar.delete_requested.connect(self._delete_conversation)
         self.sidebar.show_all.connect(self._open_history)
         self.sidebar.collapse.connect(self._toggle_sidebar)
+        self.sidebar.move_requested.connect(self._move_conversation)
+        self.sidebar.open_project.connect(self._open_project)
+        self.sidebar.new_project.connect(self._new_project)
+        self.sidebar.new_chat_in_project.connect(self._new_chat_in_project)
+        self.sidebar.review_cards.connect(self._review_cards)
+        self.sidebar.tab_changed.connect(self._sidebar_tab_changed)
+        self.sidebar.show_tab(settings.sidebar_tab)
         self._sidebar_wanted = True
         shell.addWidget(self.sidebar)
 
@@ -353,6 +368,13 @@ class CompanionWindow(QMainWindow):
         self.conversation_title = QLabel("New conversation")
         self.conversation_title.setObjectName("chatTitle")
         self.conversation_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.crumb = QPushButton()
+        self.crumb.setObjectName("crumb")
+        self.crumb.setToolTip("Open the project")
+        self.crumb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.crumb.clicked.connect(lambda: self._open_project(self.crumb.property("project")))
+        self.crumb.hide()
+        heading.addWidget(self.crumb)
         heading.addWidget(self.conversation_title, 1)
         pill = QFrame()
         pill.setObjectName("pill")
@@ -428,6 +450,16 @@ class CompanionWindow(QMainWindow):
         self.settings_dialog = PanelPage("Settings")
         self.settings_dialog.back.clicked.connect(self._close_panel)
         self.pages.addWidget(self.settings_dialog)
+        self.project_page = ProjectPage(self.store, lambda: character_key(self.settings.character_path),
+                                        self._projects_root)
+        self.project_page.back.connect(self._leave_pages)
+        self.project_page.open_conversation.connect(self._switch_conversation)
+        self.project_page.new_chat.connect(self._new_chat_in_project)
+        self.project_page.changed.connect(self._project_changed)
+        self.project_page.deleted.connect(self._project_deleted)
+        self.project_page.review_cards.connect(self._review_cards)
+        self.pages.addWidget(self.project_page)
+        self.pages.currentChanged.connect(self._page_changed)
         settings_outer = self.settings_dialog.body_layout
         settings_outer.setContentsMargins(0, 4, 0, 0)
         settings_outer.setSpacing(12)
@@ -492,7 +524,14 @@ class CompanionWindow(QMainWindow):
             label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             return label
 
-        companion_page, voice_page, avatar_page, app_page = (page(title) for title in ("Companion", "Voice", "Avatar", "App"))
+        companion_page, voice_page, avatar_page, app_page, tools_page = (
+            page(title) for title in ("Companion", "Voice", "Avatar", "App", "Tools"))
+        section(tools_page, "MCP servers")
+        self.tools_panel = ToolsPanel(self._mcp_path, present=self._present)
+        self.tools_panel.changed.connect(self._servers_changed)
+        tools_page.addWidget(self.tools_panel)
+        tools_page.addStretch()
+        self.mcp_servers = list(self.tools_panel.servers)
         settings_layout = companion_page
         section(settings_layout, "Response model")
         self.connection = ConnectionPanel(settings)
@@ -879,6 +918,19 @@ class CompanionWindow(QMainWindow):
         self.transcript.suggestion.connect(self._use_suggestion)
         layout.addWidget(self.transcript, 1)
 
+        # Quick actions for the kind of conversation: study tools in a study session, a recap in a project.
+        self.type_bar = QWidget()
+        self.type_bar.setObjectName("typeBar")
+        self.type_row = QHBoxLayout(self.type_bar)
+        self.type_row.setContentsMargins(4, 0, 4, 0)
+        self.type_row.setSpacing(6)
+        self.type_bar.hide()
+        layout.addWidget(self.type_bar)
+        self._focus = None  # The study focus timer: subject, conversation, minutes, end time.
+        self._focus_timer = QTimer(self)
+        self._focus_timer.setInterval(1000)
+        self._focus_timer.timeout.connect(self._focus_tick)
+        self.focus_button = None
         self.composer = QFrame()
         self.composer.setObjectName("composer")
         composer_layout = QVBoxLayout(self.composer)
@@ -1235,6 +1287,7 @@ class CompanionWindow(QMainWindow):
             self.input.clear()
             self.transcript.add_message("user", "You", text, attachments=stored)
         self.transcript.begin_reply(self.settings.name)
+        chat_tools = self._chat_tools()
         prompt = reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None,
                               avatar_cues=self.show_avatar.isChecked(),
                               computer_tasks=self.computer_tasks.isChecked(),
@@ -1242,16 +1295,19 @@ class CompanionWindow(QMainWindow):
                               memory_cues=True, auto_memory=self.auto_memory.isChecked(),
                               reminders=self._reminder_prompt(),
                               look=self.look_at_screen.isChecked() and not looking,
-                              check_ins=self.check_ins.isChecked())
+                              check_ins=self.check_ins.isChecked(),
+                              project=self._project_context(),
+                              tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None)
         self._task_request = self._task_offer = None
         self._look_requested = False
         self._looking = looking
         self._memory_actions = []
         self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
         self._worker_kind = "reply"
-        worker = ReplyWorker(replace(self.settings, system_prompt=prompt), context, self)
+        worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools), context, self)
         self._worker = worker
         worker.chunk.connect(self._on_chunk)
+        worker.tool_used.connect(self._tool_used)
         worker.finished.connect(self._on_finished)
         self._set_busy(True)
         self._streaming_voice = self.auto_speak.isChecked() and self.volume.value() > 0
@@ -1468,6 +1524,7 @@ class CompanionWindow(QMainWindow):
             return
         self._leave_pages()
         self._restore_conversation(conversation_id)
+        self.sidebar.show_tab("chats")  # A new chat is an everyday one until it joins a project or subject.
 
     # Sidebar ------------------------------------------------------------------------------
 
@@ -1476,6 +1533,11 @@ class CompanionWindow(QMainWindow):
         page = self.pages.currentWidget()
         if page is self.settings_dialog:
             self._close_panel()
+        elif page is self.project_page:
+            self.project_page._save_instructions()
+            self.pages.setCurrentWidget(self.chat_page)
+            self.input.setFocus()
+            self._refresh_sidebar()
         elif isinstance(page, PanelPage):
             for dialog in page.body.findChildren(QDialog):
                 dialog.reject()
@@ -1483,11 +1545,23 @@ class CompanionWindow(QMainWindow):
     def _refresh_sidebar(self):
         try:
             rows = self.store.conversations(character_key(self.settings.character_path))
+            projects = self.store.projects()
         except sqlite3.Error:
             return
         # Like Codex, a new conversation joins the list once something is said in it.
         rows = [row for row in rows if row["message_count"] or row["id"] == self._conversation_id]
-        self.sidebar.set_conversations(rows, self._conversation_id)
+        current = next((row.get("project_id", "") for row in rows if row["id"] == self._conversation_id), "")
+        page = self.project_page.project_id if self.pages.currentWidget() is self.project_page else None
+        from ..chat import study
+        extras = {}
+        for project in projects:
+            if project["kind"] == "study":
+                try:
+                    extras[project["id"]] = {"exam": study.exam_text(project["exam_date"]),
+                                             "due": study.stats(self.store, project["id"])["due"]}
+                except (sqlite3.Error, ValueError):
+                    pass
+        self.sidebar.set_conversations(rows, self._conversation_id, projects, current, page, extras)
 
     @Slot(str)
     def _switch_conversation(self, conversation_id):
@@ -2206,9 +2280,14 @@ class CompanionWindow(QMainWindow):
         handlers = {"remember": self._remember, "forget": self._forget,
                     "remind": self._set_reminder, "unremind": self._cancel_reminder,
                     # After her reply is shown, so the confirmation comes after her words.
-                    "undotask": lambda _: QTimer.singleShot(0, self, self._undo_latest)}
+                    "undotask": lambda _: QTimer.singleShot(0, self, self._undo_latest),
+                    "card": self._add_card, "score": self._score, "focus": self._focus_cue}
+        self._new_cards = []
         for action, detail in actions:
             handlers[action](detail)
+        self._cards_added()
+        if any(action in {"card", "score", "focus"} for action, _ in actions):
+            self._refresh_type_bar()
 
     def _remember(self, fact):
         fact = " ".join(fact.split())[:1000]
@@ -2322,7 +2401,8 @@ class CompanionWindow(QMainWindow):
         if not request.strip() or self._closing:
             return
         context = [m for m in self._messages[:-1] if m.get("role") in {"user", "assistant"}]
-        task = ComputerTask(request, context, self.settings, self)
+        task = ComputerTask(request, context, self.settings, self, servers=self.mcp_servers,
+                            project=self._current_project())
         card = self.transcript.add_task_card(self.settings.name, request)
         self._task, self._task_card, self._task_turn, self._task_ack = task, card, turn, acknowledgement
         task.step.connect(card.add_step)
@@ -2745,6 +2825,8 @@ class CompanionWindow(QMainWindow):
                 return
         self._closing = True
         self.connection.shutdown()
+        self.tools_panel.shutdown()
+        self.project_page._save_instructions()  # Typed just before closing: still kept.
         self._refresh_activity()
         self._dismiss_dialogs()
         self._pending_transcription = ""
@@ -2930,14 +3012,14 @@ class CompanionWindow(QMainWindow):
                 self._task_request = detail
             elif name == "offer" and detail:
                 self._task_offer = detail
-            elif name in {"remember", "forget", "remind", "unremind"} and detail:
+            elif name in {"remember", "forget", "remind", "unremind", "card", "score", "focus"} and detail:
                 self._memory_actions.append((name, detail))
             elif name == "undotask":
                 self._memory_actions.append((name, ""))
             elif name == "look":
                 self._look_requested = True
         cues = [(offset, cue) for offset, cue in cues if cue.partition(":")[0] not in
-                {"task", "offer", "remember", "forget", "remind", "unremind", "undotask", "look"}]
+                {"task", "offer", "remember", "forget", "remind", "unremind", "undotask", "look", "card", "score", "focus"}]
         # Spoken replies show each expression as the voice reaches it; silent ones show it at once.
         self._pending_cues.extend(cues)
         if not self._streaming_voice:
@@ -3187,7 +3269,342 @@ class CompanionWindow(QMainWindow):
         if conversation:
             self.conversation_title.setText(conversation["title"])
             self.conversation_title.setToolTip(conversation["title"])
+        project = self._current_project()
+        self.crumb.setVisible(project is not None)
+        if project:
+            self.crumb.setText(f"{project['name']}  ›")
+            self.crumb.setIcon(project_icon(project["color"], glyph="study" if project["kind"] == "study" else "folder"))
+            self.crumb.setProperty("project", project["id"])
+        self._refresh_type_bar()
         self._refresh_sidebar()
+
+    # Projects -----------------------------------------------------------------------------
+
+    def _current_project(self):
+        try:
+            conversation = self.store.conversation(self._conversation_id)
+            return self.store.project(conversation["project_id"]) if conversation and conversation["project_id"] else None
+        except sqlite3.Error:
+            return None
+
+    def _project_context(self):
+        """What she is told about the current conversation's project, or None."""
+        project = self._current_project()
+        if not project:
+            return None
+        from ..chat import projects, study
+        try:
+            files = self.store.project_files(project["id"])
+            if project["kind"] == "study":
+                return study.context(project, files, study.stats(self.store, project["id"]))
+            return projects.context(project, files)
+        except sqlite3.Error:
+            return None
+
+    def _open_project(self, project_id):
+        if not project_id or not self.store.project(project_id):
+            return
+        self._end_handsfree()
+        page = self.pages.currentWidget()
+        if isinstance(page, PanelPage) or page is self.settings_dialog:
+            self._leave_pages()
+        self.project_page.show_project(project_id)
+        self.pages.setCurrentWidget(self.project_page)
+        self._show_tab_for(self.store.project(project_id))
+        self._refresh_sidebar()
+
+    def _show_tab_for(self, project):
+        """The sidebar shows the tab a conversation or page belongs to."""
+        self.sidebar.show_tab("study" if project and project["kind"] == "study" else
+                              "projects" if project else "chats")
+
+    # The toolbar above the message box, by kind of conversation --------------------------------
+
+    def _refresh_type_bar(self):
+        while self.type_row.count():
+            item = self.type_row.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self.focus_button = None
+        project = self._current_project()
+        if not project:
+            self.type_bar.hide()
+            return
+
+        def chip(glyph, text, tip, slot, checkable=False):
+            button = QPushButton(text)
+            button.setIcon(glyph_icon(glyph))
+            button.setIconSize(QSize(16, 16))
+            button.setToolTip(tip)
+            button.setCheckable(checkable)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(slot)
+            self.type_row.addWidget(button)
+            return button
+
+        if project["kind"] == "study":
+            chip("quiz", "Quiz me", "She asks one question at a time and keeps score",
+                 lambda: self._quick(f"Quiz me on {project['name']}: one question at a time."))
+            chip("cards", "Make flashcards", "Flashcards from what you just covered, saved to this subject",
+                 lambda: self._quick("Make flashcards from what we just covered."))
+            chip("idea", "Explain simpler", "The last explanation again, more simply, with an example",
+                 lambda: self._quick("Explain that more simply, with an example."))
+            chip("notes", "Summarize", "Short notes of what this session covered",
+                 lambda: self._quick("Summarize what we covered into short revision notes."))
+            self.focus_button = chip("timer", "", "A focus session: she tells you when it ends", self._toggle_focus, True)
+            self._focus_tick()
+            from ..chat import study
+            try:
+                answers = self.store.study_events(project["id"], "answer", conversation_id=self._conversation_id)
+                due = study.stats(self.store, project["id"])["due"]
+            except sqlite3.Error:
+                answers, due = [], 0
+            if answers:
+                score = QLabel(f"Quiz {sum(event['value'] for event in answers)}/{len(answers)}")
+                score.setObjectName("typeScore")
+                score.setToolTip("Your answers in this session")
+                self.type_row.addWidget(score)
+            if due:
+                chip("cards", f"Review {due}", "Flashcards due today",
+                     lambda: self._review_cards(project["id"]))
+        else:
+            chip("notes", "Recap so far", "Where this project stands, from its chats, files and instructions",
+                 lambda: self._quick("Give me a short recap of where this project stands."))
+            chip("quiz", "Plan next steps", "A short, ordered plan for what to do next",
+                 lambda: self._quick("What should the next steps be? Give me a short, ordered plan."))
+        self.type_row.addStretch()
+        self.type_bar.show()
+
+    def _quick(self, text):
+        if self._worker or self.microphone.busy or self.suspended:
+            self._flash("Let her finish first.")
+            return
+        draft = self.input.toPlainText().strip()
+        self.input.setPlainText(text + ("\n\n" + draft if draft else ""))
+        self._send()
+
+    def _review_cards(self, project_id):
+        from .flashcards import FlashcardReview
+        if not self.store.project(project_id):
+            return
+        self._end_handsfree()
+        dialog = FlashcardReview(self.store, project_id, self)
+        self._chrome.watch(dialog)
+        self._present(dialog)
+        dialog.deleteLater()
+        if self.pages.currentWidget() is self.project_page:
+            self.project_page.refresh()
+        self._refresh_sidebar()
+        self._refresh_type_bar()
+
+    # The focus timer (study) ------------------------------------------------------------------
+
+    def _toggle_focus(self):
+        if self._focus:
+            self._focus = None
+            self._focus_timer.stop()
+            self._flash("Focus session stopped")
+            self._focus_tick()
+        else:
+            from ..chat.study import FOCUS_MINUTES
+            self._start_focus(FOCUS_MINUTES)
+
+    def _start_focus(self, minutes):
+        from ..chat.study import FOCUS_LIMITS
+        project = self._current_project()
+        if not project or project["kind"] != "study":
+            return
+        minutes = max(FOCUS_LIMITS[0], min(FOCUS_LIMITS[1], int(minutes)))
+        self._focus = {"project": project["id"], "conversation": self._conversation_id, "minutes": minutes,
+                       "ends": time.monotonic() + minutes * 60}
+        self._focus_timer.start()
+        self._focus_tick()
+
+    def _focus_tick(self):
+        if self._focus and time.monotonic() >= self._focus["ends"]:
+            self._focus_done()
+        button = self.focus_button
+        if button is None:
+            return
+        try:
+            button.objectName()
+        except RuntimeError:
+            self.focus_button = None  # The toolbar was rebuilt.
+            return
+        if self._focus:
+            left = max(0, int(self._focus["ends"] - time.monotonic()))
+            button.setText(f"Focus {left // 60:02d}:{left % 60:02d}")
+            button.setChecked(True)
+            button.setToolTip("Focusing · click to stop")
+        else:
+            from ..chat.study import FOCUS_MINUTES
+            button.setText(f"Focus {FOCUS_MINUTES}:00")
+            button.setChecked(False)
+
+    def _focus_done(self):
+        from ..chat import study
+        focus, self._focus = self._focus, None
+        self._focus_timer.stop()
+        project = self.store.project(focus["project"])
+        try:
+            self.store.log_study(focus["project"], "focus", focus["minutes"], focus["conversation"])
+        except sqlite3.Error:
+            pass
+        self.notify.emit("Focus session finished", f"{focus['minutes']} minutes on {project['name'] if project else 'your subject'}")
+        line = study.FOCUS_DONE.format(mark=study.MARK, time=time.strftime("%H:%M"), minutes=focus["minutes"],
+                                       name=project["name"] if project else "the subject")
+        if focus["conversation"] == self._conversation_id and not (self._worker or self.microphone.busy):
+            try:
+                self.settings.validate_connection()
+                self._begin_reply(line, reminder=True, note=(f"Focus · {focus['minutes']} minutes done", "timer"))
+            except ValueError:
+                pass
+        self._refresh_type_bar()
+
+    # Her study cues --------------------------------------------------------------------------
+
+    def _study_subject(self):
+        project = self._current_project()
+        return project if project and project["kind"] == "study" else None
+
+    def _add_card(self, detail):
+        from ..chat.study import parse_card
+        subject, card = self._study_subject(), parse_card(detail)
+        if subject and card:
+            try:
+                self._new_cards.append(self.store.add_flashcard(subject["id"], *card, self._conversation_id))
+            except (ValueError, sqlite3.Error):
+                pass
+
+    def _score(self, detail):
+        subject = self._study_subject()
+        verdict = detail.strip().lower()
+        if subject and verdict in {"right", "wrong", "correct", "incorrect"}:
+            try:
+                self.store.log_study(subject["id"], "answer", verdict in {"right", "correct"}, self._conversation_id)
+            except sqlite3.Error:
+                pass
+
+    def _focus_cue(self, detail):
+        digits = "".join(character for character in detail if character.isdigit())
+        if self._study_subject() and not self._focus:
+            from ..chat.study import FOCUS_MINUTES
+            self._start_focus(int(digits) if digits else FOCUS_MINUTES)
+
+    def _cards_added(self):
+        cards, self._new_cards = self._new_cards, []
+        subject = self._study_subject()
+        if not cards or not subject:
+            return
+        note = self.transcript.add_memory_note(
+            f"{len(cards)} flashcard{'s' if len(cards) != 1 else ''} added to {subject['name']}", icon="cards")
+        note.undo.connect(lambda: self._remove_cards(note, cards))
+
+    def _remove_cards(self, note, cards):
+        try:
+            self.store.delete_flashcards(cards)
+        except sqlite3.Error:
+            return
+        note.settle(f"Removed {len(cards)} flashcard{'s' if len(cards) != 1 else ''}")
+        self._refresh_type_bar()
+
+    @Slot(str)
+    def _sidebar_tab_changed(self, tab):
+        self.settings = replace(self.settings, sidebar_tab=tab)
+        try:
+            self.preferences.remember(self.settings, ("sidebar_tab",))
+        except (OSError, ValueError):
+            pass
+
+    def _new_project(self, kind="project"):
+        try:
+            project_id = self.store.create_project("New subject" if kind == "study" else "New project", kind)
+        except sqlite3.Error:
+            self._flash("Could not create a project. Please try again.")
+            return None
+        self._open_project(project_id)
+        self.project_page.name.setFocus()
+        self.project_page.name.selectAll()
+        return project_id
+
+    def _new_chat_in_project(self, project_id):
+        if self._worker or self.microphone.busy:
+            self._flash("Let her finish, or press Stop, before starting another conversation.")
+            return
+        self._new_conversation()
+        try:
+            self.store.set_conversation_project(self._conversation_id, project_id)
+        except (ValueError, sqlite3.Error):
+            return
+        self._update_conversation_title()
+        self._show_tab_for(self._current_project())
+        self.input.setFocus()
+
+    def _move_conversation(self, conversation_id, project_id):
+        if project_id.startswith("+"):
+            conversation = self.store.conversation(conversation_id)
+            kind = project_id[1:] or "project"
+            try:
+                project_id = self.store.create_project(conversation["title"] if conversation else "New project", kind)
+            except sqlite3.Error:
+                return
+        try:
+            self.store.set_conversation_project(conversation_id, project_id)
+        except (ValueError, sqlite3.Error):
+            self._flash("Could not move that conversation. Please try again.")
+            return
+        project = self.store.project(project_id) if project_id else None
+        self._flash(f"Moved to {project['name']}" if project else "Removed from the project")
+        self._update_conversation_title()
+        if self.pages.currentWidget() is self.project_page:
+            self.project_page.refresh()
+
+    def _project_changed(self):
+        self._page_changed(self.pages.currentIndex())
+
+    @Slot(int)
+    def _page_changed(self, _index):
+        """The header names what is open: the conversation, or a page such as a project or Settings."""
+        if self._closing or self.store.connection is None:
+            return
+        page = self.pages.currentWidget()
+        if page is self.chat_page:
+            self._update_conversation_title()
+            return
+        self.crumb.hide()
+        if page is self.project_page:
+            project = self.store.project(self.project_page.project_id) if self.project_page.project_id else None
+            self.conversation_title.setText(project["name"] if project else "Project")
+        else:
+            self.conversation_title.setText(page.title.text() if isinstance(page, PanelPage) else "Settings")
+        self._refresh_sidebar()
+
+    def _project_deleted(self, project_id, with_chats):
+        if with_chats and not self.store.conversation(self._conversation_id):
+            key = character_key(self.settings.character_path)
+            rest = self.store.conversations(key)
+            self._restore_conversation(rest[0]["id"] if rest else self.store.create_conversation(key))
+        self.pages.setCurrentWidget(self.chat_page)
+        self._update_conversation_title()
+        self._flash("Project deleted" + (" with its chats" if with_chats else "; its chats are in Recents"))
+
+    # Tools (MCP) ----------------------------------------------------------------------------
+
+    def _servers_changed(self, servers):
+        self.mcp_servers = list(servers)
+
+    def _chat_tools(self):
+        """--mcp-config JSON for servers allowed in conversation, when replies come through Claude Code."""
+        if self.settings.llm_provider != "claude":
+            return ""
+        from ..core.mcp import claude_config
+        config = claude_config(self.mcp_servers, conversation=True)
+        return json.dumps(config) if config["mcpServers"] else ""
+
+    @Slot(str)
+    def _tool_used(self, tool):
+        server, _, name = tool.removeprefix("mcp__").partition("__")
+        self.transcript.add_memory_note(f"Used {name.replace('_', ' ')} from {server}", can_undo=False, icon="tool")
 
     def _restore_conversation(self, conversation_id) -> None:
         rows = self.store.messages(conversation_id)
@@ -3210,6 +3627,8 @@ class CompanionWindow(QMainWindow):
                 self._last_reply_id = row["id"]
         self.replay.setEnabled(bool(self._last_reply))
         self._update_conversation_title()
+        if hasattr(self, "sidebar") and self._current_project():
+            self._show_tab_for(self._current_project())  # Opening a project's chat shows its tab.
         self._refresh_continuity()
         self.privacy.setText(self._privacy_text())
         self._refresh_activity()

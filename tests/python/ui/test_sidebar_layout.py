@@ -51,7 +51,8 @@ class SidebarLayoutTests(unittest.TestCase):
 
     def titles(self):
         sidebar = self.window.sidebar.list
-        return [sidebar.item(row).text() for row in range(sidebar.count())]
+        return [sidebar.item(row).text() for row in range(sidebar.count())
+                if sidebar.item(row).data(Qt.ItemDataRole.UserRole)]  # Date headings are not chats.
 
     def test_sidebar_lists_pinned_first_and_hides_other_empty_chats(self):
         titles = self.titles()

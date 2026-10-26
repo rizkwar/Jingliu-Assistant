@@ -11,6 +11,7 @@ from .llm import ChatError, stream_reply
 
 class ReplyWorker(QThread):
     chunk = Signal(str, str)
+    tool_used = Signal(str)  # An MCP tool she called while replying (Claude subscription only).
 
     def __init__(self, settings: Settings, messages: list[dict[str, str]], parent=None):
         super().__init__(parent)
@@ -58,6 +59,9 @@ class ReplyWorker(QThread):
                     async for text in stream_reply(client, self.settings, self.messages):
                         if self.stop_requested.is_set():
                             return
+                        if isinstance(text, dict):
+                            self.tool_used.emit(text.get("tool", ""))
+                            continue
                         self.chunk.emit(self.turn_id, text)
             except TimeoutError as exc:
                 raise ChatError("The reply took too long. Please try again.") from exc

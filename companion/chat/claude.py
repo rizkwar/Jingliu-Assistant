@@ -52,12 +52,16 @@ def child_environment():
     return environment
 
 
-def reply_command(prompt_file, model):
-    # Conversation only: no tools, MCP, skills, CLAUDE.md, hooks or saved sessions.
-    return [claude_executable(), '-p', '--system-prompt-file', str(prompt_file), '--tools', '',
-            '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence',
-            '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', 'low', '--input-format', 'stream-json',
-            '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+def reply_command(prompt_file, model, mcp_file=None, servers=()):
+    # Conversation: no built-in tools, skills, CLAUDE.md, hooks or saved sessions. Only MCP servers the
+    # person allowed in conversation are connected, and only their tools may run.
+    command = [claude_executable(), '-p', '--system-prompt-file', str(prompt_file), '--tools', '',
+               '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence',
+               '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', 'low', '--input-format', 'stream-json',
+               '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+    if mcp_file and servers:
+        command += ['--mcp-config', str(mcp_file), '--allowedTools', *(f'mcp__{name}' for name in servers)]
+    return command
 
 
 def user_turn(messages):
@@ -134,15 +138,19 @@ async def stream_claude(settings, messages):
     with tempfile.TemporaryDirectory(prefix='companion-claude-') as folder:
         prompt_file = Path(folder) / 'system-prompt.txt'
         prompt_file.write_text(settings.system_prompt + TRANSPORT_NOTE, encoding='utf-8')
+        servers = list((json.loads(settings.chat_tools) if settings.chat_tools else {}).get('mcpServers', {}))
+        mcp_file = Path(folder) / 'mcp.json'
+        if servers:
+            mcp_file.write_text(settings.chat_tools, encoding='utf-8')
         try:
-            process = await run(reply_command(prompt_file, settings.claude_model), cwd=folder)
+            process = await run(reply_command(prompt_file, settings.claude_model, mcp_file, servers), cwd=folder)
         except OSError:
             raise ChatError('Could not start Claude Code. Check its installation and restart the assistant.') from None
         try:
             process.stdin.write(prompt.encode('utf-8'))
             await process.stdin.drain()
             process.stdin.close()
-            got_text = False
+            got_text = after_tool = False
             while True:
                 line = await process.stdout.readline()
                 if not line:
@@ -154,11 +162,20 @@ async def stream_claude(settings, messages):
                 kind = event.get('type')
                 if kind == 'stream_event':
                     inner = event.get('event') or {}
-                    if inner.get('type') == 'content_block_start' and (inner.get('content_block') or {}).get('type') in {
+                    block = inner.get('content_block') or {}
+                    if inner.get('type') == 'content_block_start' and block.get('type') in {
                             'tool_use', 'server_tool_use', 'mcp_tool_use'}:
-                        raise ChatError('Claude attempted a tool operation. Conversation was stopped; tools are not enabled here.')
+                        name = str(block.get('name') or '')
+                        if not name.startswith('mcp__') or name.removeprefix('mcp__').partition('__')[0] not in servers:
+                            raise ChatError('Claude attempted a tool operation. Conversation was stopped; tools are not enabled here.')
+                        after_tool = True
+                        yield {'tool': name}  # Shown in the chat as a small note.
+                        continue
                     delta = inner.get('delta') or {}
                     if inner.get('type') == 'content_block_delta' and delta.get('type') == 'text_delta' and delta.get('text'):
+                        if after_tool and got_text:
+                            yield '\n\n'  # Text after a tool continues as a new paragraph.
+                        after_tool = False
                         got_text = True
                         yield delta['text']
                 elif kind == 'rate_limit_event' and (event.get('rate_limit_info') or {}).get('status') == 'rejected':

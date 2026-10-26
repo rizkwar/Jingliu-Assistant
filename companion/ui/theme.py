@@ -28,6 +28,8 @@ ICONS = {
     'delete': '', 'clock': '', 'back': '', 'rename': '', 'screen': '',
     'compose': '', 'sidebar': '', 'search': '', 'pin': '', 'copy': '',
     'chevron': '', 'shield': '', 'bell': '', 'quote': '',
+    'tool': '', 'folder': '', 'project': '', 'open': '', 'plug': '',
+    'study': '', 'cards': '', 'timer': '', 'quiz': '', 'idea': '', 'notes': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -244,6 +246,64 @@ QPushButton#modelPicker {{ background: transparent; border: none; border-radius:
     color: {MUTED}; font-size: 13px; }}
 QPushButton#modelPicker:hover {{ background: rgba(168, 212, 255, 0.07); color: {FROST}; }}
 QPushButton#modelPicker::menu-indicator {{ image: none; width: 0; }}
+
+/* Projects: the sidebar tree, the breadcrumb and the project page. */
+QTreeWidget#sideTree {{ background: transparent; border: none; padding: 0; outline: none; }}
+QTreeWidget#sideTree::item {{ color: #c3d3ea; padding: 0 6px; border-radius: 8px; border: none; }}
+QTreeWidget#sideTree::item:hover {{ background: rgba(168, 212, 255, 0.06); color: {FROST}; }}
+QTreeWidget#sideTree::item:selected {{ background: rgba(168, 212, 255, 0.11); color: {FROST}; }}
+QTreeWidget#sideTree {{ show-decoration-selected: 0; }}
+QTreeWidget#sideTree::branch, QTreeWidget#sideTree::branch:selected, QTreeWidget#sideTree::branch:hover {{
+    background: transparent; image: none; border: none; }}
+QTreeWidget#sideTree::item:first {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
+QTreeWidget#sideTree::item:last {{ border-top-left-radius: 0; border-bottom-left-radius: 0; }}
+QTreeWidget#sideTree::item:only-one {{ border-radius: 8px; }}
+QPushButton#crumb {{ background: transparent; border: none; border-radius: 8px; padding: 3px 8px; color: {MUTED};
+    font-size: 14px; }}
+QPushButton#crumb:hover {{ background: rgba(168, 212, 255, 0.08); color: {FROST}; }}
+QFrame#projectCard, QFrame#serverRow {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.10);
+    border-radius: 14px; }}
+QLabel#cardTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 15px; color: {FROST}; }}
+QLineEdit#projectName {{ background: transparent; border: none; border-bottom: 1px solid transparent; border-radius: 0;
+    padding: 0; font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 24px; color: {FROST}; }}
+QLineEdit#projectDescription {{ background: transparent; border: none; border-bottom: 1px solid transparent; border-radius: 0;
+    padding: 0; font-size: 14px; color: {MUTED}; }}
+QLineEdit#projectName:hover, QLineEdit#projectDescription:hover {{ border-bottom-color: rgba(168, 212, 255, 0.18); }}
+QLineEdit#projectName:focus, QLineEdit#projectDescription:focus {{ border-bottom-color: {ICE}; }}
+QPushButton#projectStart {{ background: rgba(12, 19, 36, 0.94); border: 1px solid rgba(168, 212, 255, 0.16);
+    border-radius: 18px; padding: 14px 18px; text-align: left; font-size: 15px; color: {MUTED}; }}
+QPushButton#projectStart:hover {{ border-color: rgba(168, 212, 255, 0.42); color: {FROST}; }}
+QListWidget#projectChats, QListWidget#projectFiles {{ background: transparent; border: none; padding: 0; outline: none; }}
+QListWidget#projectChats::item {{ color: #d5e2f4; padding: 0 10px; border-radius: 8px;
+    border-bottom: 1px solid rgba(168, 212, 255, 0.05); }}
+QListWidget#projectChats::item:hover {{ background: rgba(168, 212, 255, 0.07); }}
+QListWidget#projectFiles::item {{ background: transparent; border: none; }}
+QLabel#projectFolder {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 12px; color: #cfe0f6; }}
+
+/* The Chats · Projects · Study tabs above Settings. */
+QFrame#sideTabs {{ background: rgba(168, 212, 255, 0.05); border: 1px solid rgba(168, 212, 255, 0.08); border-radius: 12px; }}
+QToolButton#sideTab {{ background: transparent; border: none; border-radius: 9px; padding: 5px 4px; color: {MUTED};
+    font-size: 12px; }}
+QToolButton#sideTab:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.06); }}
+QToolButton#sideTab:checked {{ color: {FROST}; background: rgba(168, 212, 255, 0.13); }}
+
+/* Study: the progress card, flashcards and the toolbar above the message box. */
+QLabel#examCountdown {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 18px; color: {AMBER}; }}
+QLabel#progressText {{ color: #cfe0f6; font-size: 13px; }}
+QFrame#flashcard {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(29, 50, 86, 0.92), stop:1 rgba(11, 19, 36, 0.96));
+    border: 1px solid rgba(168, 212, 255, 0.22); border-radius: 20px; min-height: 260px; }}
+QLabel#flashcardMoon {{ font-family: '{ICON_FONT}'; font-size: 22px; color: {ICE}; }}
+QLabel#flashcardFront {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 21px; color: {FROST}; }}
+QFrame#flashcardRule {{ background: rgba(168, 212, 255, 0.18); border: none; }}
+QLabel#flashcardBack {{ font-size: 16px; color: #d5e2f4; }}
+QPushButton#grade {{ min-width: 92px; padding: 8px 12px; border-radius: 12px; font-size: 13px; }}
+QPushButton#grade[grade="again"] {{ color: #ffb3bf; border-color: rgba(226, 86, 110, 0.40); }}
+QPushButton#grade[grade="easy"] {{ color: #9fe3cd; border-color: rgba(127, 209, 185, 0.40); }}
+QWidget#typeBar QPushButton {{ background: rgba(12, 19, 36, 0.80); border: 1px solid rgba(168, 212, 255, 0.14);
+    border-radius: 14px; padding: 5px 12px 5px 10px; color: #c9dcf5; font-size: 13px; }}
+QWidget#typeBar QPushButton:hover {{ background: rgba(168, 212, 255, 0.10); color: {FROST}; }}
+QWidget#typeBar QPushButton:checked {{ color: {AMBER}; border-color: rgba(230, 194, 140, 0.45); }}
+QLabel#typeScore {{ color: {AMBER}; font-size: 13px; padding: 0 6px; }}
 """
 
 

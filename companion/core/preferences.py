@@ -15,7 +15,7 @@ from ..voice.settings import validate_rate
 FIELDS = {
     'llm_provider': str, 'openrouter_model': str, 'codex_model': str, 'claude_model': str,
     "tts_voice": str, "tts_enabled": bool, "tts_volume": int,
-    "tts_rate": int, "tts_engine": str, "computer_tasks": bool, "confirm_tasks": bool, "approve_steps": bool, "auto_memory": bool, "look_at_screen": bool, "barge_in": bool, "check_ins": bool, "check_in_greeted": str, "message_style": str,
+    "tts_rate": int, "tts_engine": str, "computer_tasks": bool, "confirm_tasks": bool, "approve_steps": bool, "auto_memory": bool, "look_at_screen": bool, "barge_in": bool, "check_ins": bool, "check_in_greeted": str, "message_style": str, "sidebar_tab": str,
     "tts_reference": str,
     "character_path": str,
     "stt_model": str, "stt_auto_send": bool, "stt_microphone": str,
@@ -45,6 +45,8 @@ def validate(values):
             raise ValueError('Saved model ID is invalid.')
     if "tts_voice" in clean and clean["tts_voice"] not in (*VOICES, "reference"):
         raise ValueError("Saved voice is not available.")
+    if clean.get("sidebar_tab", "chats") not in {"chats", "projects", "study"}:
+        raise ValueError("Saved sidebar tab is not available.")
     if clean.get("message_style", "plain") not in {"plain", "bubble"}:
         raise ValueError("Saved message style is not available.")
     if clean.get("tts_engine", "pocket") not in {"pocket", "chatterbox"}:

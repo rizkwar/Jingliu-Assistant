@@ -68,6 +68,9 @@ def drives():
 def describe(tool, values):
     """One line, in plain words, for the task card and the approval window."""
     values = values or {}
+    if tool.startswith("mcp__") and not tool.startswith(f"mcp__{SERVER}__"):
+        server, _, name = tool.removeprefix("mcp__").partition("__")
+        return f"Use {name.replace('_', ' ')} from {server}"
     path = values.get("file_path") or values.get("path") or values.get("pattern") or ""
     short = lambda text, limit=160: (text[:limit] + "…") if len(text) > limit else text
     name = tool.removeprefix(f"mcp__{SERVER}__")
@@ -119,6 +122,8 @@ def approval_group(tool):
         return "commands"
     if tool in {"Write", "Edit"} or tool.removeprefix(f"mcp__{SERVER}__") in FILE_STEPS:
         return "file changes"
+    if tool.startswith("mcp__"):
+        return "tools from " + tool.removeprefix("mcp__").partition("__")[0]
     return tool
 
 
@@ -198,9 +203,12 @@ class ComputerTask(QObject):
     approval = Signal(object)
     finished = Signal(str, bool)  # report, succeeded
 
-    def __init__(self, request, context, settings, parent=None, undo_root=None):
+    def __init__(self, request, context, settings, parent=None, undo_root=None, servers=(), project=None):
         super().__init__(parent)
         self.request = request
+        self.servers, self.project = list(servers), project
+        from ..core.mcp import trusted_tools
+        self.trusted = tuple(trusted_tools(self.servers))
         from .journal import Journal, cleanup
         root = Path(undo_root or UNDO_ROOT)
         cleanup(root)
@@ -233,14 +241,23 @@ class ComputerTask(QObject):
                   "env": {"PYTHONPATH": str(PROJECT_ROOT), "JINGLIU_APPROVAL_PORT": str(self.approvals.port),
                           "JINGLIU_APPROVAL_TOKEN": self.approvals.token, "PYTHONIOENCODING": "utf-8",
                           "JINGLIU_JOURNAL": str(self.journal.folder)}}
-        (work / "mcp.json").write_text(json.dumps({"mcpServers": {SERVER: server}}), encoding="utf-8")
-        (work / "prompt.txt").write_text(TASK_PROMPT.format(
-            name=settings.name, home=Path.home(), profile=settings.system_prompt or settings.name), encoding="utf-8")
+        from ..core.mcp import claude_config
+        servers = {**claude_config(self.servers)["mcpServers"], SERVER: server}
+        (work / "mcp.json").write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+        prompt = TASK_PROMPT.format(name=settings.name, home=Path.home(), profile=settings.system_prompt or settings.name)
+        folder = Path(self.project["folder"]) if self.project and self.project.get("folder") else None
+        if self.project:
+            prompt += (f"\nThis task belongs to the user's project \"{self.project['name']}\"."
+                       + (f" Its folder is {folder}; work there unless the task says otherwise." if folder else "")
+                       + (f"\nProject instructions: {self.project['instructions']}" if self.project.get("instructions") else "")
+                       + "\n")
+        (work / "prompt.txt").write_text(prompt, encoding="utf-8")
         from ..chat.claude import DEFAULT_CLAUDE_MODEL
         arguments = ["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence",
                      "--setting-sources", "", "--disable-slash-commands", "--strict-mcp-config",
                      "--mcp-config", str(work / "mcp.json"), "--permission-prompt-tool", f"mcp__{SERVER}__approve",
-                     "--tools", TOOLS, "--allowedTools", *FREE_TOOLS, "--append-system-prompt-file", str(work / "prompt.txt"),
+                     "--tools", TOOLS, "--allowedTools", *FREE_TOOLS, *self.trusted,
+                     "--append-system-prompt-file", str(work / "prompt.txt"),
                      "--model", settings.claude_model or DEFAULT_CLAUDE_MODEL, "--effort", "medium",
                      "--max-turns", str(MAX_TURNS), "--add-dir", *drives()]
         earlier = "\n".join(f"{m['role']}: {m['content']}" for m in context[-6:] if m.get("content"))
@@ -252,7 +269,7 @@ class ComputerTask(QObject):
             if name.endswith(("API_KEY", "AUTH_TOKEN")) or name.startswith("CLAUDE_CODE_") or name == "CLAUDECODE":
                 environment.remove(name)
         self.process.setProcessEnvironment(environment)
-        self.process.setWorkingDirectory(str(Path.home()))
+        self.process.setWorkingDirectory(str(folder if folder and folder.is_dir() else Path.home()))
         self.process.setProgram(claude_executable() or "claude")
         self.process.setArguments(arguments)
 
@@ -309,7 +326,8 @@ class ComputerTask(QObject):
                 for block in (event.get("message") or {}).get("content") or []:
                     # Only steps that need no approval are announced here; approved ones are
                     # announced as they are allowed.
-                    if block.get("type") == "tool_use" and (block.get("name") in FREE_TOOLS):
+                    name = block.get("name") or ""
+                    if block.get("type") == "tool_use" and (name in FREE_TOOLS or (self.trusted and name.startswith(self.trusted))):
                         self.step.emit(describe(block.get("name", ""), block.get("input")))
             elif event.get("type") == "result":
                 text = str(event.get("result") or "").strip()

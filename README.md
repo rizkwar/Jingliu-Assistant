@@ -42,6 +42,36 @@ current character is **Jingliu**, always in character: reserved, composed, quiet
 - While she works on a task she looks focused, and a small panel shows her current step.
 - Drag to move; the corner grip resizes her. **Settings → Avatar → Animation tester** plays every animation.
 
+**Three kinds of conversation**, each with its own tab above Settings: **Chats** (everyday, grouped by
+Pinned / Today / Yesterday / Previous 7 days / Older), **Projects** and **Study**. Opening a conversation
+shows its tab; New chat is an everyday chat.
+
+**Study**
+- A **subject** per course or exam: an **exam date with a countdown**, **materials** she teaches and quizzes
+  from (text and PDFs are read), and **how she teaches you**. She tutors in its sessions: explains step by
+  step, checks your understanding and grounds answers in your materials.
+- Above the message box: **Quiz me** (one question at a time, scored: *Quiz 4/5*), **Make flashcards**,
+  **Explain simpler**, **Summarize**, and a **Focus timer** (25 minutes, or ask her: "let's focus for 40
+  minutes"). When it ends she tells you herself and the minutes count toward the subject.
+- **Flashcards** she makes are saved to the subject (Undo removes them). **Review** them with spaced
+  repetition: Show answer (Space), then Again / Hard / Good / Easy (1–4), each showing when the card returns.
+  The subject page shows progress: cards due, focus time this week, recent quiz accuracy.
+
+**Projects**
+- Keep ongoing work together: a project has its own **chats**, **instructions** she follows in every chat of
+  it ("I'm a beginner, examples first"), **files** she knows (text, code and PDFs are read for her) and an
+  optional **folder** where computer tasks start. Start one with **+** next to Projects in the sidebar.
+- Right-click any chat → **Move to project**. The header shows *Project › Chat*; click the project to open
+  its page. Deleting a project can keep its chats (they return to Recents).
+
+**Tools from MCP servers** (Settings → Tools)
+- Connect MCP servers (your notes, a calendar, GitHub, a database…): by command or URL, by pasting the JSON
+  snippet from a server's instructions, or **Import from Claude** (Claude Code and Claude Desktop). **Test**
+  shows a server's tools.
+- Computer tasks can use every enabled server; its steps show in the task card and ask first unless you turn
+  that off per server. Servers set to **Conversations and tasks** are also available while she replies with
+  your Claude subscription, and each tool she uses shows as a small note in the chat.
+
 **Do things on your computer** ([computer tasks](docs/computer-tasks.md))
 - Ask casually ("my desktop is a mess") or type `/do …`. She proposes a plan and waits for your yes.
 - She **asks before** running commands, changing files, or clicking and typing, unless you turn that

@@ -14,7 +14,11 @@ from ..chat.continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
+PROJECT_COLORS = ("ice", "frost", "crimson", "amber", "jade", "violet")
+PROJECT_KINDS = ("project", "study")
+CARD_LIMITS = (500, 2000)  # Characters on the front and back of a flashcard.
+PROJECT_LIMITS = {"name": 80, "description": 300, "instructions": 8000, "folder": 1024}
 STOP_WORDS = set("a an and are as at be been but by can do for from have how i in is it me my of on or that the this to was we what with you your".split())
 
 
@@ -72,6 +76,30 @@ class Store:
                 content TEXT NOT NULL CHECK (length(content) BETWEEN 1 AND 6000),
                 through_id INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS projects (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                instructions TEXT NOT NULL DEFAULT '', folder TEXT NOT NULL DEFAULT '',
+                color TEXT NOT NULL DEFAULT 'ice', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS flashcards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                front TEXT NOT NULL, back TEXT NOT NULL, conversation_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, due_at TEXT NOT NULL, interval INTEGER NOT NULL DEFAULT 0,
+                ease REAL NOT NULL DEFAULT 2.5, reviews INTEGER NOT NULL DEFAULT 0, lapses INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS flashcards_by_due ON flashcards(project_id, due_at);
+            CREATE TABLE IF NOT EXISTS study_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                conversation_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, value INTEGER NOT NULL, at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS project_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL, path TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
+                added_at TEXT NOT NULL
+            );
         """)
         with self.connection:
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(conversations)")}
@@ -79,6 +107,13 @@ class Store:
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN character_key TEXT NOT NULL DEFAULT ''")
             if "pinned" not in columns:
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+            if "project_id" not in columns:
+                self.connection.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT NOT NULL DEFAULT ''")
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(projects)")}
+            if "kind" not in columns:  # "project", or "study": a subject with flashcards and an exam date.
+                self.connection.execute("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
+            if "exam_date" not in columns:
+                self.connection.execute("ALTER TABLE projects ADD COLUMN exam_date TEXT NOT NULL DEFAULT ''")
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(messages)")}
             if "attachments" not in columns:
                 # JSON list of locally stored copies; the files live under data/attachments.
@@ -95,14 +130,166 @@ class Store:
             self.connection.close()
             self.connection = None
 
-    def conversations(self, character=None):
+    def conversations(self, character=None, project=None):
+        """Newest first. `project`: None for all, '' for chats outside any project, or a project id."""
+        where, values = [], []
+        if character is not None:
+            where.append("c.character_key=?")
+            values.append(character)
+        if project is not None:
+            where.append("c.project_id=?")
+            values.append(project)
         return [dict(row) for row in self.connection.execute(
             "SELECT c.*, COUNT(m.id) AS message_count FROM conversations c "
             "LEFT JOIN messages m ON m.conversation_id=c.id "
-            + ("WHERE c.character_key=? " if character is not None else "")
+            + ("WHERE " + " AND ".join(where) + " " if where else "")
             + "GROUP BY c.id ORDER BY c.updated_at DESC, c.rowid DESC",
-            (character,) if character is not None else (),
+            values,
         )]
+
+    # Projects: a name, instructions she follows, files she knows, an optional folder and their chats.
+
+    def create_project(self, name="New project", kind="project"):
+        if kind not in PROJECT_KINDS:
+            raise ValueError("Unknown kind of project.")
+        project_id, timestamp = uuid4().hex, now()
+        with self.connection:
+            self.connection.execute("INSERT INTO projects(id,name,kind,created_at,updated_at) VALUES (?, ?, ?, ?, ?)",
+                                    (project_id, self._project_text("name", name), kind, timestamp, timestamp))
+        return project_id
+
+    def projects(self, kind=None):
+        """Projects (kind "project") and study subjects (kind "study"), most recently used first."""
+        return [dict(row) for row in self.connection.execute(
+            "SELECT p.*, (SELECT COUNT(*) FROM conversations c WHERE c.project_id=p.id) AS conversation_count, "
+            "(SELECT COUNT(*) FROM project_files f WHERE f.project_id=p.id) AS file_count "
+            "FROM projects p " + ("WHERE p.kind=? " if kind else "") + "ORDER BY p.updated_at DESC, p.rowid DESC",
+            (kind,) if kind else ())]
+
+    def project(self, project_id):
+        row = self.connection.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def _project_text(field, value):
+        value = str(value).strip() if field != "instructions" else str(value).strip("\n")
+        if field == "name":
+            value = " ".join(value.split())
+            if not value:
+                raise ValueError("A project needs a name.")
+        if len(value) > PROJECT_LIMITS[field]:
+            raise ValueError(f"The project {field} can be at most {PROJECT_LIMITS[field]:,} characters.")
+        return value
+
+    def update_project(self, project_id, **fields):
+        values = {}
+        for field, value in fields.items():
+            if field == "color":
+                if value not in PROJECT_COLORS:
+                    raise ValueError("Choose one of the project colours.")
+                values[field] = value
+            elif field == "exam_date":
+                if value:
+                    datetime.strptime(value, "%Y-%m-%d")  # ValueError for anything but a date.
+                values[field] = value or ""
+            elif field in PROJECT_LIMITS:
+                values[field] = self._project_text(field, value)
+            else:
+                raise ValueError(f"Unknown project field: {field}")
+        if values:
+            with self.connection:
+                self.connection.execute(
+                    "UPDATE projects SET " + ", ".join(f"{field}=?" for field in values) + ", updated_at=? WHERE id=?",
+                    (*values.values(), now(), project_id))
+        return self.project(project_id)
+
+    def delete_project(self, project_id, delete_conversations=False):
+        """Removes the project and returns its stored files (for the caller to delete). Its chats
+        move back to your list unless `delete_conversations`."""
+        files = self.project_files(project_id)
+        for conversation in self.conversations(project=project_id):
+            if delete_conversations:
+                self.delete_conversation(conversation["id"])
+        with self.connection:
+            self.connection.execute("UPDATE conversations SET project_id='' WHERE project_id=?", (project_id,))
+            self.connection.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        return files
+
+    def set_conversation_project(self, conversation_id, project_id=""):
+        if project_id and not self.project(project_id):
+            raise ValueError("That project no longer exists.")
+        with self.connection:
+            self.connection.execute("UPDATE conversations SET project_id=? WHERE id=?", (project_id, conversation_id))
+            if project_id:
+                self.connection.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+
+    def project_files(self, project_id):
+        return [dict(row) for row in self.connection.execute(
+            "SELECT * FROM project_files WHERE project_id=? ORDER BY added_at, id", (project_id,))]
+
+    def add_project_file(self, project_id, name, path, kind, size=0):
+        with self.connection:
+            cursor = self.connection.execute(
+                "INSERT INTO project_files(project_id,name,path,kind,size,added_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, name, path, kind, int(size), now()))
+            self.connection.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+        return cursor.lastrowid
+
+    # Study: flashcards (spaced repetition) and events (focus minutes, quiz answers) per subject.
+
+    def add_flashcard(self, project_id, front, back, conversation_id=""):
+        front, back = " ".join(str(front).split()), str(back).strip()
+        if not front or not back:
+            raise ValueError("A flashcard needs a question and an answer.")
+        front, back = front[:CARD_LIMITS[0]], back[:CARD_LIMITS[1]]
+        timestamp = now()
+        with self.connection:
+            cursor = self.connection.execute(
+                "INSERT INTO flashcards(project_id,front,back,conversation_id,created_at,due_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, front, back, conversation_id, timestamp, datetime.now().date().isoformat()))
+        return cursor.lastrowid
+
+    def flashcards(self, project_id, due_on=None):
+        """All of a subject's cards, or only those due on or before the date `due_on` (YYYY-MM-DD)."""
+        return [dict(row) for row in self.connection.execute(
+            "SELECT * FROM flashcards WHERE project_id=? " + ("AND due_at<=? " if due_on else "")
+            + "ORDER BY due_at, id", (project_id, due_on) if due_on else (project_id,))]
+
+    def flashcard(self, card_id):
+        row = self.connection.execute("SELECT * FROM flashcards WHERE id=?", (card_id,)).fetchone()
+        return dict(row) if row else None
+
+    def schedule_flashcard(self, card_id, due_at, interval, ease, lapsed=False):
+        with self.connection:
+            self.connection.execute(
+                "UPDATE flashcards SET due_at=?, interval=?, ease=?, reviews=reviews+1, lapses=lapses+? WHERE id=?",
+                (due_at, int(interval), float(ease), int(lapsed), card_id))
+
+    def delete_flashcards(self, card_ids):
+        with self.connection:
+            self.connection.executemany("DELETE FROM flashcards WHERE id=?", [(card_id,) for card_id in card_ids])
+
+    def log_study(self, project_id, kind, value, conversation_id=""):
+        """A finished focus session ("focus", minutes) or a quiz answer ("answer", 1 right / 0 wrong)."""
+        with self.connection:
+            self.connection.execute("INSERT INTO study_events(project_id,conversation_id,kind,value,at) VALUES (?, ?, ?, ?, ?)",
+                                    (project_id, conversation_id, kind, int(value), now()))
+            self.connection.execute("UPDATE projects SET updated_at=? WHERE id=?", (now(), project_id))
+
+    def study_events(self, project_id, kind=None, since=None, conversation_id=None):
+        query, values = "SELECT * FROM study_events WHERE project_id=?", [project_id]
+        for column, value, operator in (("kind", kind, "="), ("at", since, ">="), ("conversation_id", conversation_id, "=")):
+            if value is not None:
+                query += f" AND {column}{operator}?"
+                values.append(value)
+        return [dict(row) for row in self.connection.execute(query + " ORDER BY id", values)]
+
+    def remove_project_file(self, file_id):
+        row = self.connection.execute("SELECT * FROM project_files WHERE id=?", (file_id,)).fetchone()
+        if row:
+            with self.connection:
+                self.connection.execute("DELETE FROM project_files WHERE id=?", (file_id,))
+        return dict(row) if row else None
 
     def last_message(self, conversation_id):
         row = self.connection.execute(
