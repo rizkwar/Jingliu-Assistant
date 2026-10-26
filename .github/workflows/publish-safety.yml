@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Test publishing checks
-        run: python3 -m unittest discover -s tests -p test_publish_safety.py
+        run: python3 -m unittest discover -s tests -t . -p test_publish_safety.py
       - name: Check credentials, personal metadata and private paths
         run: python3 scripts/check_publish_safety.py --history
       - name: Download checksum-pinned Gitleaks

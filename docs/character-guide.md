@@ -12,7 +12,7 @@ companion. All sample dialogue is newly written, rather than copied game lines.
 2. Open **Settings > Add character**. Give them a name and describe their identity,
    personality, background, interests, speaking style, reactions, and relationship
    with you. Add example conversations and behaviors to avoid in the same text.
-   The [description example](../examples/character-description.toml) shows one approach.
+   The [description example](examples/character-description.toml) shows one approach.
 3. Optionally choose a clean voice recording: one English speaker, no music,
    **3–30 seconds of PCM WAV** (8–15 seconds recommended). The editor validates
    the format and copies it locally; it does not change your source recording.

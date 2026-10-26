@@ -6,12 +6,12 @@ import sqlite3
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtCore import QEvent, QLockFile
 
-from .config import PROJECT_ROOT, load_settings
-from .ui import CompanionWindow
-from .hotkey import RecordingHotkey
-from .storage import Store
-from .preferences import Preferences
-from .background import TrayController
+from .core.config import PROJECT_ROOT, load_settings
+from .ui.window import CompanionWindow
+from .app.hotkey import RecordingHotkey
+from .core.storage import Store
+from .core.preferences import Preferences
+from .app.tray import TrayController
 
 
 def main() -> int:
@@ -54,7 +54,7 @@ def main() -> int:
     hotkey.activated.connect(window._toggle_recording)
     if not hotkey.register():
         window.mic_hint.setText("Hold the button to talk · Ctrl+Alt+Space is unavailable · 60-second limit")
-    from .autostart import BACKGROUND
+    from .app.autostart import BACKGROUND
     if not (BACKGROUND in sys.argv and tray_available):
         window.show()  # Started with Windows: stay in the tray (her avatar still appears if it is on).
     try:

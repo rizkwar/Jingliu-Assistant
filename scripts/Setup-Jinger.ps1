@@ -26,7 +26,7 @@ try {
         if (-not (Test-SupportedPython $pythonPath)) { throw 'The project Python is broken or unsupported. Use 64-bit Python 3.11 or 3.12.' }
         Push-Location -LiteralPath $projectRoot
         try {
-            & $pythonPath -m companion.doctor
+            & $pythonPath -m companion.app.doctor
             exit $LASTEXITCODE
         } finally { Pop-Location }
     }
@@ -72,7 +72,7 @@ try {
         Write-Host 'Created .env from the template. Add your OpenRouter key locally when ready.'
     } else { Write-Host 'Kept your existing .env unchanged.' }
     Push-Location -LiteralPath $projectRoot
-    try { Invoke-Python $pythonPath @('-m', 'companion.doctor', '--engines') }
+    try { Invoke-Python $pythonPath @('-m', 'companion.app.doctor', '--engines') }
     finally { Pop-Location }
     Write-Host 'Setup complete. Double-click Start Jinger.cmd to launch.'
     exit 0

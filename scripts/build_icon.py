@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from PySide6.QtCore import QBuffer, QIODevice
 from PySide6.QtWidgets import QApplication
-from companion.theme import moon_icon
+from companion.ui.theme import moon_icon
 
 SIZES = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
 

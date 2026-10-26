@@ -81,7 +81,7 @@ Undo records live in `data/task_undo/` (with what you asked and how it ended) an
 Conversation stays tool-free, exactly as before. A task is a separate Claude Code run
 (`claude -p`, your Claude plan, model from Settings) with real tools. Each run is isolated:
 - **Tools:** only Bash, PowerShell, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, plus the
-  app's own server (`companion/task_tools.py`) for screenshots, clicks, typing, keys, scroll and wait.
+  app's own server (`companion/tasks/tools.py`) for screenshots, clicks, typing, keys, scroll and wait.
 - **No personal setup:** your Claude Code settings, skills and slash commands are not loaded
   (`--setting-sources ""`, `--disable-slash-commands`), and no other MCP servers are allowed
   (`--strict-mcp-config`). `--safe-mode` is not used because it also drops the approval server.

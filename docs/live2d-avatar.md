@@ -59,7 +59,7 @@ page permits WebAssembly compilation for Cubism Core.
 
 ## Life: sleep, reactions and idle moments
 
-The Live2D rig now has a life layer (`companion/avatar_web/avatar-life.js`) on top
+The Live2D rig now has a life layer (`companion/avatar/web/avatar-life.js`) on top
 of the head and gaze controller. The model package has no motion files, so every
 animation is procedural. Each one drives the rig's own expression parameters,
 checked by rendering them: eyelids and eye-smile, mouth shape, blush, brows, body
@@ -83,7 +83,7 @@ so her hair and ribbons follow every movement.
 
 While the desktop avatar is shown, the reply model may add silent cues such as
 `[[blush]]` where a feeling changes. A streaming filter
-(`companion/avatar_cues.py`) removes them before anything is displayed, spoken
+(`companion/avatar/cues.py`) removes them before anything is displayed, spoken
 or saved, including cues split across chunks. Bracketed text that is not a known
 cue, such as code like `matrix[[0]]`, is left alone. If she is speaking aloud,
 each cue fires when her voice reaches it; otherwise it fires at once.
@@ -195,7 +195,7 @@ cues cannot reach, so the model cannot put her to sleep.
 expressions stay whole. Only the Live2D model has this layer. The AI portrait and
 layered rig are unchanged.
 
-Verification: `node --test tests/*.test.mjs` covers the sleep timeline, wake
+Verification: `node --test tests/js/*.test.mjs` covers the sleep timeline, wake
 triggers, hover dwell, pokes, lip-sync priority and long seeded runs within rig
 bounds. A native check of the real widget, with a 20-second delay, observed the
 greeting, a yawn into drowsiness, sleep with the "Sleeping" tooltip and the Zzz
@@ -251,7 +251,7 @@ The full suites passed **284 Python tests** and **57 JavaScript tests** during
 integration. The opt-in native check also passed:
 
 ```powershell
-.\.venv\Scripts\python.exe dev/check_live2d.py
+.\.venv\Scripts\python.exe dev/qa/check_live2d.py
 ```
 
 It uses temporary model assignments, preferences and conversations. No response
@@ -275,7 +275,7 @@ for this experiment, and no measured frame-rate claim is made.
 ### Ribbon timing regression
 
 ```powershell
-.\.venv\Scripts\python.exe dev/check_live2d.py --physics
+.\.venv\Scripts\python.exe dev/qa/check_live2d.py --physics
 ```
 
 This additional check runs the real pinned Cubism solver and imported rig through

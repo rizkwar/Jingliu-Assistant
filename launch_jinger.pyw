@@ -2,7 +2,7 @@
 
 if __name__ == "__main__":
     try:
-        from companion.launcher import launch
+        from companion.app.launcher import launch
     except Exception:
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, "Project files are missing or unreadable. Restore the project folder and run Setup Jinger.cmd.",

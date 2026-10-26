@@ -119,22 +119,30 @@ settings, characters) and `voices/`. Neither is ever committed to Git.
 
 ## Project layout
 
-| Folder | Contents |
-| --- | --- |
-| `companion/` | The app. |
-| `docs/` | Guides: characters, models, voice, Live2D avatar, computer tasks, publishing. |
-| `More/` | Extra launchers (shortcuts, voice and avatar setup, setup check). |
-| `scripts/` | What the launchers run, plus the publishing safety check. |
-| `dev/` | Development tools: avatar rig builders, previews and measurements ([dev/README.md](dev/README.md)). |
-| `tests/` | Python and Node tests. |
-| `examples/` | An example character description. |
-| `data/`, `voices/`, `.cache/` | Your local data, voice recordings and model caches (Git-ignored). |
+```
+companion/          the app
+  app/              startup, tray, Start with Windows, hotkey, setup checks
+  core/             settings, saved preferences, the database, backups
+  chat/             model providers, prompts, memory notes, reminders, check-ins
+  character/        character profiles and the saved-character library
+  voice/            speech, the microphone, transcription, talk-over
+  avatar/           the desktop avatar and its web renderer (web/)
+  tasks/            computer tasks: runner, tools, undo journal, screen capture
+  ui/               the main window, chat view, settings pages, theme
+docs/               guides, and an example character (docs/examples/)
+More/               extra launchers: shortcuts, voice and avatar setup, setup check
+scripts/            what the launchers run, plus the publishing safety check
+dev/                avatar development tools: rig/, qa/, previews/ (see dev/README.md)
+tests/python/       Python tests, in the same folders as the app
+tests/js/           tests for the avatar's JavaScript
+data/, voices/, .cache/   your local data, voice recordings and model caches (Git-ignored)
+```
 
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests
-node --test tests/*.test.mjs
+.\.venv\Scripts\python.exe -m unittest discover -s tests -t .
+node --test tests/js/*.test.mjs
 ```
 
 Tests use fake network streams, fake microphones and temporary folders: no API key, microphone,

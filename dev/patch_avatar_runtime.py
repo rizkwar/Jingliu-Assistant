@@ -56,5 +56,5 @@ def patch_hd(text):
 
 
 if __name__ == '__main__':
-    path = ROOT / 'companion/avatar_web/vendor/mesh-avatar.js'
+    path = ROOT / 'companion/avatar/web/vendor/mesh-avatar.js'
     path.write_bytes(patch(path.read_bytes()))
