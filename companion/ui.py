@@ -643,20 +643,20 @@ class CompanionWindow(QMainWindow):
         self.close_to_tray = QCheckBox("Keep running in the system tray when I close the window")
         self.close_to_tray.setChecked(settings.close_to_tray)
         switch(settings_layout, self.close_to_tray, "Quit from the tray icon to close her fully.")
-        self.check_ins = QCheckBox("Gentle check-ins: a good-morning greeting, and a nudge to rest "
-                                   "after about three hours at the computer")
-        self.check_ins.setChecked(settings.check_ins)
-        self.check_ins.setToolTip("She greets you once each morning and, after about three hours of use without a "
-                                  "ten-minute break, suggests a short rest. Only the time since your last mouse or "
-                                  "keyboard input is read, nothing else.")
-        self.check_ins.toggled.connect(self._check_ins_toggled)
-        switch(settings_layout, self.check_ins, "Only the time since your last mouse or keyboard input is read.")
         from . import autostart
         self.start_with_windows = QCheckBox("Start Jingliu when I sign in to Windows (quietly, in the tray)")
         self.start_with_windows.setChecked(autostart.enabled())
         self.start_with_windows.setEnabled(sys.platform == "win32")
         self.start_with_windows.toggled.connect(self._start_with_windows_toggled)
         switch(settings_layout, self.start_with_windows, "Also listed in Task Manager → Startup apps.")
+        section(settings_layout, "Check-ins")
+        self.check_ins = QCheckBox("Gentle check-ins")
+        self.check_ins.setChecked(settings.check_ins)
+        self.check_ins.toggled.connect(self._check_ins_toggled)
+        switch(settings_layout, self.check_ins,
+               "She greets you to fit the time of day when you arrive or come back after a while, and suggests "
+               "a short rest after about three hours at the computer. Only the time since your last mouse or "
+               "keyboard input is read.")
         section(settings_layout, "Your data")
         data_hint = QLabel("Everything stays on this computer. A backup holds your conversations, memories, reminders, "
                            "shared files, settings and characters in one file; an export is one readable text file.")
@@ -1888,13 +1888,14 @@ class CompanionWindow(QMainWindow):
                 or self._task is not None or self.microphone.busy or self.speech.busy):
             return
         now, idle = reminders.now_local(), check_ins.idle_seconds()
-        if self._check_ins.morning(now, idle):
+        reason = self._check_ins.greeting(now, idle)
+        if reason:
             self.settings = replace(self.settings, check_in_greeted=self._check_ins.greeted)
             try:
                 self.preferences.remember(self.settings, ("check_in_greeted",))
             except (OSError, ValueError):
                 pass
-            self._deliver_check_in(check_ins.morning_message(now), "Check-in · good morning")
+            self._deliver_check_in(check_ins.greeting_message(now, reason), check_ins.greeting_label(now, reason))
         elif self._check_ins.long_session(time.monotonic(), idle):
             hours = self._check_ins.hours(time.monotonic())
             self._deliver_check_in(check_ins.rest_message(now, hours),

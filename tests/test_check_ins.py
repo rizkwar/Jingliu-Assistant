@@ -14,13 +14,25 @@ SETTINGS = Settings("test-key", DEFAULT_MODEL, "Jingliu", "Profile.", tts_enable
 
 
 class CheckInRuleTests(unittest.TestCase):
-    def test_a_morning_greeting_comes_once_a_day_and_only_when_present(self):
+    def test_she_greets_when_you_arrive_and_when_you_come_back_after_a_while(self):
         rules = CheckIns()
-        self.assertFalse(rules.morning(datetime(2026, 10, 26, 8, 0), idle=600))   # Not at the computer yet.
-        self.assertTrue(rules.morning(datetime(2026, 10, 26, 8, 5), idle=3))
-        self.assertFalse(rules.morning(datetime(2026, 10, 26, 9, 0), idle=3))     # Already greeted today.
-        self.assertFalse(rules.morning(datetime(2026, 10, 27, 14, 0), idle=3))    # Afternoon is not morning.
-        self.assertTrue(CheckIns(greeted="2026-10-26").morning(datetime(2026, 10, 27, 7, 0), idle=0))
+        self.assertIsNone(rules.greeting(datetime(2026, 10, 26, 8, 0), idle=600))     # Not at the computer yet.
+        self.assertEqual(rules.greeting(datetime(2026, 10, 26, 8, 5), idle=3), "first")
+        self.assertIsNone(rules.greeting(datetime(2026, 10, 26, 9, 0), idle=3))       # Already greeted today.
+        self.assertIsNone(rules.greeting(datetime(2026, 10, 26, 13, 0), idle=3 * 3600))  # Away for a while...
+        self.assertEqual(rules.greeting(datetime(2026, 10, 26, 13, 1), idle=2), "back")  # ...and back.
+        self.assertIsNone(rules.greeting(datetime(2026, 10, 26, 13, 30), idle=2))
+        # Working past midnight is still the same day; the next morning is a new one.
+        self.assertIsNone(rules.greeting(datetime(2026, 10, 27, 1, 0), idle=2))
+        self.assertEqual(rules.greeting(datetime(2026, 10, 27, 7, 0), idle=2), "first")
+
+    def test_the_greeting_fits_the_time_of_day(self):
+        cases = {6: "good morning", 14: "good afternoon", 19: "good evening", 23: "late at night", 2: "late at night"}
+        for hour, words in cases.items():
+            with self.subTest(hour=hour):
+                self.assertIn(words, check_ins.greeting_label(datetime(2026, 10, 26, hour, 0), "first"))
+        self.assertIn("welcome back", check_ins.greeting_label(datetime(2026, 10, 26, 19, 0), "back"))
+        self.assertIn("evening", check_ins.greeting_message(datetime(2026, 10, 26, 19, 0), "back"))
 
     def test_a_rest_nudge_after_three_hours_without_a_break_then_not_again_for_three(self):
         rules = CheckIns()
@@ -68,12 +80,12 @@ class WindowCheckInTests(unittest.TestCase):
         self.assertFalse(self.window.check_ins.isChecked())
         self.assertEqual(self.run_check(datetime(2026, 10, 26, 8, 0), 1), [])
 
-    def test_when_on_she_greets_in_the_morning_and_it_is_remembered(self):
+    def test_when_on_she_greets_on_arrival_and_it_is_remembered(self):
         self.window.check_ins.setChecked(True)
         started = self.run_check(datetime(2026, 10, 26, 8, 0), 1)
         (line,), options = started[0]
         self.assertTrue(line.startswith(check_ins.MARK))
-        self.assertEqual(options["note"], ("Check-in · good morning", "moon"))
+        self.assertEqual(options["note"], ("Check-in · good morning", "moon"))  # 08:00
         self.assertEqual(self.window.settings.check_in_greeted, "2026-10-26")
         self.assertEqual(self.run_check(datetime(2026, 10, 26, 9, 0), 1), [])
 

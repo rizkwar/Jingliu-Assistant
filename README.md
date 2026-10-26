@@ -65,8 +65,9 @@ this one step at a time, following the character, voice, and memory brief.
 - **Back up, restore, export:** Settings → App → Your data. A backup is one zip with your conversations,
   memories, reminders, shared files, settings, characters and her profile; restoring first saves what
   you have now to `data/backups`. **Export as text** writes one readable Markdown file.
-- **Start with Windows** (quietly, in the tray) and **gentle check-ins** (a morning greeting, a nudge to
-  rest after about three hours at the computer; off by default) are in Settings → App.
+- **Start with Windows** (quietly, in the tray) and **gentle check-ins** (off by default: a greeting that
+  fits the time of day when you arrive or come back after two hours away, and a nudge to rest after
+  about three hours at the computer) are in Settings → App.
 - **Light in the background:** hidden in the tray with the avatar off, it uses about 11 MB of memory ([details](#running-in-the-background)).
 
 **Chat commands:** `/do <task>` · `/undo` · `/remember <fact>` · `/forget <number>` · `/memories`
