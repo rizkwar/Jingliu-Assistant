@@ -203,7 +203,7 @@ class FakeTask(QObject):
     finished = Signal(str, bool)
     created = []
 
-    def __init__(self, request, context, settings, parent=None, servers=(), project=None):
+    def __init__(self, request, context, settings, parent=None, servers=(), project=None, session=None):
         super().__init__(parent)
         self.request, self.context, self.started, self.stopped, self.remembered = request, context, False, False, []
         self.servers, self.project = list(servers), project

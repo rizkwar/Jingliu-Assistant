@@ -135,7 +135,7 @@ class CharacterWindowTests(unittest.TestCase):
                 time.sleep(0.005)
         self.assertIsNone(self.window._worker)
         self.assertIn("Cheerful, likes films", requests[0]["messages"][0]["content"])
-        self.assertIn("I prefer short replies", requests[0]["messages"][0]["content"])
+        self.assertIn("I prefer short replies", requests[0]["messages"][-1]["content"])
         self.assertNotIn("blue lens", json.dumps(requests))
         self.assertTrue(self.window._activate_character(self.first))
         self.assertEqual(self.window._conversation_id, original_id)

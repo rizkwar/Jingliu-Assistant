@@ -217,10 +217,15 @@ class ComputerTask(QObject):
     approval = Signal(object)
     finished = Signal(str, bool)  # report, succeeded
     activity = Signal(str)  # What she is doing right now, between steps ("Thinking…", "Writing notes.md · 40 lines")
+    usage = Signal(dict)  # The tokens the task used: {model, input, output, cached}.
+    limits = Signal(list)  # What is left of the plan, as reported while she works.
 
-    def __init__(self, request, context, settings, parent=None, undo_root=None, servers=(), project=None):
+    def __init__(self, request, context, settings, parent=None, undo_root=None, servers=(), project=None, session=None):
         super().__init__(parent)
         self.request = request
+        # The Claude Code session to run in ({id, resume}); a resumed one still has what her earlier task read.
+        self.session, self.context_size, self.reported = session, 0, False
+        self.model = settings.claude_model
         self.servers, self.project = list(servers), project
         from ..core.mcp import trusted_tools
         self.trusted = tuple(trusted_tools(self.servers))
@@ -279,8 +284,11 @@ class ComputerTask(QObject):
         from ..chat.claude import DEFAULT_CLAUDE_MODEL
         from ..chat.effort import claude as claude_effort
         # stream-json both ways: the app can interrupt a stuck step and steer her with a message.
+        session = self.session or {}
+        keep = (["--resume", session["id"]] if session.get("resume") else ["--session-id", session["id"], "--name",
+                f"{settings.name} task"]) if session.get("id") else ["--no-session-persistence"]
         arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                     "--include-partial-messages", "--no-session-persistence",
+                     "--include-partial-messages", *keep,
                      "--setting-sources", "", "--disable-slash-commands", "--strict-mcp-config",
                      "--mcp-config", str(work / "mcp.json"), "--permission-prompt-tool", f"mcp__{SERVER}__approve",
                      "--tools", TOOLS, "--allowedTools", *FREE_TOOLS, *self.trusted,
@@ -291,6 +299,12 @@ class ComputerTask(QObject):
         earlier = "\n".join(f"{m['role']}: {m['content']}" for m in context[-6:] if m.get("content"))
         self.prompt = (("Recent conversation, for context:\n" + earlier + "\n\n") if earlier else "") + \
             "The task to do now:\n" + self.request
+        if session.get("resume"):
+            # Her earlier task in this conversation is above: what she read and found is still in front of her.
+            self.prompt = ("A new task in the same conversation. Your earlier task's work is above: reuse what you "
+                           "already read and found instead of reading it again, and check only what may have changed "
+                           "since (a file's modified time, or a quick Grep). Report on this new task only.\n\n"
+                           + self.prompt)
         environment = QProcessEnvironment.systemEnvironment()
         for name in list(environment.keys()):
             # A configured API key would bill the API instead of the subscription.
@@ -472,6 +486,11 @@ class ComputerTask(QObject):
             for block in content if isinstance(content, list) else []:
                 if isinstance(block, dict) and block.get("type") == "tool_result":
                     self.running.pop(block.get("tool_use_id"), None)
+        elif kind == "rate_limit_event":
+            from ..chat.usage import claude_windows
+            windows = claude_windows(event.get("rate_limit_info") or {})
+            if windows:
+                self.limits.emit(windows)
         elif kind == "result" and self.steering:
             # The interrupted turn ends here; she continues with the message.
             self.steering, text, self.queued = False, self.queued, None
@@ -479,6 +498,17 @@ class ComputerTask(QObject):
             if text:
                 self._send(text)
         elif kind == "result":
+            used = event.get("usage") or {}
+            fresh = (used.get("input_tokens") or 0) + (used.get("cache_creation_input_tokens") or 0)
+            counts = {"input": fresh, "output": used.get("output_tokens") or 0,
+                      "cached": used.get("cache_read_input_tokens") or 0}
+            if any(counts.values()):
+                self.usage.emit({"model": self.model or "", **counts})
+            # The last call's size is what a continuing session carries into the next task.
+            last = (used.get("iterations") or [used])[-1]
+            self.context_size = sum(last.get(name) or 0 for name in (
+                "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
+            self.reported = True
             text = str(event.get("result") or "").strip()
             ok = not event.get("is_error") and event.get("subtype") == "success"
             if not text:

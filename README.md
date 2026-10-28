@@ -113,6 +113,14 @@ shows its tab; New chat is an everyday chat.
 - **No Windows title bar**, like Claude's app: her header is the title bar (drag it, double-click to maximize,
   drag to a screen edge to snap, hover maximize for Snap Layouts), with thin minimize, maximize and close
   buttons in its corner; the shadow, rounded corners and animations stay.
+- **Light on your limits:** with your Claude subscription each chat continues its own session, so a reply processes
+  only your new message and reads the rest from the prompt cache (about a tenth of the cost; in a test, replies after
+  the first reused 93-96%). Her instructions stay the same from message to message; the time, reminders, memories
+  and study passages travel with your message, and passages she already has are not sent again. A chat starts a
+  fresh session when you edit or delete a message, change model, after a long pause, or when it grows large.
+  Computer tasks in the same chat continue the last task's session for up to three hours, so she does not re-read
+  files she just read. Reminders out of view, check-ins and summaries run on Haiku. Usage shows how much came from
+  the cache.
 - **Effort** (beside the model in the message box, or Settings): how hard she thinks. **Auto** (the default)
   keeps small talk light and thinks harder for code, maths, study and contest problems; or choose Low, Medium,
   High, Extra high or Max. Computer tasks have their own level (Medium by default). Reminders, check-ins and
@@ -181,6 +189,9 @@ settings, characters) and `voices/`. Neither is ever committed to Git.
 - What you send goes to the model provider you chose, with her profile, recent context, relevant
   memories and conversation notes. Speech synthesis and recognition are local.
 - Audio from the microphone stays in memory and is never saved to a file.
+- **Sessions:** Claude Code keeps a transcript of each chat's session (and of recent tasks) under
+  `~/.claude/projects` on this computer. The app deletes it with the chat, when a session is replaced, after three
+  hours for tasks and after 30 days for chats.
 - **Usage** keeps only token counts per reply (with the chat and model) and the latest limits each service
   reported, in `data/usage-limits.json`; never what was said.
 

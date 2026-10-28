@@ -27,7 +27,8 @@ TRANSPORT_NOTE = (
     'only your next reply to the latest message. Never quote the JSON or mention this format. '
     'Images, PDFs and <attached_file> blocks in the latest message are things the user shared with you now; '
     'you can see and read them. "[Attached …]" lines in earlier messages mark files shared before, '
-    'which are no longer visible to you.'
+    'which are no longer visible to you. In a continuing conversation, the user turn may instead begin with '
+    'messages since your last reply as JSON (such as a task report), followed by the latest user message.'
 )
 
 
@@ -52,11 +53,14 @@ def child_environment():
     return environment
 
 
-def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low'):
-    # Conversation: no built-in tools, skills, CLAUDE.md, hooks or saved sessions. Only MCP servers the
-    # person allowed in conversation are connected, and only their tools may run.
+def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low', session='', resume=False):
+    # Conversation: no built-in tools, skills, CLAUDE.md or hooks. Only MCP servers the person allowed in
+    # conversation are connected, and only their tools may run. With `session`, the conversation's own session is
+    # started or continued (see sessions.py); without one, nothing is kept.
+    keep = ['--resume', session] if session and resume else ['--session-id', session] if session else \
+        ['--no-session-persistence']
     command = [claude_executable(), '-p', '--system-prompt-file', str(prompt_file), '--tools', '',
-               '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence',
+               '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', *keep,
                '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', effort, '--input-format', 'stream-json',
                '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
     if mcp_file and servers:
@@ -64,7 +68,7 @@ def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low'):
     return command
 
 
-def user_turn(messages):
+def user_turn(messages, heading='Earlier messages (JSON):'):
     """One stream-json user message: prior turns as JSON text, the latest text, then its attachments."""
     latest = messages[-1] if messages else {}
     files = latest.get('attachments') or []
@@ -73,14 +77,27 @@ def user_turn(messages):
     if latest.get('role') != 'user' or not (latest.get('content') or files):
         raise ChatError('There is no message to reply to.')
     text = latest.get('content') or ''
+    context = latest.get('context') or ''
     if turns:
-        text = ('Earlier messages (JSON):\n' + json.dumps(turns, ensure_ascii=False)
-                + '\n\nLatest user message:\n' + (text or '(attachments only)'))
+        text = (heading + '\n' + json.dumps(turns, ensure_ascii=False) + '\n\n'
+                + (context + '\n\n' if context else '') + 'Latest user message:\n' + (text or '(attachments only)'))
+    elif context:
+        text = context + '\n\n' + (text or '(attachments only)')
     try:
         content = content_blocks(text, files)
     except OSError:
         raise ChatError('An attached file could not be read. Remove it and attach it again.') from None
     return json.dumps({'type': 'user', 'message': {'role': 'user', 'content': content}}, ensure_ascii=False) + '\n'
+
+
+def resume_turn(messages):
+    """The user message that continues a session: what it missed (if anything), the app context, the message."""
+    latest = messages[-1] if messages else {}
+    since = [{'role': m['role'], 'content': m['content']} for m in latest.get('since') or [] if m.get('content')]
+    if not since:
+        return user_turn([latest])
+    return user_turn([*since, {k: v for k, v in latest.items() if k != 'since'}],
+                     'Messages since your last reply in this conversation (JSON):')
 
 
 def result_error(event):
@@ -134,7 +151,14 @@ def open_login():
 
 
 async def stream_claude(settings, messages):
-    prompt = user_turn(messages)
+    from . import sessions
+    session = getattr(settings, 'claude_session', '')
+    # A session can continue only while Claude Code still has its transcript; otherwise it starts from the history.
+    resume = bool(session and getattr(settings, 'claude_resume', False) and sessions.transcripts(session))
+    prompt = resume_turn(messages) if resume else user_turn(messages)
+    if session:
+        sessions.FOLDER.mkdir(parents=True, exist_ok=True)
+        yield {'session': {'id': session, 'resumed': resume}}
     with tempfile.TemporaryDirectory(prefix='companion-claude-') as folder:
         prompt_file = Path(folder) / 'system-prompt.txt'
         prompt_file.write_text(settings.system_prompt + TRANSPORT_NOTE, encoding='utf-8')
@@ -145,7 +169,8 @@ async def stream_claude(settings, messages):
         try:
             from .effort import claude as claude_effort
             process = await run(reply_command(prompt_file, settings.claude_model, mcp_file, servers,
-                                              claude_effort(getattr(settings, 'effort', 'low'))), cwd=folder)
+                                              claude_effort(getattr(settings, 'effort', 'low')), session, resume),
+                                cwd=str(sessions.FOLDER) if session else folder)
         except OSError:
             raise ChatError('Could not start Claude Code. Check its installation and restart the assistant.') from None
         try:

@@ -116,18 +116,22 @@ def minutes_text(minutes):
     return f"{minutes // 60}h {minutes % 60:02d}m" if minutes >= 60 else f"{minutes} min"
 
 
-def context(subject, files, progress=None, earlier="", query=""):
+def context(subject, files, progress=None, earlier="", query="", split=False):
     """Everything she is told in a session: tutoring, the subject, its materials, progress and earlier sessions.
-    A linked materials folder gives her its index and the passages related to `query` (the message)."""
+    A linked materials folder gives her its index and the passages related to `query` (the message).
+    `split`: (what stays the same through a session, what changes with each message: passages and progress)."""
     lines = [PROMPT.format(name=subject["name"], mark=MARK),
              projects.context(subject, files).split("\n\n", 1)[1]]  # The details and materials, without the project wording.
+    changing = []
     if subject.get("folder"):
         from . import materials
-        lines.append(materials.context(subject["folder"], query))
+        changing.append(materials.context(subject["folder"], query))
     if progress and (progress["answers"] or progress["cards"]):
-        lines.append(f"Progress so far: {progress['cards']} flashcards ({progress['due']} due for review), "
-                     f"{progress['right']} of {progress['answers']} recent quiz answers right, "
-                     f"{minutes_text(progress['focus_week'])} of focus this week.")
+        changing.append(f"Progress so far: {progress['cards']} flashcards ({progress['due']} due for review), "
+                        f"{progress['right']} of {progress['answers']} recent quiz answers right, "
+                        f"{minutes_text(progress['focus_week'])} of focus this week.")
     if earlier:
         lines.append(earlier)
-    return "\n\n".join(lines)
+    if split:
+        return "\n\n".join(lines), "\n\n".join(changing)
+    return "\n\n".join(lines[:2] + changing + lines[2:])

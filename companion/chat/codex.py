@@ -168,6 +168,8 @@ async def stream_codex(settings, messages):
         if any(item['kind'] == 'pdf' for item in files):
             raise ChatError('PDFs are not supported with Codex here. Switch to Claude in Settings to share PDFs.')
         history = [{'role':m['role'], 'content':m['content']} for m in messages]
+        if history and messages[-1].get('context'):  # Last, so everything before it stays the same and is cached.
+            history[-1]['content'] = messages[-1]['context'] + '\n\n' + history[-1]['content']
         try:
             from .attachments import read_text
             for item in files:

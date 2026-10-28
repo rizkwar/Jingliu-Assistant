@@ -97,12 +97,12 @@ def call(name, arguments):
         return file_operation(name, arguments)
     from . import desktop
     if name == "screenshot":
-        path = Path(tempfile.gettempdir()) / f"jingliu-screen-{os.getpid()}.png"
+        path = Path(tempfile.gettempdir()) / f"jingliu-screen-{os.getpid()}.jpg"
         width, height, factor = desktop.screenshot(path)
         state["factor"] = factor
         data = base64.b64encode(path.read_bytes()).decode("ascii")
         path.unlink(missing_ok=True)
-        return {"content": [{"type": "image", "data": data, "mimeType": "image/png"},
+        return {"content": [{"type": "image", "data": data, "mimeType": "image/jpeg"},
                             {"type": "text", "text": f"Screenshot {width}x{height}. Use these pixel coordinates."}]}
     if name == "wait":
         time.sleep(max(.2, min(10., float(arguments.get("seconds", 1)))))

@@ -53,6 +53,8 @@ def api_error(status: int | None, payload: object) -> ChatError:
 def openrouter_message(message):
     """OpenAI-style content parts for a message with attachments; plain messages pass through."""
     files = message.get("attachments")
+    if message.get("context"):  # The app context rides with the latest message, after the cached history.
+        message = {**message, "content": message["context"] + "\n\n" + (message.get("content") or "")}
     if not files:
         return {"role": message["role"], "content": message["content"]}
     from .attachments import encoded, read_text

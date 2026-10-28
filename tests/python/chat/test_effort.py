@@ -95,6 +95,7 @@ class FakeWorker(QObject):
     tool_used = Signal(str)
     usage = Signal(dict)
     limits = Signal(list)
+    session = Signal(dict)
     finished = Signal()
     made = []
 

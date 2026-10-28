@@ -334,6 +334,9 @@ class UsageDialog(QDialog):
         self.chart_card, chart_layout, _ = _card("TOKENS, LAST 14 DAYS")
         self.chart = DayChart([])
         chart_layout.addWidget(self.chart)
+        self.cache_note = _label("", "usageReset", Qt.AlignmentFlag.AlignCenter)
+        self.cache_note.setWordWrap(True)
+        chart_layout.addWidget(self.cache_note)
         chart_layout.addStretch()
         self.table_card, table_layout, table_top = _card("BY CONVERSATION")
         self.range_group = QButtonGroup(self)
@@ -443,6 +446,10 @@ class UsageDialog(QDialog):
         self.moons.addStretch()
 
         self.chart.days = usage.daily(rows)
+        reuse = usage.reuse(rows, days=7)
+        self.cache_note.setText("" if reuse is None else
+                                f"{reuse:.0f}% of what she read this week came from the cache, at about a tenth of the cost")
+        self.cache_note.setVisible(reuse is not None)
         self.chart.update()
 
         since = (datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)

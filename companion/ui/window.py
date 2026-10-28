@@ -300,6 +300,9 @@ class CompanionWindow(QMainWindow):
         chats = [row["id"] for row in conversations if row.get("kind") != "reminders"]
         self._conversation_id = last or (chats[0] if chats else self.store.create_conversation(key))
         self._reminder_job = None  # A reminder she is writing in her Reminders session, out of view.
+        self._session = None  # The Claude Code session the reply in progress runs in (chat/sessions.py).
+        self._task_session = (None, None, None, None)
+        QTimer.singleShot(4000, self._clean_sessions)
         self._active_turn = None
         self._reply_status = "pending"
         self._reply_notice = ""
@@ -1434,8 +1437,6 @@ class CompanionWindow(QMainWindow):
         self._voice_message_id = None
         self._pending_transcription = ""
         self._messages.append({"role": "user", "content": "\n".join(part for part in (text, attachments.note(stored)) if part)})
-        # Only this turn carries the files themselves; history keeps a short note about them.
-        context = [*recent_messages(turns), {"role": "user", "content": text, "attachments": stored}]
         self._reply = ""
         if note:
             self.transcript.add_memory_note(note[0], can_undo=False, icon=note[1])
@@ -1447,8 +1448,7 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_message("user", "You", text, attachments=stored)
         self.transcript.begin_reply(self.settings.name)
         chat_tools = self._chat_tools()
-        prompt = self._system_prompt(memories, summary, looking=looking, project=self._project_context(text),
-                                     tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None)
+        prompt, context, self._session = self._reply_setup(text, turns, summary, memories, stored, looking, chat_tools)
         self._task_request = self._task_offer = None
         self._look_requested = False
         self._looking = looking
@@ -1459,8 +1459,13 @@ class CompanionWindow(QMainWindow):
         level = resolve(self.settings.effort, text, stored, study=(self._current_project() or {}).get("kind") == "study")
         self._auto_effort = level if self.settings.effort == "auto" else ""
         self._refresh_effort_picker()
-        worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools, effort=level), context, self)
+        session = self._session or {}
+        worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools, effort=level,
+                                     claude_session=session.get("id", ""), claude_resume=session.get("resume", False)),
+                             context, self)
         self._count_usage(worker, self._conversation_id)
+        worker.session.connect(self._session_started)
+        worker.usage.connect(self._reply_used)
         self._worker = worker
         worker.chunk.connect(self._on_chunk)
         worker.tool_used.connect(self._tool_used)
@@ -1475,6 +1480,69 @@ class CompanionWindow(QMainWindow):
         self._update_conversation_title()
         worker.start()
         return True
+
+    def _reply_setup(self, text, turns, summary, memories, stored, looking, chat_tools):
+        """(system prompt, messages, session) for a reply. The system prompt stays the same from message to message;
+        the time, reminders, memories, notes and study passages go with the message. With Claude, the conversation
+        continues its own session, so only what is new is processed (see chat/sessions.py)."""
+        from ..chat import sessions
+        from ..chat.claude import DEFAULT_CLAUDE_MODEL
+        from ..chat.prompts import split_prompt
+        notes = summary["content"] if summary else None
+        session = None
+        if self.settings.llm_provider == "claude":
+            try:
+                session = sessions.plan(self.store, self._conversation_id, turns,
+                                        self.settings.claude_model or DEFAULT_CLAUDE_MODEL, notes)
+            except sqlite3.Error:
+                session = None
+        project, changing = self._project_context(text, split=True)
+        if session:
+            # Passages the session already has are not sent again.
+            changing, session["sent"] = sessions.dedupe(changing, session["sent"])
+            session.update(conversation=self._conversation_id, notes=notes, files=bool(stored),
+                           model=self.settings.claude_model or DEFAULT_CLAUDE_MODEL, size=0)
+        try:
+            reminder_parts = reminders.prompt(self.store.reminders(), split=True)
+        except sqlite3.Error:
+            reminder_parts = reminders.prompt([], split=True)
+        system, app_context = split_prompt(
+            self.settings.system_prompt, memories, None if session and session["resume"] else notes,
+            reminders=reminder_parts, looking=looking, context=changing,
+            avatar_cues=self.show_avatar.isChecked(), computer_tasks=self.computer_tasks.isChecked(),
+            confirm_tasks=self.confirm_tasks.isChecked(), memory_cues=True, auto_memory=self.auto_memory.isChecked(),
+            look=self.look_at_screen.isChecked(), check_ins=self.check_ins.isChecked(), project=project,
+            tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None)
+        latest = {"role": "user", "content": text, "attachments": stored, "context": app_context,
+                  "since": session["since"] if session else []}
+        return system, [*recent_messages(turns), latest], session
+
+    def _session_started(self, info):
+        """Claude Code started a fresh session after all (its transcript was gone): it begins at the window."""
+        if self._session and info.get("id") == self._session["id"] and not info.get("resumed") and self._session["resume"]:
+            from ..chat.sessions import window_seed
+            self._session.update(resume=False, turns=0, sent=[],
+                                 seed_from=window_seed(self.store.context_turns(self._session["conversation"])))
+
+    def _reply_used(self, counts):
+        if self._session:
+            self._session["size"] = sum(counts.get(name) or 0 for name in ("input", "output", "cached"))
+
+    def _finish_session(self, turn, complete):
+        """After a reply: the session now holds it, or it ends (a failed or stopped reply, or one with files,
+        which are read once and not carried in every later message)."""
+        from ..chat import sessions
+        session, self._session = getattr(self, "_session", None), None
+        if not session:
+            return
+        try:
+            if complete and turn and not session["files"]:
+                sessions.record(self.store, session["conversation"], session, session["model"], session["notes"],
+                                turn[1], session["size"], first_user_id=turn[0])
+            else:
+                sessions.forget_chat(self.store, session["conversation"])
+        except (sqlite3.Error, OSError):
+            pass
 
     def _system_prompt(self, memories, summary, looking=False, project=None, tools=None):
         return reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None,
@@ -1625,6 +1693,7 @@ class CompanionWindow(QMainWindow):
         self._save_timer.stop()
         task_turn = self._active_turn
         self._save_active_turn()
+        self._finish_session(task_turn, not interrupted and not worker.error)
         self.transcript.end_reply(notice="Reply stopped" if interrupted and not worker.error else "",
                                   error=worker.error)
         if not worker.error:
@@ -1805,6 +1874,8 @@ class CompanionWindow(QMainWindow):
             self._interrupt_speech()
             self._active_turn = None
         try:
+            from ..chat.sessions import forget
+            forget(self.store, conversation_id)
             self.store.delete_conversation(conversation_id)
             if current:
                 key = character_key(self.settings.character_path)
@@ -2712,8 +2783,23 @@ class CompanionWindow(QMainWindow):
         if not request.strip() or self._closing:
             return
         context = [m for m in self._messages[:-1] if m.get("role") in {"user", "assistant"}]
-        task = ComputerTask(request, context, self.settings, self, servers=self.mcp_servers,
-                            project=self._current_project())
+        from ..chat import sessions
+        from ..chat.claude import DEFAULT_CLAUDE_MODEL
+        project = self._current_project()
+        folder = Path(project["folder"]) if project and project.get("folder") else None
+        cwd = folder if folder and folder.is_dir() else Path.home()
+        model = self.settings.claude_model or DEFAULT_CLAUDE_MODEL
+        try:
+            session = sessions.task_plan(self.store, self._conversation_id, cwd, model)
+        except sqlite3.Error:
+            session = None
+        task = ComputerTask(request, context, self.settings, self, servers=self.mcp_servers, project=project,
+                            session=session)
+        self._task_session = (self._conversation_id, session, cwd, model)
+        if hasattr(task, "usage"):
+            conversation = self._conversation_id
+            task.usage.connect(lambda counts: self._record_usage(conversation, "claude", counts))
+            task.limits.connect(lambda windows: self._limits_reported("claude", windows))
         card = self.transcript.add_task_card(self.settings.name, request)
         self._task, self._task_card, self._task_turn, self._task_ack = task, card, turn, acknowledgement
         task.step.connect(card.add_step)
@@ -2728,6 +2814,22 @@ class CompanionWindow(QMainWindow):
         self.status.setText("Working on a task…")
         task.start()
         self._refresh_stop_button()
+
+    def _finish_task_session(self, task):
+        """A task that reached its report leaves its session for the next task here; a stopped one ends it."""
+        from ..chat import sessions
+        conversation, session, cwd, model = getattr(self, "_task_session", (None, None, None, None))
+        self._task_session = (None, None, None, None)
+        if not session or task is None:
+            return
+        try:
+            if getattr(task, "reported", False):
+                sessions.record_task(self.store, conversation, session, cwd, model, task.context_size)
+            else:
+                self.store.drop_task_session(conversation)
+                sessions.delete_transcript(session["id"])
+        except (sqlite3.Error, OSError):
+            pass
 
     def _steer_task(self, task, text):
         """Something said while she works reaches her at once; a step waiting for approval is declined with it."""
@@ -2783,6 +2885,7 @@ class CompanionWindow(QMainWindow):
 
     def _task_finished(self, report, succeeded):
         task, self._task = self._task, None
+        self._finish_task_session(task)
         card = self._task_card
         card.set_status("Done" if succeeded else "Stopped" if "stopped" in report.lower() else "Not finished",
                         "done" if succeeded else "failed")
@@ -2939,7 +3042,7 @@ class CompanionWindow(QMainWindow):
             return False
         context = [*recent_messages(turns), {"role": "user", "content": line, "attachments": []}]
         worker = ReplyWorker(replace(self.settings, system_prompt=self._system_prompt(memories, None), chat_tools="",
-                                     effort="low"), context, self)
+                                     effort="low", **self._light_model()), context, self)
         self._count_usage(worker, inbox)
         self._reminder_job = {"worker": worker, "inbox": inbox, "line": line, "reminder": reminder,
                               "text": "", "cues": CueFilter()}
@@ -3019,6 +3122,20 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_note("There is no recent task with changes to undo.")
         else:
             self._undo_task(*latest)
+
+    def _clean_sessions(self):
+        """Transcripts no session needs any more: old task sessions, replaced or month-old chat sessions."""
+        if self._worker is not None or self._task is not None:
+            return  # Never while one may be starting.
+        from ..chat.sessions import cleanup
+        try:
+            cleanup(self.store)
+        except (sqlite3.Error, OSError):
+            pass
+
+    def _light_model(self):
+        """Reminders and check-ins out of view, and summaries, are short work: with Claude, Haiku does them."""
+        return {"claude_model": "claude-haiku-5-5"} if self.settings.llm_provider == "claude" else {}
 
     def _count_usage(self, worker, conversation_id):
         """Keeps the tokens a reply used and the limits its service reported, for the Usage page."""
@@ -3785,12 +3902,13 @@ class CompanionWindow(QMainWindow):
             return next((path for _, path in materials.files(project["folder"]) if path.name.casefold() == wanted), None)
         return None
 
-    def _project_context(self, text=""):
+    def _project_context(self, text="", split=False):
         """What she is told about the current conversation's project, or None. `text`: the message, which
-        picks the passages of a subject's materials folder she is shown."""
+        picks the passages of a subject's materials folder she is shown. `split`: (what stays the same,
+        what changes with each message)."""
         project = self._current_project()
         if not project:
-            return None
+            return (None, "") if split else None
         from ..chat import projects, study
         try:
             files = self.store.project_files(project["id"])
@@ -3799,10 +3917,10 @@ class CompanionWindow(QMainWindow):
                 earlier = study.recall(self.store, project, self._conversation_id, character_key(self.settings.character_path))
                 recent = " ".join(m["content"] for m in self._messages[-3:-1] if m["role"] == "user")
                 return study.context(project, files, study.stats(self.store, project["id"]), earlier,
-                                     query=f"{recent}\n{text}")
-            return projects.context(project, files)
+                                     query=f"{recent}\n{text}", split=split)
+            return (projects.context(project, files), "") if split else projects.context(project, files)
         except sqlite3.Error:
-            return None
+            return (None, "") if split else None
 
     def _open_project(self, project_id):
         if not project_id or not self.store.project(project_id):
@@ -4256,7 +4374,7 @@ class CompanionWindow(QMainWindow):
         self._activity_error = False
         self._summary_through = batch.through_id
         self._worker_kind = "summary"
-        worker = ReplyWorker(replace(self.settings, system_prompt=SUMMARY_PROMPT, effort="low"),
+        worker = ReplyWorker(replace(self.settings, system_prompt=SUMMARY_PROMPT, effort="low", **self._light_model()),
                              [{"role": "user", "content": batch.source}], self)
         self._count_usage(worker, self._conversation_id)
         self._worker = worker

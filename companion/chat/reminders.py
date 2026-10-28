@@ -113,13 +113,18 @@ def describe(reminder, now=None):
     return f"{when(due, now)}" + (f" · {repeat}" if repeat else "")
 
 
-def prompt(upcoming, now=None):
-    """Her instructions, with the current time and what is already scheduled."""
+def prompt(upcoming, now=None, split=False):
+    """Her instructions, with the current time and what is already scheduled. `split`: (instructions that stay
+    the same, the time and upcoming reminders as they are now), so the instructions can be cached."""
     import json
     now = now or now_local()
     items = [{"what": item["text"], "when": describe(item, now)} for item in upcoming[:12]]
-    return PROMPT.format(now=f"{now:%A %d %B %Y, %H:%M} (UTC{now:%z})", upcoming=json.dumps(items, ensure_ascii=False),
-                         mark=MARK)
+    stamp, listed = f"{now:%A %d %B %Y, %H:%M} (UTC{now:%z})", json.dumps(items, ensure_ascii=False)
+    if split:
+        return (PROMPT.format(now="given in the app context of each message", upcoming="listed in the app context",
+                              mark=MARK),
+                f"Current local date and time: {stamp}\nUpcoming reminders (JSON): {listed}")
+    return PROMPT.format(now=stamp, upcoming=listed, mark=MARK)
 
 
 def message(reminder, now=None):

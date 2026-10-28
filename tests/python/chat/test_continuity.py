@@ -19,7 +19,11 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(batch.count, 8)
         self.assertEqual(batch.through_id, source[7]["assistant_id"])
         self.assertEqual(data["older_exchanges"][-1]["user"], source[7]["user"])
-        self.assertEqual(recent_messages(source)[0]["content"], source[8]["user"])
+        # What a reply sends starts at a multiple of six turns, so its start stays put for six messages
+        # and the service can reuse it from the cache: twelve to seventeen recent turns.
+        self.assertEqual(recent_messages(source)[0]["content"], source[6]["user"])
+        self.assertEqual([len(recent_messages(turns(count))) // 2 for count in range(17, 26)],
+                         [17, 12, 13, 14, 15, 16, 17, 12, 13])
         self.assertNotIn(source[-1]["user"], batch.source)
 
     def test_large_recent_messages_leave_room_for_maximum_user_input(self):

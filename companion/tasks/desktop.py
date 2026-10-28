@@ -8,7 +8,7 @@ import ctypes
 from ctypes import wintypes
 import time
 
-MAX_WIDTH = 1366  # Readable for the model, small enough to send quickly.
+MAX_WIDTH = 1280  # Readable for the model; each screenshot costs tokens by its pixels, so no larger.
 
 user32 = ctypes.windll.user32 if hasattr(ctypes, "windll") else None
 ULONG_PTR = ctypes.c_size_t
@@ -69,7 +69,7 @@ def dpi_aware():
 
 
 def screenshot(path):
-    """Capture every monitor. Returns (width, height, scale) of the saved, downscaled PNG."""
+    """Capture every monitor. Returns (width, height, scale) of the saved, downscaled JPEG."""
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QGuiApplication
     app = QGuiApplication.instance() or QGuiApplication([])
@@ -80,7 +80,7 @@ def screenshot(path):
     scale = min(1.0, MAX_WIDTH / max(1, image.width()))
     if scale < 1:
         image = image.scaledToWidth(int(image.width() * scale), Qt.TransformationMode.SmoothTransformation)
-    image.save(str(path), "PNG")
+    image.save(str(path), "JPEG", 82)
     # Screenshot pixel → physical pixel: physical = left + x * (width / shot width).
     return image.width(), image.height(), width / image.width()
 

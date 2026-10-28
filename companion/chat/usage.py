@@ -203,6 +203,14 @@ def today(rows, moment=None):
     return dict(parts, total=sum(parts.values()), replies=len(mine))
 
 
+def reuse(rows, days=7, moment=None):
+    """The share of input read from the prompt cache in the last `days` days (percent), or None without replies."""
+    since = (moment or datetime.now()).date() - timedelta(days=days - 1)
+    mine = [row for row in rows if _local(row["at"]).date() >= since]
+    cached, read = sum(row["cached"] for row in mine), sum(row["input"] + row["cached"] for row in mine)
+    return 100.0 * cached / read if read else None
+
+
 def by_conversation(rows, limit=6):
     """The chats that used the most: [{id, title, model, tokens}], most first. The model is the one used most."""
     chats = {}

@@ -14,6 +14,7 @@ class ReplyWorker(QThread):
     tool_used = Signal(str)  # An MCP tool she called while replying (Claude subscription only).
     usage = Signal(dict)  # The tokens this reply used: {model, input, output, cached}.
     limits = Signal(list)  # What is left of the plan's limits, as the service reported it while replying.
+    session = Signal(dict)  # The Claude Code session this reply ran in: {id, resumed}.
 
     def __init__(self, settings: Settings, messages: list[dict[str, str]], parent=None):
         super().__init__(parent)
@@ -64,6 +65,8 @@ class ReplyWorker(QThread):
                         if isinstance(text, dict):
                             if "usage" in text:
                                 self.usage.emit(text["usage"])
+                            elif "session" in text:
+                                self.session.emit(text["session"])
                             elif "limits" in text:
                                 self.limits.emit(text["limits"])
                             else:

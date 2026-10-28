@@ -698,7 +698,9 @@ class WindowTests(unittest.TestCase):
         with self.mock_client(handler):
             self.send("Explain recursion")
             self.wait_until(lambda: self.window._worker is None)
-        prompt = payloads[0]["messages"][0]["content"]
+        # Memories travel with the message, so the system prompt stays the same and is read from the cache.
+        prompt = payloads[0]["messages"][-1]["content"]
+        self.assertNotIn("Prefer examples first", payloads[0]["messages"][0]["content"])
         self.assertIn("Prefer examples first", prompt)
         self.assertNotIn("Orchids", prompt)
         self.assertNotIn(SETTINGS.api_key, "\n".join(self.window.store.connection.iterdump()))
@@ -885,10 +887,11 @@ class WindowTests(unittest.TestCase):
             self.send("A separate conversation")
             self.wait_until(lambda: self.window._worker is None)
         self.assertEqual(len(payloads), 2)
-        self.assertIn("A unique older decision", payloads[0]["messages"][0]["content"])
+        self.assertIn("A unique older decision", payloads[0]["messages"][-1]["content"])
         self.assertNotIn("A unique older decision", json.dumps(payloads[1]))
-        self.assertEqual(payloads[0]["messages"][1]["content"], "Earlier question 3")
-        self.assertEqual(len(payloads[0]["messages"]), 26)
+        # The window starts at a multiple of six turns (here the first), so it stays put and is cached.
+        self.assertEqual(payloads[0]["messages"][1]["content"], "Earlier question 0")
+        self.assertEqual(len(payloads[0]["messages"]), 32)
 
     def test_failed_summary_generation_preserves_saved_notes_and_draft_edits(self):
         dialog, _, _ = self.prepare_summary()
@@ -964,7 +967,8 @@ class WindowTests(unittest.TestCase):
             self.window._begin_recording()
             mic.deliver("A spoken interruption")
             self.wait_until(lambda: len(payloads) == 2 and self.window._worker is None)
-        self.assertEqual(payloads[1]["messages"][-1]["content"], "A spoken interruption")
+        latest = payloads[1]["messages"][-1]["content"]
+        self.assertTrue(latest.startswith("<app_context>") and latest.endswith("</app_context>\n\nA spoken interruption"))
         self.assertEqual(dialog.editor.toPlainText(), "")
 
     def test_closing_real_context_dialog_cancels_generation_before_dialog_is_deleted(self):

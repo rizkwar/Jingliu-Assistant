@@ -14,7 +14,7 @@ from ..chat.continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 PROJECT_COLORS = ("ice", "frost", "crimson", "amber", "jade", "violet")
 PROJECT_KINDS = ("project", "study")
 CARD_LIMITS = (500, 2000)  # Characters on the front and back of a flashcard.
@@ -106,6 +106,18 @@ class Store:
                 output INTEGER NOT NULL DEFAULT 0, cached INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS token_usage_by_time ON token_usage(at);
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                session_id TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', seed_from INTEGER NOT NULL DEFAULT 0,
+                through_id INTEGER NOT NULL DEFAULT 0, fingerprint TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '', passages TEXT NOT NULL DEFAULT '[]', size INTEGER NOT NULL DEFAULT 0,
+                turns INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS task_sessions (
+                conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                session_id TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+                size INTEGER NOT NULL DEFAULT 0, tasks INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+            );
         """)
         with self.connection:
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(conversations)")}
@@ -361,6 +373,44 @@ class Store:
             "SELECT u.at, u.conversation_id, u.provider, u.model, u.input, u.output, u.cached, c.title "
             "FROM token_usage u LEFT JOIN conversations c ON c.id = u.conversation_id WHERE u.at >= ? ORDER BY u.at",
             (since.isoformat(timespec="microseconds"),))]
+
+    # Sessions: which Claude Code session continues a conversation (or its computer tasks), so the
+    # service reads what came before from its cache instead of processing it again. No message text is kept here.
+    def chat_session(self, conversation_id):
+        row = self.connection.execute("SELECT * FROM chat_sessions WHERE conversation_id=?", (conversation_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_chat_session(self, conversation_id, **values):
+        values = {**values, "conversation_id": conversation_id, "updated_at": values.get("updated_at") or now()}
+        names = ", ".join(values)
+        with self.connection:
+            self.connection.execute(f"INSERT OR REPLACE INTO chat_sessions({names}) VALUES ({', '.join('?' * len(values))})",
+                                    tuple(values.values()))
+
+    def drop_chat_session(self, conversation_id):
+        with self.connection:
+            self.connection.execute("DELETE FROM chat_sessions WHERE conversation_id=?", (conversation_id,))
+
+    def task_session(self, conversation_id):
+        row = self.connection.execute("SELECT * FROM task_sessions WHERE conversation_id=?", (conversation_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_task_session(self, conversation_id, **values):
+        values = {**values, "conversation_id": conversation_id, "updated_at": values.get("updated_at") or now()}
+        names = ", ".join(values)
+        with self.connection:
+            self.connection.execute(f"INSERT OR REPLACE INTO task_sessions({names}) VALUES ({', '.join('?' * len(values))})",
+                                    tuple(values.values()))
+
+    def drop_task_session(self, conversation_id):
+        with self.connection:
+            self.connection.execute("DELETE FROM task_sessions WHERE conversation_id=?", (conversation_id,))
+
+    def sessions(self):
+        """Every session the app keeps: [(kind, conversation, session id, updated at)]."""
+        return [(row["kind"], row["conversation_id"], row["session_id"], row["updated_at"]) for row in self.connection.execute(
+            "SELECT 'chat' kind, conversation_id, session_id, updated_at FROM chat_sessions "
+            "UNION ALL SELECT 'task', conversation_id, session_id, updated_at FROM task_sessions")]
 
     def mark_unread(self, conversation_id, count=1):
         """Adds `count` unread messages; 0 marks the conversation read."""

@@ -49,6 +49,8 @@ class Settings:
     approve_steps: bool = True
     effort: str = "auto"  # How hard she thinks before a reply: auto, low, medium, high, xhigh or max.
     task_effort: str = "medium"  # The same for computer tasks (no auto).
+    claude_session: str = field(default="", repr=False)  # For one reply: the conversation's Claude Code session,
+    claude_resume: bool = field(default=False, repr=False)  # and whether it continues (see chat/sessions.py).
     auto_memory: bool = True
     look_at_screen: bool = True
     barge_in: bool = True
