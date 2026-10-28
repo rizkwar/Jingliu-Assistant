@@ -101,7 +101,7 @@ QPlainTextEdit#input {{ background: transparent; border: none; padding: 2px 4px;
 
 QFrame#assistant {{ background: rgba(20, 32, 57, 0.88); border: none;
     border-radius: 16px; border-top-left-radius: 4px; }}
-QFrame#user {{ background: rgba(168, 212, 255, 0.115); border: none; border-radius: 22px; }}
+QFrame#user {{ background: rgba(168, 212, 255, 0.115); border: none; border-radius: 18px; }}  /* At most half a one-line message's height: Qt drops a larger radius altogether. */
 QFrame#user QLabel#body {{ color: #dbe6f5; }}
 QFrame#task {{ background: rgba(18, 29, 52, 0.80); border: none;
     border-left: 3px solid rgba(168, 212, 255, 0.45); border-radius: 8px; }}
@@ -391,7 +391,7 @@ THEMES = {
     'gold': ('Lunar gold', 38, 0.75, False),
     'violet': ('Violet dusk', 268, 0.9, False),
     'ink': ('Midnight ink', None, 0.12, False),
-    'graphite': ('Graphite (like ChatGPT)', None, 0.03, False, 0.1),
+    'graphite': ('Graphite (like ChatGPT)', None, 0.03, False, 0.05),
     'snow': ('Snowfield (light)', None, 1.0, True),
     'blossom': ('Blossom day (light)', 340, 0.7, True),
 }

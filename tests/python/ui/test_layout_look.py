@@ -29,9 +29,20 @@ class LookTests(unittest.TestCase):
         theme.set_theme("graphite")
         night = QColor(theme.tone(theme.NIGHT))
         self.assertLess(night.saturation(), 20)  # Neutral grey, not navy…
-        self.assertGreater(night.lightness(), 25)  # …and lifted to a soft dark, like ChatGPT's.
+        self.assertGreater(night.lightness(), QColor(theme.NIGHT).lightness())  # …and lifted a little, like ChatGPT's dark.
         self.assertEqual(theme.tone(theme.CRIMSON), theme.CRIMSON)  # Her accent stays.
         self.assertIn("graphite", theme.THEMES)
+
+    def test_a_one_line_message_of_yours_is_a_pill(self):
+        import re
+        from companion.ui.chat_view import Bubble
+        radius = int(re.search(r"QFrame#user \{ [^}]*border-radius: (\d+)px", theme.style()).group(1))
+        bubble = Bubble("user", "You")
+        bubble.setStyleSheet(theme.style())
+        bubble.set_text("i mean the demo turns out to be fine")
+        bubble.adjustSize()
+        # Qt draws no rounding at all when the radius is more than half the height.
+        self.assertLessEqual(radius, bubble.sizeHint().height() / 2)
 
     def test_the_conversation_is_a_rounded_panel_in_a_centred_column_and_replies_are_plain(self):
         window = CompanionWindow(replace(SETTINGS, message_style="plain", openrouter_model="nvidia/a-very-long-model-name-x"),
