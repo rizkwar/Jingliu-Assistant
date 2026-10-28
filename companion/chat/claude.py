@@ -178,8 +178,14 @@ async def stream_claude(settings, messages):
                         after_tool = False
                         got_text = True
                         yield delta['text']
-                elif kind == 'rate_limit_event' and (event.get('rate_limit_info') or {}).get('status') == 'rejected':
-                    raise ChatError('Your Claude plan limit was reached. Wait for it to reset, then try again.')
+                elif kind == 'rate_limit_event':
+                    info = event.get('rate_limit_info') or {}
+                    from .usage import claude_windows
+                    windows = claude_windows(info)
+                    if windows:
+                        yield {'limits': windows}  # What is left of the plan, for the Usage page.
+                    if info.get('status') == 'rejected':
+                        raise ChatError('Your Claude plan limit was reached. Wait for it to reset, then try again.')
                 elif kind == 'result':
                     if event.get('is_error') or event.get('subtype') != 'success':
                         raise result_error(event)
@@ -189,6 +195,11 @@ async def stream_claude(settings, messages):
                         raise ChatError('The reply reached its token limit. Ask me to continue.')
                     if not got_text:
                         raise ChatError('Claude returned no answer. Please try again.')
+                    usage = event.get('usage') or {}
+                    counts = {'input': (usage.get('input_tokens') or 0) + (usage.get('cache_creation_input_tokens') or 0),
+                              'output': usage.get('output_tokens') or 0, 'cached': usage.get('cache_read_input_tokens') or 0}
+                    if any(counts.values()):
+                        yield {'usage': {'model': settings.claude_model or DEFAULT_CLAUDE_MODEL, **counts}}
                     return
         finally:
             await stop(process)

@@ -143,6 +143,15 @@ async def connect(login=False, browser=None):
         return result
 
 
+async def read_limits():
+    """The ChatGPT plan's rate limit windows (Codex's RateLimitSnapshot), read without a reply."""
+    async with server() as (connection, _):
+        account = (await connection.rpc('account/read', {'refreshToken':False})).get('account') or {}
+        if account.get('type') != 'chatgpt':
+            raise ChatError('Sign in to ChatGPT from Settings to see your Codex limits.')
+        return (await connection.rpc('account/rateLimits/read', None)).get('rateLimits') or {}
+
+
 async def stream_codex(settings, messages):
     async with server() as (connection, folder):
         account = (await connection.rpc('account/read', {'refreshToken':False})).get('account') or {}
@@ -173,6 +182,7 @@ async def stream_codex(settings, messages):
             'sandboxPolicy':{'type':'readOnly','networkAccess':False}})
         phases, streamed = {}, set()
         got_text = False
+        tokens = None
         while True:
             event = await connection.receive()
             method, values = event.get('method'), event.get('params', {})
@@ -191,10 +201,21 @@ async def stream_codex(settings, messages):
                 text = values.get('delta', '')
                 if text:
                     got_text = True; streamed.add(values['itemId']); yield text
+            elif method == 'thread/tokenUsage/updated':
+                tokens = (values.get('tokenUsage') or {}).get('total') or tokens
+            elif method == 'account/rateLimits/updated':
+                from .usage import codex_windows
+                windows = codex_windows(values.get('rateLimits'))
+                if windows: yield {'limits': windows}
             elif method == 'turn/completed':
                 if values.get('turn', {}).get('status') != 'completed':
                     raise ChatError('Codex could not finish the reply. Check model access and your subscription limits; no alternate provider was used.')
                 if not got_text: raise ChatError('Codex returned no conversational answer. Please try again.')
+                if tokens:
+                    cached = tokens.get('cachedInputTokens') or 0
+                    yield {'usage': {'model':settings.codex_model or '', 'cached':cached,
+                                     'input':max(0, (tokens.get('inputTokens') or 0) - cached),
+                                     'output':tokens.get('outputTokens') or 0}}
                 return
             elif method == 'error':
                 raise ChatError('Codex reported an error. Check sign-in, model access and your subscription limits.')

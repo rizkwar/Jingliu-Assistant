@@ -95,6 +95,7 @@ async def stream_reply(
         "max_tokens": 4096,
         "temperature": 0.7,
         "reasoning": {"enabled": False, "exclude": True},
+        "usage": {"include": True},  # The last event then carries the reply's token counts.
     }
     try:
         async with client.stream(
@@ -117,6 +118,7 @@ async def stream_reply(
 
             got_text = False
             finished = False
+            usage = None
             async for data in sse_payloads(response.aiter_lines()):
                 if data == "[DONE]":
                     finished = True
@@ -131,6 +133,8 @@ async def stream_reply(
                     error = event["error"]
                     code = error.get("code") if isinstance(error, dict) else None
                     raise api_error(code, event)
+                if isinstance(event.get("usage"), dict):
+                    usage = event["usage"]
                 choices = event.get("choices") or []
                 if not choices:
                     continue
@@ -150,6 +154,11 @@ async def stream_reply(
                 raise ChatError("The connection ended before the reply finished. Please try again.")
             if not got_text:
                 raise ChatError("The model returned no answer. Please try again.")
+            if usage:
+                cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+                yield {"usage": {"model": settings.model, "cached": cached,
+                                 "input": max(0, (usage.get("prompt_tokens") or 0) - cached),
+                                 "output": usage.get("completion_tokens") or 0}}
     except httpx.TimeoutException as exc:
         raise ChatError("The model took too long to respond. Please try again.") from exc
     except httpx.RequestError as exc:

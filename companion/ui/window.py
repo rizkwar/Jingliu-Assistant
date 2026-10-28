@@ -329,6 +329,7 @@ class CompanionWindow(QMainWindow):
         self.memory_button = action("memories", "Memories", "What she remembers about you")
         self.reminders_button = action("bell", "Reminders", "Everything upcoming")
         self.tasks_button = action("clock", "Recent tasks", "Tasks from the last week, with Undo for the files they changed")
+        self.usage_button = action("moon", "Usage", "How much of her plan is left, and the tokens behind it")
         self.context_button = action("context", "Context and summary", "Inspect or summarize older exchanges in this conversation")
         self.settings_button = action("settings", "Settings", "Settings · Ctrl+,")
         self.suspend_button = action("pause", "Suspend")
@@ -339,7 +340,7 @@ class CompanionWindow(QMainWindow):
         shell.setContentsMargins(0, 0, 0, 0)
         shell.setSpacing(0)
         self.sidebar = Sidebar(settings.name, SEALS.get(settings.name.lower(), ""),
-                               (self.memory_button, self.reminders_button, self.tasks_button))
+                               (self.memory_button, self.reminders_button, self.tasks_button, self.usage_button))
         self.sidebar.add_bottom(self.settings_button)
         self.title, self.seal, self.new_chat = self.sidebar.title, self.sidebar.seal, self.sidebar.new_chat
         self.sidebar.open_conversation.connect(self._switch_conversation)
@@ -476,6 +477,11 @@ class CompanionWindow(QMainWindow):
         self.memory_button.triggered.connect(self._open_memories)
         self.reminders_button.triggered.connect(self._open_reminders)
         self.tasks_button.triggered.connect(self._open_recent_tasks)
+        self.usage_button.triggered.connect(self._open_usage)
+        self._usage_clock = QTimer(self)  # A window that resets refills in the sidebar without a reply.
+        self._usage_clock.timeout.connect(self._refresh_usage_note)
+        self._usage_clock.start(60_000)
+        self._refresh_usage_note()
         self.suspend_button.triggered.connect(self.toggle_suspended)
         self.new_chat.clicked.connect(self._new_conversation)
         self.reload.clicked.connect(self._reload_settings)
@@ -1330,6 +1336,7 @@ class CompanionWindow(QMainWindow):
             self.preferences.remember(self.settings, ('llm_provider', 'openrouter_model', 'codex_model', 'claude_model'))
         except (OSError, ValueError):
             pass  # E.g. a half-typed OpenRouter ID; the choice still applies to this session.
+        self._refresh_usage_note()  # Each service has its own limits.
 
     @Slot()
     def _send(self) -> None:
@@ -1415,6 +1422,7 @@ class CompanionWindow(QMainWindow):
         self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
         self._worker_kind = "reply"
         worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools), context, self)
+        self._count_usage(worker, self._conversation_id)
         self._worker = worker
         worker.chunk.connect(self._on_chunk)
         worker.tool_used.connect(self._tool_used)
@@ -1814,6 +1822,7 @@ class CompanionWindow(QMainWindow):
         style_title_bar(self)
         for sky in self.findChildren(NightSky):
             sky.update()
+        self._refresh_usage_note()
         if not self._worker and not self._active_turn and self.pages.currentWidget() is self.chat_page:
             self._restore_conversation(self._conversation_id)
         self._refresh_sidebar()
@@ -1943,6 +1952,7 @@ class CompanionWindow(QMainWindow):
         self.settings = settings
         self.connection.apply(settings)
         self._refresh_model_picker()
+        self._refresh_usage_note()
         self._refresh_character_label()
         self._refresh_characters()
         self._refresh_avatar_models()
@@ -2824,6 +2834,7 @@ class CompanionWindow(QMainWindow):
         context = [*recent_messages(turns), {"role": "user", "content": line, "attachments": []}]
         worker = ReplyWorker(replace(self.settings, system_prompt=self._system_prompt(memories, None), chat_tools=""),
                              context, self)
+        self._count_usage(worker, inbox)
         self._reminder_job = {"worker": worker, "inbox": inbox, "line": line, "reminder": reminder,
                               "text": "", "cues": CueFilter()}
         worker.chunk.connect(self._reminder_chunk)
@@ -2902,6 +2913,57 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_note("There is no recent task with changes to undo.")
         else:
             self._undo_task(*latest)
+
+    def _count_usage(self, worker, conversation_id):
+        """Keeps the tokens a reply used and the limits its service reported, for the Usage page."""
+        provider = self.settings.llm_provider
+        worker.usage.connect(lambda counts: self._record_usage(conversation_id, provider, counts))
+        worker.limits.connect(lambda windows: self._limits_reported(provider, windows))
+
+    def _record_usage(self, conversation_id, provider, counts):
+        try:
+            self.store.record_usage(conversation_id, provider, counts.get("model", ""), counts.get("input"),
+                                    counts.get("output"), counts.get("cached"))
+        except sqlite3.Error:
+            pass  # Counting never gets in the way of a reply.
+
+    def _limits_reported(self, provider, windows):
+        from ..chat.usage import save_limits
+        save_limits(provider, windows)
+        self._refresh_usage_note()
+
+    def _refresh_usage_note(self):
+        """The sidebar's Usage item: a moon in the phase of the window closest to running out, and its percent."""
+        from ..chat import usage
+        from .usage import moon_icon_for
+        entry = usage.load_limits().get(self.settings.llm_provider) or {}
+        windows = usage.current(entry.get("windows") or [])
+        lowest = usage.least_left(windows)
+        left = None if lowest is None else lowest["left"]
+        self.usage_button.setIcon(moon_icon_for(left))
+        if lowest is None:
+            self.sidebar.set_note(self.usage_button, "")
+            self.usage_button.setToolTip("How much of her plan is left, and the tokens behind it")
+            return
+        text = "limit" if lowest.get("blocked") else f"{left:.0f}% left"
+        self.sidebar.set_note(self.usage_button, text, warn=lowest.get("blocked") or left < usage.LOW)
+        self.usage_button.setToolTip("\n".join(
+            f"{window['label']}: " + ("limit reached" if window.get("blocked") else window.get("detail") or f"{window['left']:.0f}% left")
+            + (f", {usage.until(window.get('resets_at'))}" if window.get("resets_at") else "") for window in windows))
+
+    @Slot()
+    def _open_usage(self) -> None:
+        from .usage import UsageDialog
+        dialog = UsageDialog(self.store, self.settings, parent=self)
+        dialog.limits_changed.connect(self._refresh_usage_note)
+        chosen = []
+        dialog.open_conversation.connect(chosen.append)
+        self._chrome.watch(dialog)
+        self._present(dialog)
+        dialog.deleteLater()
+        self._refresh_usage_note()
+        if chosen:
+            self._switch_conversation(chosen[-1])
 
     @Slot()
     def _open_recent_tasks(self) -> None:
@@ -4090,6 +4152,7 @@ class CompanionWindow(QMainWindow):
         self._worker_kind = "summary"
         worker = ReplyWorker(replace(self.settings, system_prompt=SUMMARY_PROMPT),
                              [{"role": "user", "content": batch.source}], self)
+        self._count_usage(worker, self._conversation_id)
         self._worker = worker
         worker.chunk.connect(self._on_chunk)
         worker.finished.connect(self._on_finished)

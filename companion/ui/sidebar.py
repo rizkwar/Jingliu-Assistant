@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QHeaderView, Q
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .projects import project_icon
-from .theme import DIM, ICON_FONT, ICONS, badge_icon, glyph_icon, icon_button
+from .theme import DIM, ICON_FONT, ICONS, badge_icon, glyph_icon, icon_button, repolish
 
 RECENT_LIMIT = 60          # The full archive stays in History.
 PROJECT_CHATS = 6          # Under an open project; its page lists them all.
@@ -151,6 +151,7 @@ class Sidebar(QFrame):
 
         self.new_chat = self._item("compose", "New chat", "A new conversation · the current one stays in your list · Ctrl+N")
         layout.addWidget(self.new_chat)
+        self._tools, self._notes = {}, {}
         for action in actions:
             layout.addWidget(self._tool(action))
 
@@ -309,7 +310,27 @@ class Sidebar(QFrame):
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         button.setIconSize(QSize(24, 24))
         button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tools[action] = button
         return button
+
+    def set_note(self, action, text, warn=False):
+        """A short note at the right of an item, such as how much of her plan is left beside Usage."""
+        button = self._tools.get(action)
+        if button is None:
+            return
+        note = self._notes.get(action)
+        if note is None:
+            row = QHBoxLayout(button)
+            row.setContentsMargins(0, 0, 10, 0)
+            row.addStretch()
+            note = QLabel()
+            note.setObjectName("sideNote")
+            note.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            row.addWidget(note)
+            self._notes[action] = note
+        note.setText(text)
+        note.setVisible(bool(text))
+        repolish(note, warn=warn)
 
     def add_bottom(self, action):
         button = self._tool(action)

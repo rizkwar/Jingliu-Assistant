@@ -14,7 +14,7 @@ from ..chat.continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 PROJECT_COLORS = ("ice", "frost", "crimson", "amber", "jade", "violet")
 PROJECT_KINDS = ("project", "study")
 CARD_LIMITS = (500, 2000)  # Characters on the front and back of a flashcard.
@@ -100,6 +100,12 @@ class Store:
                 name TEXT NOT NULL, path TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,
                 added_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS token_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, conversation_id TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', input INTEGER NOT NULL DEFAULT 0,
+                output INTEGER NOT NULL DEFAULT 0, cached INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS token_usage_by_time ON token_usage(at);
         """)
         with self.connection:
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(conversations)")}
@@ -339,6 +345,22 @@ class Store:
         with self.connection:
             self.connection.execute("UPDATE conversations SET kind='reminders', title=? WHERE id=?", (title, conversation_id))
         return conversation_id
+
+    def record_usage(self, conversation_id, provider, model, input=0, output=0, cached=0):
+        """The tokens one reply used. Counts only: no text of the conversation."""
+        counts = [max(0, int(value or 0)) for value in (input, output, cached)]
+        if not any(counts):
+            return
+        with self.connection:
+            self.connection.execute("INSERT INTO token_usage(at,conversation_id,provider,model,input,output,cached) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?)", (now(), conversation_id or "", provider, model or "", *counts))
+
+    def usage_since(self, since):
+        """Token rows from `since` (a UTC datetime) on, each with its chat's title (None once the chat is deleted)."""
+        return [dict(row) for row in self.connection.execute(
+            "SELECT u.at, u.conversation_id, u.provider, u.model, u.input, u.output, u.cached, c.title "
+            "FROM token_usage u LEFT JOIN conversations c ON c.id = u.conversation_id WHERE u.at >= ? ORDER BY u.at",
+            (since.isoformat(timespec="microseconds"),))]
 
     def mark_unread(self, conversation_id, count=1):
         """Adds `count` unread messages; 0 marks the conversation read."""

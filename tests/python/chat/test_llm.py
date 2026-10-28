@@ -35,7 +35,10 @@ class StreamingTests(unittest.IsolatedAsyncioTestCase):
         body += event("Hello ") + event("there 👋", "stop")
         body += 'data: {"choices":[],"usage":{"completion_tokens":5}}\n\n'
         body += "data: [DONE]\n\n"
-        self.assertEqual(await self.collect(body), ["Hello ", "there 👋"])
+        parts = await self.collect(body)
+        self.assertEqual([part for part in parts if isinstance(part, str)], ["Hello ", "there 👋"])
+        # The usage event is not text: it comes last, as the reply's token counts.
+        self.assertEqual(parts[-1], {"usage": {"model": DEFAULT_MODEL, "cached": 0, "input": 0, "output": 5}})
         payload = json.loads(self.request.content)
         self.assertEqual(payload["model"], DEFAULT_MODEL)
         self.assertEqual(payload["messages"][0], {"role": "system", "content": "You are Jinger."})

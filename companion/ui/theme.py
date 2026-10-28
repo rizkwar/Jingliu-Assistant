@@ -309,6 +309,22 @@ QPushButton#crumb:hover {{ background: rgba(168, 212, 255, 0.08); color: {FROST}
 QFrame#projectCard, QFrame#serverRow {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.10);
     border-radius: 14px; }}
 QLabel#cardTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 15px; color: {FROST}; }}
+QFrame#usageCard {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.10); border-radius: 14px; }}
+QLabel#usageHeading {{ color: {MUTED}; font-size: 12px; font-weight: 600; }}
+QLabel#usageLabel {{ color: {MUTED}; font-size: 13px; }}
+QLabel#usageBig {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 20px; color: {FROST}; }}
+QLabel#usageBig[warn="true"] {{ color: {AMBER}; }}
+QLabel#usageBig[empty="true"] {{ color: {CRIMSON}; }}
+QLabel#usageReset, QLabel#usageHead {{ color: {DIM}; font-size: 12px; }}
+QLabel#usageHead {{ font-weight: 600; }}
+QPushButton#usageChat {{ background: transparent; border: none; text-align: left; padding: 0; color: {FROST}; font-size: 14px; }}
+QPushButton#usageChat:hover {{ color: {ICE}; }}
+QPushButton#usageChat:disabled {{ color: {MUTED}; }}
+QLabel#usageModel {{ color: {MUTED}; font-size: 13px; }}
+QLabel#usageTokens {{ color: {FROST}; font-size: 14px; font-weight: 600; }}
+QFrame#usageRule {{ background: rgba(168, 212, 255, 0.06); border: none; min-height: 1px; max-height: 1px; }}
+QLabel#sideNote {{ color: {MUTED}; font-size: 12px; background: transparent; }}
+QLabel#sideNote[warn="true"] {{ color: {AMBER}; }}
 QLineEdit#projectName {{ background: transparent; border: none; border-bottom: 1px solid transparent; border-radius: 0;
     padding: 0; font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 24px; color: {FROST}; }}
 QLineEdit#projectDescription {{ background: transparent; border: none; border-bottom: 1px solid transparent; border-radius: 0;
@@ -377,6 +393,11 @@ def set_theme(key):
 
 def is_light():
     return _theme[3]
+
+
+def accent_hue():
+    """The hue, in degrees, her blues take in the current theme."""
+    return 215 if _theme[1] is None else _theme[1]
 
 
 def _recolour(red, green, blue):

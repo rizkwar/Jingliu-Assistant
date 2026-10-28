@@ -93,7 +93,7 @@ shows its tab; New chat is an everyday chat.
 - **Undo any task:** the task card's **Undo**, "undo that", `/undo`, or **⋯ → Recent tasks** (7 days).
 
 **The app**
-- **A Codex-style window** under the moonlit sky: a sidebar with New chat, Memories, Reminders, Recent tasks
+- **A Codex-style window** under the moonlit sky: a sidebar with New chat, Memories, Reminders, Recent tasks, Usage
   and your conversations (right-click to **pin** one under a crescent, rename or delete it), **search**
   (Ctrl+K), a model picker and an **Approve for me** switch in the message box, and copy / read aloud under
   each reply. Select part of a reply and right-click → **Quote in reply**. Her messages can be plain text
@@ -102,13 +102,18 @@ shows its tab; New chat is an everyday chat.
   `inline code` in rounded pills, files she cites shown with a file icon that **open the file** from your
   subject's materials, centred tables, links that open in your browser, and **math** from LaTeX
   (`$…$` in a line, `$$…$$` centred), drawn with a real math font, e.g. relational algebra like
-  `R_1 owtie_{c} R_2 = \sigma_{c}(R_1 	imes R_2)`. Scrolling up while she writes stays put; a round ↓
+  `R_1 \bowtie_{c} R_2 = \sigma_{c}(R_1 \times R_2)`. Scrolling up while she writes stays put; a round ↓
   brings you back to her latest words.
 - **Code in its own box**: `</>` and the language or file name, icon buttons to **wrap long lines** and
   **copy** (it turns into a check), and colours for keywords, strings, comments and numbers.
 - **No Windows title bar**, like Claude's app: her header is the title bar (drag it, double-click to maximize,
   drag to a screen edge to snap, hover maximize for Snap Layouts), with thin minimize, maximize and close
   buttons in its corner; the shadow, rounded corners and animations stay.
+- **Usage** in the sidebar: how much of her plan is left, as moons that wane as you use it (Claude's 5-hour
+  session and week, ChatGPT's windows via Codex, or your OpenRouter credit), each with when it resets. The
+  sidebar shows the window closest to running out ("62% left", amber below 20%). The page also has 14 days of
+  tokens split into input, output and cached (hover a day for its numbers) and the chats that used the most
+  today, this week or this month (click one to open it). Token counts stay on this computer.
 - **No popups**: rename a chat, project or subject right where its name is (double-click it, or the title above the chat); questions like "Delete …?" and notices appear in a bar inside the window.
 - **Fonts**: Inter (bundled, like ChatGPT; the default), Segoe UI Variable, Sitka, Bahnschrift or Calibri, in four text sizes.
 - **Themes** (Settings → App → Window → Theme): Moonlit frost, Crimson moon, Jade grove, Lunar gold, Violet
@@ -168,6 +173,8 @@ settings, characters) and `voices/`. Neither is ever committed to Git.
 - What you send goes to the model provider you chose, with her profile, recent context, relevant
   memories and conversation notes. Speech synthesis and recognition are local.
 - Audio from the microphone stays in memory and is never saved to a file.
+- **Usage** keeps only token counts per reply (with the chat and model) and the latest limits each service
+  reported, in `data/usage-limits.json`; never what was said.
 
 ## Troubleshooting
 
