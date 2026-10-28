@@ -598,11 +598,6 @@ class ChatView(QScrollArea):
         self._reveal = QTimer(self)
         self._reveal.setInterval(33)
         self._reveal.timeout.connect(self._reveal_more)
-        # Opening a conversation: the latest messages at once, older ones above them a few at a time.
-        self._pending, self._insert_at, self._keep_from_bottom = [], None, None
-        self._filler = QTimer(self)
-        self._filler.setInterval(12)
-        self._filler.timeout.connect(self._fill_more)
         from . import math_render
         math_render.notifier().ready.connect(self._formula_ready)
         self._dots = QTimer(self)
@@ -633,11 +628,7 @@ class ChatView(QScrollArea):
         self._place_latest()
 
     def _grown(self, _low, high):
-        if self._keep_from_bottom is not None:
-            # Older messages were added above: what you were reading stays where it was.
-            self.verticalScrollBar().setValue(high - self._keep_from_bottom)
-            self._keep_from_bottom = None
-        elif self._stick:
+        if self._stick:
             self._following = True
             self.verticalScrollBar().setValue(high)
             self._following = False
@@ -699,53 +690,12 @@ class ChatView(QScrollArea):
         # Widgets that may grow (her messages) take the row up to their maximum width.
         row.addWidget(widget, 1 if widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding else 0)
         if align != 'right': row.addStretch()
-        if self._insert_at is not None:  # Older messages, going in above the ones already shown.
-            self.rows.insertLayout(self._insert_at, row)
-            self._items.insert(self._insert_at, widget)
-            self._insert_at += 1
-            return widget
         self.rows.insertLayout(self.rows.count() - 1, row)
         if not isinstance(widget, Welcome):
             self._remove_welcome()
         self._items.append(widget)
         self._stick = True
         return widget
-
-    def fill(self, entries, recent=6):
-        """Shows a conversation: `entries` add its items oldest first. The last `recent` show at once; older ones
-        go in above them a few at a time between frames, so opening even a long conversation is instant."""
-        self._pending = []
-        if not motion.enabled() or len(entries) <= recent:
-            for entry in entries:
-                entry()
-            return
-        for entry in entries[-recent:]:
-            entry()
-        self._pending = list(entries[:-recent])
-        self._filler.start()
-
-    def _fill_more(self, budget=0.016):
-        """The next older messages, as many as fit in about a frame's time, so the window stays responsive."""
-        if self._pending:
-            bar = self.verticalScrollBar()
-            if not self._stick:
-                self._keep_from_bottom = bar.maximum() - bar.value()
-            batch, deadline = [], time.monotonic() + budget
-            while self._pending and (not batch or time.monotonic() < deadline):
-                entry = self._pending.pop()
-                self._insert_at = 0
-                try:
-                    entry()  # Oldest last: each goes in at the top, above the one before it.
-                finally:
-                    self._insert_at = None
-                batch.append(entry)
-        if not self._pending:
-            self._filler.stop()
-
-    def flush(self):
-        """Everything still waiting to be shown, now."""
-        while self._pending:
-            self._fill_more(budget=float('inf'))
 
     def _remove(self, widget):
         if widget in self._items: self._items.remove(widget)
@@ -877,8 +827,7 @@ class ChatView(QScrollArea):
         self._dots.stop()
         self._render.stop()
         self._reveal.stop()
-        self._filler.stop()
-        self._pending, self._stream, self._shown = [], '', 0
+        self._stream, self._shown = '', 0
         self._live = None
         self._items.clear()
         while self.rows.count() > 1:
@@ -894,5 +843,4 @@ class ChatView(QScrollArea):
         self._stick = True
 
     def toPlainText(self):
-        self.flush()
         return '\n\n'.join(item.plain() for item in self._items)

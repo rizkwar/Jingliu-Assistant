@@ -78,21 +78,6 @@ class MotionTests(unittest.TestCase):
                                Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.ScrollUpdate, False)
         self.assertFalse(filter_.eventFilter(area.viewport(), touchpad))  # Already smooth: left alone.
 
-    def test_a_conversation_shows_its_newest_messages_first_and_the_rest_fills_in_above_in_order(self):
-        view = ChatView()
-        view.resize(700, 600)
-        view.show()
-        entries = [lambda index=index: view.add_message("user" if index % 2 else "assistant", "Jingliu",
-                                                        f"Message {index}") for index in range(20)]
-        view.fill(entries)
-        shown = [item.text for item in view._items if isinstance(item, Bubble)]
-        self.assertEqual(shown, [f"Message {index}" for index in range(14, 20)])  # The latest at once.
-        self.assertTrue(wait(self.app, lambda: not view._pending))
-        self.assertEqual([item.text for item in view._items if isinstance(item, Bubble)],
-                         [f"Message {index}" for index in range(20)])  # Then the rest, in order, above.
-        view.fill(entries)
-        self.assertIn("Message 0", view.toPlainText())  # Reading the transcript shows everything at once.
-
     def test_her_words_appear_at_an_even_pace_and_all_of_them_at_the_end(self):
         view = ChatView()
         view.resize(700, 600)
