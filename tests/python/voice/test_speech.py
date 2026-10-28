@@ -41,6 +41,22 @@ class SpokenTextTests(unittest.TestCase):
         self.assertLess(len(text), 2400)
         self.assertTrue(text.endswith("You can read the rest in the conversation."))
 
+    def test_times_are_said_as_people_say_them(self):
+        for written, said in (
+                ("I will remind you at 08:00.", "I will remind you at eight o'clock in the morning."),
+                ("Class is 19:30 tonight.", "Class is seven thirty tonight."),
+                ("Done by 7:05 p.m.", "Done by seven oh five in the evening."),
+                ("Meet at 7 p.m. tomorrow", "Meet at seven in the evening tomorrow"),
+                ("Lunch at 12:00, bed by 00:00.", "Lunch at twelve o'clock, bed by midnight."),
+                ("Study 08:00–10:00.", "Study eight o'clock to ten o'clock in the morning."),
+                ("It was 3:15 when you left.", "It was three fifteen when you left."),
+                ("23:59", "eleven fifty-nine at night"),
+                ("Kelas pukul 08.00 ya.", "Kelas pukul eight o'clock in the morning ya.")):
+            with self.subTest(written):
+                self.assertEqual(spoken_text(written), said)
+        # Not times: prices, versions, scores and code stay as they are.
+        self.assertEqual(spoken_text("It costs 3.50, version 2.10, score 2:1."), "It costs 3.50, version 2.10, score 2:1.")
+
 
 class SegmentationTests(unittest.TestCase):
     def phrases(self, chunks):

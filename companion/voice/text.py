@@ -153,6 +153,84 @@ class SpeechSegmenter:
         return None
 
 
+_ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
+         "seventeen eighteen nineteen").split()
+_TENS = {2: "twenty", 3: "thirty", 4: "forty", 5: "fifty"}
+# A clock time: 08:00, 7:05 pm, 19.30 (the dot only where it is clearly a time: a leading zero, a.m./p.m., or
+# after "at", "pukul" or "jam"), and a range such as 08:00–10:00.
+_CLOCK = r"(?:[01]?\d|2[0-3])[:.][0-5]\d(?![:.]?\d)"
+_SUFFIX = r"(?:\s*(?P<{0}>[ap]\.?\s?m\.?)(?![a-z]))?"
+_TIME = re.compile(r"(?<![\w:.])(?P<lead>(?:at|pukul|jam)\s+)?(?P<a>" + _CLOCK + ")" + _SUFFIX.format("sa")
+                   + r"(?:\s*(?:–|—|-|to|until|sampai)\s*(?P<b>" + _CLOCK + ")" + _SUFFIX.format("sb") + ")?",
+                   re.IGNORECASE)
+
+
+def _number(value):
+    return _ONES[value] if value < 20 else _TENS[value // 10] + ("" if value % 10 == 0 else "-" + _ONES[value % 10])
+
+
+def _clock(hour, minute, suffix, certain):
+    """How a person says a time, and its part of the day when that is known: ("eight o'clock", "in the
+    morning"), ("seven thirty", "in the evening"), ("noon", "")."""
+    if suffix:
+        hour = hour % 12 + (12 if suffix.lower().startswith("p") else 0)
+        certain = True
+    if minute == 0 and hour == 12 and certain:
+        return "noon", ""
+    if minute == 0 and hour == 0:
+        return "midnight", ""
+    twelve = hour % 12 or 12
+    words = _number(twelve) + (" o'clock" if minute == 0 else (" oh " if minute < 10 else " ") + _number(minute))
+    if not certain:
+        return words, ""
+    return words, ("at night" if hour < 5 or hour >= 21 else "in the morning" if hour < 12
+                   else "in the afternoon" if hour < 17 else "in the evening")
+
+
+def _times(text):
+    def say(match):
+        written = [(match["a"], match["sa"])] + ([(match["b"], match["sb"])] if match["b"] else [])
+        # A dot is a time only when it plainly is one; "3.50" is a price or a number.
+        if (any("." in value for value, _ in written) and not match["lead"]
+                and not any(suffix for _, suffix in written) and not any(v.startswith("0") for v, _ in written)):
+            return match[0]
+        # The part of the day is known from a.m./p.m., a 24-hour hour (13+) or a leading zero (08:00); in a
+        # range of 24-hour times, one such end is enough for both.
+        clock = [(int(h), int(m), suffix, int(h) >= 13 or h.startswith("0"))
+                 for (value, suffix) in written for h, m in [re.split(r"[:.]", value)]]
+        if len(clock) == 2 and not any(item[2] for item in clock) and any(item[3] for item in clock):
+            clock = [(hour, minute, suffix, True) for hour, minute, suffix, _ in clock]
+        said = [_clock(*item) for item in clock]
+        after = text[match.end():]
+        if _DAYPART.match(after):  # "19:30 tonight": the sentence already says when.
+            said = [(words, "") for words, _ in said]
+        if len(said) == 2 and said[0][1] and said[0][1] == said[1][1]:
+            words = f"{said[0][0]} to {said[1][0]} {said[1][1]}"  # A range: the part of the day once.
+        else:
+            words = " to ".join(" ".join(part for part in item if part) for item in said)
+        # "7 p.m." at the end of a sentence: its full stop is the sentence's too.
+        last = match["sb"] or (match["sa"] if not match["b"] else None)
+        if last and last.endswith(".") and (not after.strip() or re.match(r"\s+[A-Z]", after)):
+            words += "."
+        return (match["lead"] or "") + words
+    text = _TIME.sub(say, text)
+
+    def hour_only(match):  # "7 p.m." → "seven in the evening"
+        hour = int(match["h"]) % 12 + (12 if match["s"].lower().startswith("p") else 0)
+        words, part = _clock(hour, 0, None, True)
+        words = words.replace(" o'clock", "")
+        if _DAYPART.match(text[match.end():]):
+            part = ""
+        end = "." if match["s"].endswith(".") and (not text[match.end():].strip() or re.match(r"\s+[A-Z]", text[match.end():])) else ""
+        return " ".join(item for item in (words, part) if item) + end
+    return re.sub(r"(?<![\w:.])(?P<h>1[0-2]|0?[1-9])\s?(?P<s>[ap]\.?\s?m\.?)(?![a-z])", hour_only, text,
+                  flags=re.IGNORECASE)
+
+
+_DAYPART = re.compile(r"\s*(?:tonight|today|tomorrow (?:morning|evening|night)|this (?:morning|afternoon|evening)|"
+                      r"in the (?:morning|afternoon|evening)|at night|pagi|siang|sore|malam)\b", re.IGNORECASE)
+
+
 def spoken_text(text: str) -> str:
     # Omit code blocks, including an unclosed fence in an interrupted answer.
     text = re.sub(r"(```|~~~)[\s\S]*?(?:\1|\Z)", " ", text)
@@ -165,6 +243,7 @@ def spoken_text(text: str) -> str:
     text = re.sub(r"(?m)^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)", "", text)
     text = text.replace("**", "").replace("__", "")
     text = re.sub(r"\*([^*\n]+)\*", r"\1", text)
+    text = _times(text)  # "08:00" is said "eight o'clock in the morning", not "zero eight zero zero".
     text = re.sub(r"\s+", " ", text).strip()
     # Keep a long coding answer from becoming many minutes of unsolicited speech.
     if len(text) > 2400:
