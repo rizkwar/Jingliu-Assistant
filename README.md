@@ -137,6 +137,11 @@ shows its tab; New chat is an everyday chat.
   sidebar shows the window closest to running out ("62% left", amber below 20%). The page also has 14 days of
   tokens split into input, output and cached (hover a day for its numbers) and the chats that used the most
   today, this week or this month (click one to open it). Token counts stay on this computer.
+- **Smooth to use:** opening a chat shows its latest messages at once and fills in older ones above (formulas are
+  drawn once and kept); chats, Settings and pages crossfade; new messages fade in; her words appear at an even pace
+  as she writes; the mouse wheel glides; menus fade in and hovers ease. All of it follows Windows' "Show animations"
+  setting. Icons are Lucide's (2 px strokes, bundled under its ISC licence), with medium-weight labels and soft fills
+  instead of hairline outlines.
 - **No popups**: rename a chat, project or subject right where its name is (double-click it, or the title above the chat); questions like "Delete …?" and notices appear in a bar inside the window.
 - **Fonts**: Inter (bundled, like ChatGPT; the default), Segoe UI Variable, Sitka, Bahnschrift or Calibri, in four text sizes.
 - **Themes** (Settings → App → Window → Theme): Moonlit frost, Crimson moon, Jade grove, Lunar gold, Violet

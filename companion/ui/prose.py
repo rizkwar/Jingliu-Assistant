@@ -85,7 +85,7 @@ def _monospace(form):
                                         for family in families)
 
 
-def _formulas(document, formulas):
+def _formulas(document, formulas, wait=True):
     """Puts her formulas back as images: in the line, or centred on a line of their own. Returns the numbers of
     the blocks holding a formula in a line (they need room for its height)."""
     from . import math_render
@@ -107,7 +107,13 @@ def _formulas(document, formulas):
         cursor = QTextCursor(document)
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        drawn = math_render.render(latex, size * (1.25 if display else 1.1), tone('#e6eefa'), _ratio())
+        drawn = math_render.render(latex, size * (1.25 if display else 1.1), tone('#e6eefa'), _ratio(), wait=wait)
+        if drawn is math_render.PENDING:  # Being drawn in the background while she writes: shown as written.
+            form = QTextCharFormat()
+            form.setFontFamilies(['Cascadia Mono', 'Consolas'])
+            form.setForeground(QColor(tone('#8fa3c2')))
+            cursor.insertText(('$$%s$$' if display else '$%s$') % latex, form)
+            continue
         if drawn is None:
             form = QTextCharFormat()
             form.setFontFamilies(['Cascadia Mono', 'Consolas'])
@@ -137,9 +143,9 @@ def _formulas(document, formulas):
     return tall
 
 
-def shape(document, formulas=()):
+def shape(document, formulas=(), wait=True):
     """Her Markdown, set for reading: line spacing, paragraph rhythm, links, formulas, tables and pills."""
-    tall = _formulas(document, formulas) if formulas else set()
+    tall = _formulas(document, formulas, wait) if formulas else set()
     cursor = QTextCursor(document)
     block = document.begin()
     while block.isValid():
@@ -272,6 +278,7 @@ def plain(document, start=0, end=None):
 class ProseView(QTextBrowser):
     """One stretch of her reply between code blocks, as tall as its text."""
     linkHovered = Signal(str)
+    live = False  # While she writes it: formulas are drawn in the background (see math_render.render).
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -299,7 +306,7 @@ class ProseView(QTextBrowser):
         from .math_render import extract
         source, formulas = extract(text)
         self.document().setMarkdown(source, FEATURES)
-        shape(self.document(), formulas)
+        shape(self.document(), formulas, wait=not self.live)
         self._fit()
 
     def setText(self, html):  # Rich text that is not Markdown: her "…" while she thinks.

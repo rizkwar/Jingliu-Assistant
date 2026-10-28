@@ -67,19 +67,19 @@ QLabel#section {{ color: {ICE}; font-size: 13px; font-weight: 600; padding: 14px
 QLabel#emblem {{ font-family: '{ICON_FONT}'; font-size: 20px; color: {ICE};
     background: qradialgradient(cx:0.5, cy:0.5, radius:0.6, fx:0.4, fy:0.35, stop:0 #1d3256, stop:1 #0d1528);
     border: 1px solid #2c4470; border-radius: 22px; }}
-QFrame#pill {{ background: rgba(168, 212, 255, 0.07); border: 1px solid rgba(168, 212, 255, 0.16); border-radius: 13px; }}
+QFrame#pill {{ background: rgba(168, 212, 255, 0.09); border: none; border-radius: 13px; }}
 QLabel#status {{ color: #cfe3fb; font-size: 12px; }}
 
-QPushButton {{ background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(168, 212, 255, 0.13);
-    border-radius: 6px; padding: 7px 14px; color: #d8e4f4; }}
-QPushButton:hover {{ background: rgba(168, 212, 255, 0.09); border-color: rgba(168, 212, 255, 0.26); color: {FROST}; }}
+QPushButton {{ background: rgba(168, 212, 255, 0.075); border: 1px solid transparent;
+    border-radius: 8px; padding: 7px 14px; color: #d8e4f4; font-weight: 500; }}
+QPushButton:hover {{ background: rgba(168, 212, 255, 0.13); color: {FROST}; }}
 QPushButton:pressed {{ background: rgba(168, 212, 255, 0.15); }}
 QPushButton:checked {{ background: rgba(111, 168, 232, 0.24); border-color: {ICE_DEEP}; }}
 QPushButton:disabled {{ color: #4a5a78; border-color: rgba(168, 212, 255, 0.07); }}
 QPushButton#primary {{ background: #d3e6fb; color: #0a1424; border: none; font-weight: 600; }}
 QPushButton#primary:hover {{ background: #e6f1fd; }}
 
-QPushButton#icon {{ font-family: '{ICON_FONT}'; font-size: 15px; padding: 0; border-radius: 17px;
+QPushButton#icon {{ font-family: '{ICON_FONT}'; font-size: 16px; font-weight: 700; padding: 0; border-radius: 17px;
     min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; color: #c4d8f2;
     background: transparent; border: 1px solid transparent; }}
 QPushButton#icon:hover {{ background: rgba(168, 212, 255, 0.10); border-color: rgba(168, 212, 255, 0.18); }}
@@ -88,7 +88,7 @@ QPushButton#icon:disabled {{ color: #3b4966; }}
 QPushButton#icon[live="true"] {{ color: #fff; background: {CRIMSON}; border-color: #ff8fa1; }}
 QPushButton#icon[danger="true"] {{ color: #ffb3bf; }}
 QPushButton#icon::menu-indicator {{ image: none; width: 0; }}
-QPushButton#send {{ font-family: '{ICON_FONT}'; font-size: 15px; padding: 0; border-radius: 17px;
+QPushButton#send {{ font-family: '{ICON_FONT}'; font-size: 16px; font-weight: 700; padding: 0; border-radius: 17px;
     min-width: 34px; max-width: 34px; min-height: 34px; max-height: 34px; border: none; color: #0a1424;
     background: #d3e6fb; }}
 QPushButton#send:hover {{ background: #e3f1ff; }}
@@ -99,12 +99,12 @@ QFrame#composer[focused="true"] {{ border-color: rgba(168, 212, 255, 0.45); }}
 QPlainTextEdit#input {{ background: transparent; border: none; padding: 2px 4px; font-size: 15px;
     selection-background-color: #2f5487; }}
 
-QFrame#assistant {{ background: rgba(18, 29, 52, 0.84); border: 1px solid rgba(168, 212, 255, 0.10);
+QFrame#assistant {{ background: rgba(20, 32, 57, 0.88); border: none;
     border-radius: 16px; border-top-left-radius: 4px; }}
 QFrame#user {{ background: rgba(168, 212, 255, 0.075); border: none; border-radius: 14px; }}
 QFrame#user QLabel#body {{ color: #dbe6f5; }}
-QFrame#task {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.12);
-    border-left: 2px solid rgba(168, 212, 255, 0.45); border-radius: 4px; }}
+QFrame#task {{ background: rgba(18, 29, 52, 0.80); border: none;
+    border-left: 3px solid rgba(168, 212, 255, 0.45); border-radius: 8px; }}
 QLabel#taskTitle {{ font-size: 14px; color: {FROST}; }}
 QLabel#taskSteps {{ font-size: 12px; color: {MUTED}; font-family: 'Cascadia Mono', 'Consolas'; }}
 QLabel#taskStatus {{ font-size: 12px; font-weight: 600; color: {ICE}; }}
@@ -123,7 +123,7 @@ QLabel#approvalAction {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 13
     background: rgba(10, 17, 33, 0.9); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 8px; padding: 10px; }}
 QListWidget#history {{ background: transparent; border: none; padding: 0; outline: none; }}
 QListWidget#history::item {{ background: transparent; border: none; padding: 0; }}
-QFrame#historyRow {{ background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(168, 212, 255, 0.08); border-radius: 6px; }}
+QFrame#historyRow {{ background: rgba(168, 212, 255, 0.045); border: none; border-radius: 10px; }}
 QListWidget#history::item:hover QFrame#historyRow {{ background: rgba(168, 212, 255, 0.07); }}
 QListWidget#history::item:selected {{ background: rgba(111, 168, 232, 0.12); border: 1px solid rgba(168, 212, 255, 0.32); border-radius: 6px; }}
 QLabel#historyTitle {{ font-size: 14px; font-weight: 600; color: {FROST}; }}
@@ -148,7 +148,7 @@ QPushButton#memoryUndo {{ background: transparent; border: none; color: {ICE}; f
 QPushButton#memoryUndo:hover {{ color: {FROST}; text-decoration: underline; }}
 QLabel#speaker {{ color: {ICE}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
 QLabel#body {{ font-size: 15.5px; selection-background-color: #2f5487; }}
-QFrame#codeBlock {{ background: rgba(168, 212, 255, 0.055); border: 1px solid rgba(168, 212, 255, 0.07);
+QFrame#codeBlock {{ background: rgba(168, 212, 255, 0.065); border: none;
     border-radius: 18px; }}
 QLabel#codeMark {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 12px; font-weight: 700; color: {FROST}; }}
 QLabel#codeTitle {{ font-family: 'Segoe UI Variable Text', 'Segoe UI'; color: {FROST}; font-size: 13px; font-weight: 600;
@@ -192,8 +192,8 @@ QLabel#note[tone="error"] {{ color: #f3b3bd; border-color: rgba(226, 86, 110, 0.
 QLabel#welcomeTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 26px; color: {FROST}; }}
 QLabel#welcomeText {{ color: {MUTED}; font-size: 13px; }}
 QLabel#welcomeMoon {{ font-family: '{ICON_FONT}'; font-size: 40px; color: {ICE}; }}
-QFrame#attachment {{ background: rgba(168, 212, 255, 0.07); border: 1px solid rgba(168, 212, 255, 0.18); border-radius: 10px; }}
-QFrame#attachment:hover {{ border-color: rgba(168, 212, 255, 0.38); }}
+QFrame#attachment {{ background: rgba(168, 212, 255, 0.09); border: none; border-radius: 12px; }}
+QFrame#attachment:hover {{ background: rgba(168, 212, 255, 0.14); }}
 QLabel#attachmentIcon {{ font-family: '{ICON_FONT}'; font-size: 18px; color: {ICE}; }}
 QLabel#attachmentName {{ font-size: 12px; color: #cfe0f6; }}
 QLabel#attachmentKind {{ font-size: 10px; color: {MUTED}; letter-spacing: 1px; }}
@@ -203,8 +203,8 @@ QPushButton#remove {{ font-family: '{ICON_FONT}'; font-size: 9px; padding: 0; bo
 QPushButton#remove:hover {{ color: #fff; background: {CRIMSON}; }}
 QWidget#dropHint {{ background: rgba(7, 12, 24, 0.88); border: 2px dashed rgba(168, 212, 255, 0.55); border-radius: 20px; }}
 QLabel#dropText {{ color: {ICE}; font-size: 18px; font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light'; }}
-QPushButton#chip {{ background: transparent; border: 1px solid rgba(168, 212, 255, 0.16);
-    border-radius: 6px; padding: 6px 14px; color: #c9dcf5; font-size: 13px; }}
+QPushButton#chip {{ background: rgba(168, 212, 255, 0.075); border: none;
+    border-radius: 10px; padding: 6px 14px; color: #d3e3f7; font-size: 13px; font-weight: 500; }}
 QPushButton#chip:hover {{ background: rgba(168, 212, 255, 0.13); color: {FROST}; }}
 
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px; }}
@@ -249,12 +249,12 @@ QSlider::handle:horizontal {{ background: {FROST}; width: 14px; height: 14px; ma
 QFrame#sidebar {{ background: rgba(5, 9, 19, 0.62); border: none; border-right: 1px solid rgba(168, 212, 255, 0.07); }}
 QLabel#sideTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 17px; color: {FROST}; }}
 QFrame#sidebar QLabel#seal {{ font-size: 13px; padding-top: 2px; }}
-QPushButton#sideNew, QToolButton#sideItem {{ background: transparent; border: none; border-radius: 8px; text-align: left;
-    padding: 5px 8px; color: #d5e2f4; font-size: 14px; }}
+QPushButton#sideNew, QToolButton#sideItem {{ background: transparent; border: none; border-radius: 9px; text-align: left;
+    padding: 6px 8px; color: #dbe6f5; font-size: 14.5px; font-weight: 500; }}
 QToolButton#sideItem {{ min-width: 222px; max-width: 244px; }}
 QPushButton#sideNew:hover, QToolButton#sideItem:hover {{ background: rgba(168, 212, 255, 0.07); color: {FROST}; }}
 QPushButton#sideNew:pressed, QToolButton#sideItem:pressed {{ background: rgba(168, 212, 255, 0.12); }}
-QPushButton#sideIcon {{ font-family: '{ICON_FONT}'; font-size: 14px; padding: 0; border-radius: 8px; border: none;
+QPushButton#sideIcon {{ font-family: '{ICON_FONT}'; font-size: 15px; font-weight: 700; padding: 0; border-radius: 8px; border: none;
     min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; color: {MUTED}; background: transparent; }}
 QPushButton#sideIcon:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.08); }}
 QLabel#sideSection {{ color: {DIM}; font-size: 12px; font-weight: 600; }}
@@ -310,10 +310,10 @@ QTreeWidget#sideTree::item:only-one {{ border-radius: 8px; }}
 QPushButton#crumb {{ background: transparent; border: none; border-radius: 8px; padding: 3px 8px; color: {MUTED};
     font-size: 14px; }}
 QPushButton#crumb:hover {{ background: rgba(168, 212, 255, 0.08); color: {FROST}; }}
-QFrame#projectCard, QFrame#serverRow {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.10);
+QFrame#projectCard, QFrame#serverRow {{ background: rgba(20, 32, 57, 0.80); border: none;
     border-radius: 14px; }}
 QLabel#cardTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 15px; color: {FROST}; }}
-QFrame#usageCard {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 212, 255, 0.10); border-radius: 14px; }}
+QFrame#usageCard {{ background: rgba(20, 32, 57, 0.80); border: none; border-radius: 16px; }}
 QLabel#usageHeading {{ color: {MUTED}; font-size: 12px; font-weight: 600; }}
 QLabel#usageLabel {{ color: {MUTED}; font-size: 13px; }}
 QLabel#usageBig {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 20px; color: {FROST}; }}
@@ -346,7 +346,7 @@ QListWidget#projectFiles::item {{ background: transparent; border: none; }}
 QLabel#projectFolder {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 12px; color: #cfe0f6; }}
 
 /* The Chats · Projects · Study tabs above Settings. */
-QFrame#sideTabs {{ background: rgba(168, 212, 255, 0.05); border: 1px solid rgba(168, 212, 255, 0.08); border-radius: 12px; }}
+QFrame#sideTabs {{ background: rgba(168, 212, 255, 0.06); border: none; border-radius: 12px; }}
 QToolButton#sideTab {{ background: transparent; border: none; border-radius: 9px; padding: 5px 4px; color: {MUTED};
     font-size: 12px; }}
 QToolButton#sideTab:hover {{ color: {FROST}; background: rgba(168, 212, 255, 0.06); }}
@@ -501,8 +501,37 @@ def icon_button(glyph, tooltip, name='icon', checkable=False):
     return button
 
 
+ICON_FILES = {
+    "new": "plus", "more": "ellipsis", "mic": "mic", "mic_live": "mic", "send": "arrow-up", "stop": "square",
+    "settings": "settings", "history": "history", "speaker": "volume-2", "muted": "volume-x", "handsfree": "headphones",
+    "memories": "heart", "context": "notebook-text", "pause": "pause", "play": "play", "moon": "moon",
+    "attach": "paperclip", "close": "x", "document": "file-text", "image": "image", "delete": "trash-2",
+    "clock": "clock", "back": "arrow-left", "rename": "pencil", "screen": "monitor", "compose": "square-pen",
+    "sidebar": "panel-left", "search": "search", "pin": "pin", "copy": "copy", "code": "code", "chevron": "chevron-down",
+    "shield": "shield", "bell": "bell", "quote": "quote", "tool": "wrench", "folder": "folder", "project": "briefcase",
+    "open": "external-link", "plug": "plug", "study": "graduation-cap", "cards": "layers", "timer": "timer",
+    "quiz": "list-checks", "idea": "lightbulb", "notes": "sticky-note", "folder_open": "folder-open",
+    "chevron_right": "chevron-right",
+}
+
+
 def glyph_icon(glyph, color=ICE, size=32):
-    """Menu icon drawn from the system icon font."""
+    """An icon with the even 2 px strokes of Lucide (bundled, ISC licence), like Claude's and ChatGPT's apps;
+    the system icon font draws any glyph without one."""
+    path = Path(ASSETS) / 'icons' / f'{ICON_FILES.get(glyph, "")}.svg'
+    if glyph in ICON_FILES and path.is_file():
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtSvg import QSvgRenderer
+        svg = path.read_text(encoding='utf-8').replace('currentColor', QColor(tone(color)).name())
+        renderer = QSvgRenderer(QByteArray(svg.encode('utf-8')))
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        margin = size * 0.1
+        renderer.render(painter, QRectF(margin, margin, size - 2 * margin, size - 2 * margin))
+        painter.end()
+        return QIcon(pixmap)
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)

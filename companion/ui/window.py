@@ -438,7 +438,9 @@ class CompanionWindow(QMainWindow):
         centring = QHBoxLayout()
         centring.setContentsMargins(0, 0, 0, 0)
         # One window: the conversation, and pages such as Settings or History in its place.
-        self.pages = QStackedWidget()
+        from . import motion
+        motion.install(QApplication.instance())  # Menus fade, the wheel glides, hovers ease (unless turned off).
+        self.pages = motion.FadingStack()  # Settings, pages and the chat crossfade into one another.
         self.pages.setObjectName("pages")
         self.pages.setMaximumWidth(900)  # Keep lines readable on a maximized window.
         column = QWidget()
@@ -1464,7 +1466,7 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_memory_note(text.replace(reminders.MARK, "Reminder"), can_undo=False, icon="clock")
         else:
             self.input.clear()
-            self.transcript.add_message("user", "You", text, attachments=stored)
+            self.transcript.add_message("user", "You", text, attachments=stored, animate=True)
         self.transcript.begin_reply(self.settings.name)
         chat_tools = self._chat_tools()
         prompt, context, self._session = self._reply_setup(text, turns, summary, memories, stored, looking, chat_tools)
@@ -2019,6 +2021,8 @@ class CompanionWindow(QMainWindow):
         self._refresh_sidebar()
 
     def _toggle_sidebar(self):
+        from . import motion
+        motion.crossfade(self.centralWidget())
         self._sidebar_wanted = not self.sidebar.isVisible()
         self._place_sidebar()
 
@@ -4476,10 +4480,14 @@ class CompanionWindow(QMainWindow):
                 self.preferences.remember(self.settings, ("last_conversation",))
             except (OSError, ValueError):
                 pass
+        if hasattr(self, "transcript") and conversation_id != self._conversation_id:
+            from . import motion
+            motion.crossfade(self.transcript)
         self._reset_conversation_view()
         self._conversation_id = conversation_id
         self._active_turn = None
         self._messages = context
+        entries = []
         if self._is_reminder_session(conversation_id):
             self.store.mark_unread(conversation_id, 0)
             if hasattr(self, "sidebar"):
@@ -4488,23 +4496,24 @@ class CompanionWindow(QMainWindow):
             if row["role"] == "user" and row["display"].startswith(check_in_lines.MARK):
                 # Her instructions for a check-in are for her; you see when it was.
                 moment = re.match(r"\S+ Check-in \((\d{1,2}:\d{2})", row["display"])
-                self.transcript.add_memory_note("Check-in" + (f" · {moment.group(1)}" if moment else ""),
-                                                can_undo=False, icon="moon")
+                entries.append(lambda text="Check-in" + (f" · {moment.group(1)}" if moment else ""):
+                               self.transcript.add_memory_note(text, can_undo=False, icon="moon"))
                 continue
             if row["role"] == "user" and row["display"].startswith(reminders.MARK):
-                self.transcript.add_memory_note(row["display"].replace(reminders.MARK, "Reminder", 1),
-                                                can_undo=False, icon="clock")
+                entries.append(lambda text=row["display"].replace(reminders.MARK, "Reminder", 1):
+                               self.transcript.add_memory_note(text, can_undo=False, icon="clock"))
                 continue
             name = "You" if row["role"] == "user" else self.settings.name
             notice = row["notice"]
             if row["status"] == "pending":
                 notice = "Interrupted during a previous session"
-            self.transcript.add_message(row["role"], name, row["display"], notice or "",
-                                        attachments=attachments.loads(row.get("attachments", "")),
-                                        when=row.get("created_at", ""))
+            entries.append(lambda row=row, name=name, notice=notice: self.transcript.add_message(
+                row["role"], name, row["display"], notice or "", attachments=attachments.loads(row.get("attachments", "")),
+                when=row.get("created_at", "")))
             if row["role"] == "assistant" and row["display"] and row["status"] != "local":
                 self._last_reply = row["display"]
                 self._last_reply_id = row["id"]
+        self.transcript.fill(entries)
         self.replay.setEnabled(bool(self._last_reply))
         if hasattr(self, "coding_chip"):
             self._refresh_coding_chip()

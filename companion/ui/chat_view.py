@@ -10,6 +10,7 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextBlock
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
+from . import motion
 from .code_block import CodeBlock, segments
 from .prose import ProseView
 from .theme import ICONS, glyph_icon, tone
@@ -199,6 +200,20 @@ class Bubble(QFrame):
             self.setSizePolicy(QSizePolicy.Policy.Expanding if plain else QSizePolicy.Policy.Maximum,
                                QSizePolicy.Policy.Preferred)
 
+    def set_streaming(self, on):
+        """While she writes, a formula not drawn yet shows as she wrote it and appears when it is ready."""
+        self.streaming = on
+        for view in [self.body, *self._parts]:
+            if isinstance(view, ProseView):
+                view.live = on
+
+    def refresh(self):
+        """Draws her text again (a formula finished drawing in the background)."""
+        for view in [self.body, *self._parts]:
+            if isinstance(view, ProseView):
+                view.markdown = None
+        self.set_text(self.text)
+
     def finish(self, when=''):
         """A complete reply of hers: show copy, read aloud and the time beneath it."""
         if self.role != 'user' and self.text:
@@ -214,6 +229,7 @@ class Bubble(QFrame):
         open, right-click menu."""
         if self.role != 'user':
             view = ProseView()
+            view.live = getattr(self, 'streaming', False)
             view.linkHovered.connect(lambda url, view=view: self._hover_link(url, view))
             view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             view.customContextMenuRequested.connect(lambda position, view=view: self._menu(position, view))
@@ -577,6 +593,18 @@ class ChatView(QScrollArea):
         self._render.setSingleShot(True)
         self._render.setInterval(40)  # Coalesce streamed chunks into one Markdown render.
         self._render.timeout.connect(self._render_live)
+        # Her words appear at an even pace (a little faster when more is waiting), not in bursts as they arrive.
+        self._stream, self._shown = '', 0
+        self._reveal = QTimer(self)
+        self._reveal.setInterval(33)
+        self._reveal.timeout.connect(self._reveal_more)
+        # Opening a conversation: the latest messages at once, older ones above them a few at a time.
+        self._pending, self._insert_at, self._keep_from_bottom = [], None, None
+        self._filler = QTimer(self)
+        self._filler.setInterval(12)
+        self._filler.timeout.connect(self._fill_more)
+        from . import math_render
+        math_render.notifier().ready.connect(self._formula_ready)
         self._dots = QTimer(self)
         self._dots.setInterval(320)
         self._dots.timeout.connect(self._tick)
@@ -605,15 +633,23 @@ class ChatView(QScrollArea):
         self._place_latest()
 
     def _grown(self, _low, high):
-        if self._stick:
+        if self._keep_from_bottom is not None:
+            # Older messages were added above: what you were reading stays where it was.
+            self.verticalScrollBar().setValue(high - self._keep_from_bottom)
+            self._keep_from_bottom = None
+        elif self._stick:
             self._following = True
             self.verticalScrollBar().setValue(high)
             self._following = False
         self._place_latest()
 
     def scroll_to_latest(self):
+        bar = self.verticalScrollBar()
+        if motion.enabled() and bar.maximum() - bar.value() > 40:
+            motion.glide(bar, bar.maximum(), 240)  # The ↓ glides down; _scrolled sticks once at the bottom.
+            return
         self._stick = True
-        self._grown(0, self.verticalScrollBar().maximum())
+        self._grown(0, bar.maximum())
 
     def _place_latest(self):
         """ChatGPT's round ↓: shown while you have scrolled up, to come back to her latest words."""
@@ -663,12 +699,53 @@ class ChatView(QScrollArea):
         # Widgets that may grow (her messages) take the row up to their maximum width.
         row.addWidget(widget, 1 if widget.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding else 0)
         if align != 'right': row.addStretch()
+        if self._insert_at is not None:  # Older messages, going in above the ones already shown.
+            self.rows.insertLayout(self._insert_at, row)
+            self._items.insert(self._insert_at, widget)
+            self._insert_at += 1
+            return widget
         self.rows.insertLayout(self.rows.count() - 1, row)
         if not isinstance(widget, Welcome):
             self._remove_welcome()
         self._items.append(widget)
         self._stick = True
         return widget
+
+    def fill(self, entries, recent=6):
+        """Shows a conversation: `entries` add its items oldest first. The last `recent` show at once; older ones
+        go in above them a few at a time between frames, so opening even a long conversation is instant."""
+        self._pending = []
+        if not motion.enabled() or len(entries) <= recent:
+            for entry in entries:
+                entry()
+            return
+        for entry in entries[-recent:]:
+            entry()
+        self._pending = list(entries[:-recent])
+        self._filler.start()
+
+    def _fill_more(self, budget=0.016):
+        """The next older messages, as many as fit in about a frame's time, so the window stays responsive."""
+        if self._pending:
+            bar = self.verticalScrollBar()
+            if not self._stick:
+                self._keep_from_bottom = bar.maximum() - bar.value()
+            batch, deadline = [], time.monotonic() + budget
+            while self._pending and (not batch or time.monotonic() < deadline):
+                entry = self._pending.pop()
+                self._insert_at = 0
+                try:
+                    entry()  # Oldest last: each goes in at the top, above the one before it.
+                finally:
+                    self._insert_at = None
+                batch.append(entry)
+        if not self._pending:
+            self._filler.stop()
+
+    def flush(self):
+        """Everything still waiting to be shown, now."""
+        while self._pending:
+            self._fill_more(budget=float('inf'))
 
     def _remove(self, widget):
         if widget in self._items: self._items.remove(widget)
@@ -690,7 +767,7 @@ class ChatView(QScrollArea):
         welcome.suggestion.connect(self.suggestion)
         self._add(welcome, 'center')
 
-    def add_message(self, role, speaker, text, notice='', attachments=(), when=''):
+    def add_message(self, role, speaker, text, notice='', attachments=(), when='', animate=False):
         bubble = Bubble(role, speaker, attachments=attachments, plain=self.plain, when=when)
         bubble.setMaximumWidth(self._bubble_width(bubble))
         bubble.set_text(text)
@@ -699,7 +776,10 @@ class ChatView(QScrollArea):
         bubble.quote.connect(self.quote_requested)
         if text:
             bubble.finish()
-        return self._add(bubble, 'right' if role == 'user' else 'left')
+        self._add(bubble, 'right' if role == 'user' else 'left')
+        if animate:
+            motion.fade_in(bubble)
+        return bubble
 
     def add_offer(self, description):
         card = OfferCard(description)
@@ -714,7 +794,9 @@ class ChatView(QScrollArea):
     def add_task_card(self, speaker, request):
         card = TaskCard(speaker, request)
         card.setMaximumWidth(self._bubble_width())
-        return self._add(card, 'left')
+        self._add(card, 'left')
+        motion.fade_in(card)
+        return card
 
     def add_note(self, text, tone=''):
         note = QLabel(text.strip())
@@ -728,22 +810,50 @@ class ChatView(QScrollArea):
         return self._add(note, 'center')
 
     def begin_reply(self, speaker):
-        self._live = self.add_message('assistant', speaker, '')
+        self._live = self.add_message('assistant', speaker, '', animate=True)
+        self._live.set_streaming(True)
+        self._stream, self._shown = '', 0
         self._frame = 0
         self._live.set_waiting(0)
         self._dots.start()
 
     def append_reply(self, text):
         if self._live is None: return
-        self._live.text += text
+        self._stream += text
         self._dots.stop()
-        if not self._render.isActive(): self._render.start()
+        if not motion.enabled():
+            self._live.text = self._stream
+            if not self._render.isActive(): self._render.start()
+        elif not self._reveal.isActive():
+            self._reveal_more()
+            self._reveal.start()
+
+    def _reveal_more(self):
+        """Shows a little more of what she has written: an even pace that catches up when much is waiting."""
+        if self._live is None:
+            self._reveal.stop()
+            return
+        waiting = len(self._stream) - self._shown
+        if waiting <= 0:
+            self._reveal.stop()
+            return
+        self._shown += max(3, -(-waiting // 6))
+        self._live.set_text(self._stream[:self._shown])
+
+    def _formula_ready(self):
+        if self._live is not None:
+            self._live.refresh()
 
     def end_reply(self, notice='', error=''):
         live, self._live = self._live, None
         self._dots.stop()
         self._render.stop()
+        self._reveal.stop()
         if live is None: return
+        if self._stream:
+            live.text = self._stream  # All of it, however far the reveal had got.
+        self._stream, self._shown = '', 0
+        live.set_streaming(False)
         if not live.text:
             self._remove(live)
             if error or notice:
@@ -766,6 +876,9 @@ class ChatView(QScrollArea):
     def clear(self):
         self._dots.stop()
         self._render.stop()
+        self._reveal.stop()
+        self._filler.stop()
+        self._pending, self._stream, self._shown = [], '', 0
         self._live = None
         self._items.clear()
         while self.rows.count() > 1:
@@ -781,4 +894,5 @@ class ChatView(QScrollArea):
         self._stick = True
 
     def toPlainText(self):
+        self.flush()
         return '\n\n'.join(item.plain() for item in self._items)

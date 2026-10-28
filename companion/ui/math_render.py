@@ -52,12 +52,75 @@ def extract(text):
     return ''.join(out), formulas
 
 
-def render(latex, size, colour, ratio=1.0):
+PENDING = object()  # render(wait=False): being drawn in the background.
+_pending = set()
+_notifier = None
+_pool = None
+
+
+def notifier():
+    """Its `ready` signal fires (on the main thread) when a formula drawn in the background is ready."""
+    global _notifier
+    if _notifier is None:
+        from PySide6.QtCore import QObject, Signal
+
+        class Notifier(QObject):
+            ready = Signal()
+        _notifier = Notifier()
+    return _notifier
+
+
+def _disk(key):
+    import hashlib
+    from ..core.config import PROJECT_ROOT
+    name = hashlib.sha256(repr(key).encode('utf-8')).hexdigest()[:32]
+    return PROJECT_ROOT / 'data' / 'cache' / 'math' / f'{name}.png'
+
+
+def render(latex, size, colour, ratio=1.0, wait=True):
     """A formula as an image at the screen's pixel density: (image, logical width, height, baseline drop), or
-    None when the LaTeX cannot be read."""
+    None when the LaTeX cannot be read. Drawn formulas are kept on disk, so each is drawn once. `wait` False
+    (while she writes): a formula not drawn yet returns PENDING and is drawn in the background."""
     key = (latex, round(size, 1), colour, round(ratio, 2))
     if key in _cache:
         return _cache[key]
+    stored = _load(key)
+    if stored is not None:
+        _cache[key] = stored
+        return stored
+    if not wait:
+        if key not in _pending:
+            global _pool
+            from concurrent.futures import ThreadPoolExecutor
+            _pool = _pool or ThreadPoolExecutor(max_workers=1, thread_name_prefix='math')
+            _pending.add(key)
+            notifier()  # Made here, on the main thread, so its signal reaches the window.
+
+            def draw():
+                try:
+                    _draw(key, latex, size, colour, ratio)
+                finally:
+                    _pending.discard(key)
+                    notifier().ready.emit()
+            _pool.submit(draw)
+        return PENDING
+    return _draw(key, latex, size, colour, ratio)
+
+
+def _load(key):
+    path = _disk(key)
+    if not path.is_file():
+        return None
+    image = QImage(str(path))
+    try:
+        width, height, drop, ratio = (float(part) for part in image.text('formula').split())
+    except ValueError:
+        return None
+    image.setDevicePixelRatio(ratio)
+    return image, width, height, drop
+
+
+def _draw(key, latex, size, colour, ratio):
     try:
         import ziamath
         from PySide6.QtSvg import QSvgRenderer
@@ -79,6 +142,13 @@ def render(latex, size, colour, ratio=1.0):
         painter.end()
         drop = float(formula.getyofst()) if hasattr(formula, 'getyofst') else 0.0
         result = (image, width, height, drop)
+        try:
+            path = _disk(key)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            image.setText('formula', f'{width} {height} {drop} {ratio}')
+            image.save(str(path), 'PNG')
+        except OSError:
+            pass  # Drawn again next time.
     except Exception:  # Unknown commands or broken LaTeX: shown as written instead.
         result = None
     if len(_cache) > 400:
