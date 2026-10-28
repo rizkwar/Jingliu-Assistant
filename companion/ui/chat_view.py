@@ -141,12 +141,14 @@ class Bubble(QFrame):
                            QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(*((2, 4, 8, 4) if self.property('plain') else
-                                    (16, 11, 16, 12) if role != 'user' else (15, 9, 15, 10)))
+                                    (16, 11, 16, 12) if role != 'user' else (18, 10, 18, 11)))
         layout.setSpacing(4)
         if role != 'user':
-            name = QLabel(speaker.upper())
-            name.setObjectName('speaker')
-            layout.addWidget(name)
+            # Her name above a bubble; plain text goes without it, as ChatGPT's replies do.
+            self.name = QLabel(speaker.upper())
+            self.name.setObjectName('speaker')
+            self.name.setVisible(not self.property('plain'))
+            layout.addWidget(self.name)
         if self.attachments:
             cards = QVBoxLayout()
             cards.setSpacing(6)
@@ -197,6 +199,7 @@ class Bubble(QFrame):
             self.style().unpolish(self)
             self.style().polish(self)
             self.layout().setContentsMargins(*((2, 4, 8, 4) if plain else (16, 11, 16, 12)))
+            self.name.setVisible(not plain)
             self.setSizePolicy(QSizePolicy.Policy.Expanding if plain else QSizePolicy.Policy.Maximum,
                                QSizePolicy.Policy.Preferred)
 

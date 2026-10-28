@@ -341,7 +341,9 @@ class CompanionWindow(QMainWindow):
         self.settings_button = action("settings", "Settings", "Settings · Ctrl+,")
         self.suspend_button = action("pause", "Suspend")
 
-        root = NightSky()
+        root = QWidget()
+        root.setObjectName("shell")  # The darker base the sidebar sits on.
+        root.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setCentralWidget(root)
         shell = QHBoxLayout(root)
         shell.setContentsMargins(0, 0, 0, 0)
@@ -368,7 +370,7 @@ class CompanionWindow(QMainWindow):
         self._sidebar_wanted = True
         shell.addWidget(self.sidebar)
 
-        main = QWidget()
+        main = NightSky(panel=True)  # The conversation, on a rounded panel with her night sky.
         main.setObjectName("column")
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -442,7 +444,7 @@ class CompanionWindow(QMainWindow):
         motion.install(QApplication.instance())  # Menus fade, the wheel glides, hovers ease (unless turned off).
         self.pages = motion.FadingStack()  # Settings, pages and the chat crossfade into one another.
         self.pages.setObjectName("pages")
-        self.pages.setMaximumWidth(900)  # Keep lines readable on a maximized window.
+        self.pages.setMaximumWidth(820)  # A centred reading column, as wide as ChatGPT's.
         column = QWidget()
         column.setObjectName("column")
         self.chat_page = column
@@ -2126,7 +2128,9 @@ class CompanionWindow(QMainWindow):
         return (self.settings.openrouter_model or self.settings.model).split("/")[-1].split(":")[0] or "OpenRouter"
 
     def _refresh_model_picker(self):
-        self.model_picker.setText(self._model_name())
+        name = self._model_name()
+        # A long model ID would squeeze the message box's buttons; the tooltip has it in full.
+        self.model_picker.setText(name if len(name) <= 18 else name[:17].rstrip("-_. ") + "…")
         self.model_picker.setToolTip(self._model_label())
 
     def _fill_model_menu(self):

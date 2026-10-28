@@ -67,7 +67,7 @@ QLabel#section {{ color: {ICE}; font-size: 13px; font-weight: 600; padding: 14px
 QLabel#emblem {{ font-family: '{ICON_FONT}'; font-size: 20px; color: {ICE};
     background: qradialgradient(cx:0.5, cy:0.5, radius:0.6, fx:0.4, fy:0.35, stop:0 #1d3256, stop:1 #0d1528);
     border: 1px solid #2c4470; border-radius: 22px; }}
-QFrame#pill {{ background: rgba(168, 212, 255, 0.09); border: none; border-radius: 13px; }}
+QFrame#pill {{ background: transparent; border: none; border-radius: 13px; }}
 QLabel#status {{ color: #cfe3fb; font-size: 12px; }}
 
 QPushButton {{ background: rgba(168, 212, 255, 0.075); border: 1px solid transparent;
@@ -94,14 +94,14 @@ QPushButton#send {{ font-family: '{ICON_FONT}'; font-size: 16px; font-weight: 70
 QPushButton#send:hover {{ background: #e3f1ff; }}
 QPushButton#send:disabled {{ background: rgba(168, 212, 255, 0.10); color: #3b4966; }}
 
-QFrame#composer {{ background: rgba(12, 19, 36, 0.94); border: 1px solid rgba(168, 212, 255, 0.12); border-radius: 16px; }}
-QFrame#composer[focused="true"] {{ border-color: rgba(168, 212, 255, 0.45); }}
+QFrame#composer {{ background: rgba(28, 41, 68, 0.94); border: 1px solid transparent; border-radius: 26px; }}
+QFrame#composer[focused="true"] {{ border-color: rgba(168, 212, 255, 0.16); }}
 QPlainTextEdit#input {{ background: transparent; border: none; padding: 2px 4px; font-size: 15px;
     selection-background-color: #2f5487; }}
 
 QFrame#assistant {{ background: rgba(20, 32, 57, 0.88); border: none;
     border-radius: 16px; border-top-left-radius: 4px; }}
-QFrame#user {{ background: rgba(168, 212, 255, 0.075); border: none; border-radius: 14px; }}
+QFrame#user {{ background: rgba(168, 212, 255, 0.115); border: none; border-radius: 22px; }}
 QFrame#user QLabel#body {{ color: #dbe6f5; }}
 QFrame#task {{ background: rgba(18, 29, 52, 0.80); border: none;
     border-left: 3px solid rgba(168, 212, 255, 0.45); border-radius: 8px; }}
@@ -246,7 +246,8 @@ QSlider::sub-page:horizontal {{ background: {ICE_DEEP}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {FROST}; width: 14px; height: 14px; margin: -6px 0; border-radius: 7px; border: 2px solid {ICE_DEEP}; }}
 
 /* Sidebar: who she is, new chat, quick pages and the conversation list. */
-QFrame#sidebar {{ background: rgba(5, 9, 19, 0.62); border: none; border-right: 1px solid rgba(168, 212, 255, 0.07); }}
+QWidget#shell {{ background: #060913; }}
+QFrame#sidebar {{ background: transparent; border: none; }}
 QLabel#sideTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 17px; color: {FROST}; }}
 QFrame#sidebar QLabel#seal {{ font-size: 13px; padding-top: 2px; }}
 QPushButton#sideNew, QToolButton#sideItem {{ background: transparent; border: none; border-radius: 9px; text-align: left;
@@ -268,7 +269,7 @@ QListWidget#sideList::item:hover {{ background: rgba(168, 212, 255, 0.06); color
 QListWidget#sideList::item:selected {{ background: rgba(168, 212, 255, 0.11); color: {FROST}; }}
 
 /* Header above the conversation. */
-QWidget#header {{ background: transparent; border-bottom: 1px solid rgba(168, 212, 255, 0.06); }}
+QWidget#header {{ background: transparent; border: none; }}
 QLabel#chatTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 15px; color: {FROST}; }}
 QLabel#chatGlyph {{ font-family: '{ICON_FONT}'; font-size: 14px; color: {ICE}; }}
 
@@ -281,7 +282,7 @@ QPushButton#replyAction:hover {{ color: {FROST}; background: rgba(168, 212, 255,
 QLabel#replyTime {{ color: {DIM}; font-size: 11px; padding-left: 4px; }}
 
 /* Composer: + menu, a toggle chip, model picker, microphone, hands-free and send. */
-QFrame#composer {{ border-radius: 22px; }}
+QFrame#composer {{ border-radius: 26px; }}
 QPushButton#chipToggle {{ background: transparent; border: 1px solid transparent; border-radius: 14px;
     padding: 4px 11px 4px 9px; color: {MUTED}; font-size: 13px; }}
 QPushButton#chipToggle:hover {{ background: rgba(168, 212, 255, 0.07); color: {FROST}; }}
@@ -382,6 +383,7 @@ THEMES = {
     'gold': ('Lunar gold', 38, 0.75, False),
     'violet': ('Violet dusk', 268, 0.9, False),
     'ink': ('Midnight ink', None, 0.12, False),
+    'graphite': ('Graphite (like ChatGPT)', None, 0.03, False, 0.1),
     'snow': ('Snowfield (light)', None, 1.0, True),
     'blossom': ('Blossom day (light)', 340, 0.7, True),
 }
@@ -405,8 +407,10 @@ def accent_hue():
 
 
 def _recolour(red, green, blue):
-    _, hue, saturation, light = _theme
+    _, hue, saturation, light, *rest = _theme
     h, l, s = colorsys.rgb_to_hls(red / 255, green / 255, blue / 255)
+    if rest and l < .35:  # Lifted: the night's near-blacks become a softer grey; lighter colours stay as they are.
+        l += rest[0] * (1 - l / .35)
     if 175 / 360 <= h <= 265 / 360 or s < .12:  # Her blues, and the near-greys among them.
         if hue is not None:
             h = (hue / 360 + h - 215 / 360) % 1
@@ -602,10 +606,13 @@ def moon_icon(size=64):
 
 
 class NightSky(QWidget):
-    """Static backdrop: deep night gradient, a faint moon halo and drifting frost motes."""
+    """Static backdrop: deep night gradient, a faint moon halo and drifting frost motes. `panel`: drawn as a panel
+    with rounded left corners on the window's darker base, as ChatGPT and Codex set their conversation."""
+    RADIUS = 14
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, panel=False):
         super().__init__(parent)
+        self.panel = panel
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         generator = random.Random(1123)  # Fixed seed: the sky never flickers between repaints.
         self._motes = [(generator.random(), generator.random() ** 1.6, generator.uniform(0.6, 1.8),
@@ -615,6 +622,9 @@ class NightSky(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         width, height = self.width(), self.height()
+        if self.panel:
+            shape = self._panel_shape()
+            painter.setClipPath(shape)
         sky = QLinearGradient(0, 0, 0, height)
         sky.setColorAt(0, QColor(tone(NIGHT_HIGH)))
         sky.setColorAt(0.55, QColor(tone('#090f1d')))
@@ -637,7 +647,25 @@ class NightSky(QWidget):
         for x, y, size, alpha in self._motes[::2]:
             painter.setBrush(colour(200, 225, 255, alpha * 2 // 3) if not is_light() else colour(120, 150, 200, alpha // 3))
             painter.drawEllipse(QPointF(x * width, y * height), size * .8, size * .8)
+        if self.panel:
+            painter.setClipping(False)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(colour(168, 212, 255, 22), 1))
+            painter.drawPath(shape)
         painter.end()
+
+    def _panel_shape(self):
+        """Rounded on the left, where it meets the sidebar; square on the right, at the window's edge."""
+        width, height, radius = self.width(), self.height(), self.RADIUS
+        path = QPainterPath()
+        path.moveTo(width + 1, -1)
+        path.lineTo(radius + .5, -1 + .5)
+        path.quadTo(.5, .5, .5, radius + .5)
+        path.lineTo(.5, height - radius - .5)
+        path.quadTo(.5, height - .5, radius + .5, height - .5)
+        path.lineTo(width + 1, height - .5)
+        path.closeSubpath()
+        return path
 
 
 def _colorref(hex_color):

@@ -145,7 +145,10 @@ shows its tab; New chat is an everyday chat.
 - **No popups**: rename a chat, project or subject right where its name is (double-click it, or the title above the chat); questions like "Delete …?" and notices appear in a bar inside the window.
 - **Fonts**: Inter (bundled, like ChatGPT; the default), Segoe UI Variable, Sitka, Bahnschrift or Calibri, in four text sizes.
 - **Themes** (Settings → App → Window → Theme): Moonlit frost, Crimson moon, Jade grove, Lunar gold, Violet
-  dusk, Midnight ink, and two light ones, Snowfield and Blossom day. The whole window changes at once.
+  dusk, Midnight ink, Graphite (ChatGPT's neutral greys, with her crimson kept), and two light ones, Snowfield and
+  Blossom day. The whole window changes at once.
+- **Laid out like ChatGPT:** the conversation sits on a rounded panel beside the sidebar, in a centred reading
+  column, with pill-shaped messages of yours, her replies as plain text, and a large rounded message box.
 - Lives in the **system tray** when closed (Quit from there); in Windows Search / Start as **Jingliu**.
 - **Start with Windows** (quietly, in the tray) and **gentle check-ins** (off by default: a greeting
   that fits the time of day, and a nudge to rest after about three hours) in Settings → App. Like
