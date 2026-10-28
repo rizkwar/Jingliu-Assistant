@@ -1,6 +1,9 @@
-"""Moonlit frost theme: Jingliu's palette of night navy, glacial blue, silver and a crimson accent."""
+"""Moonlit frost theme: Jingliu's palette of night navy, glacial blue, silver and a crimson accent, and the
+other themes made from it."""
+import colorsys
 from pathlib import Path
 import random
+import re
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
@@ -26,7 +29,7 @@ ICONS = {
     'handsfree': '', 'memories': '', 'context': '', 'pause': '', 'play': '',
     'moon': '', 'attach': '', 'close': '', 'document': '', 'image': '',
     'delete': '', 'clock': '', 'back': '', 'rename': '', 'screen': '',
-    'compose': '', 'sidebar': '', 'search': '', 'pin': '', 'copy': '',
+    'compose': '', 'sidebar': '', 'search': '', 'pin': '', 'copy': '', 'code': '',
     'chevron': '', 'shield': '', 'bell': '', 'quote': '',
     'tool': '', 'folder': '', 'project': '', 'open': '', 'plug': '',
     'study': '', 'cards': '', 'timer': '', 'quiz': '', 'idea': '', 'notes': '',
@@ -140,8 +143,38 @@ QLabel#memoryText {{ font-size: 12px; color: #cfe0f6; }}
 QPushButton#memoryUndo {{ background: transparent; border: none; color: {ICE}; font-size: 12px; padding: 2px 8px; }}
 QPushButton#memoryUndo:hover {{ color: {FROST}; text-decoration: underline; }}
 QLabel#speaker {{ color: {ICE}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
-QLabel#body {{ font-size: 15px; selection-background-color: #2f5487; }}
+QLabel#body {{ font-size: 15.5px; selection-background-color: #2f5487; }}
+QFrame#codeBlock {{ background: rgba(168, 212, 255, 0.055); border: 1px solid rgba(168, 212, 255, 0.07);
+    border-radius: 18px; }}
+QLabel#codeMark {{ font-family: 'Cascadia Mono', 'Consolas'; font-size: 12px; font-weight: 700; color: {FROST}; }}
+QLabel#codeTitle {{ font-family: 'Segoe UI Variable Text', 'Segoe UI'; color: {FROST}; font-size: 13px; font-weight: 600;
+    padding-left: 4px; }}
+QPushButton#codeAction {{ font-family: '{ICON_FONT}'; background: transparent; border: none; color: {MUTED};
+    font-size: 14px; padding: 0; border-radius: 8px; min-width: 30px; max-width: 30px; min-height: 28px; max-height: 28px; }}
+QPushButton#codeAction:hover {{ background: rgba(168, 212, 255, 0.10); color: {FROST}; }}
+QPushButton#codeAction:checked {{ color: {ICE}; background: rgba(168, 212, 255, 0.10); }}
+QPushButton#jumpLatest {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {FROST}; padding: 0;
+    background: rgba(18, 29, 52, 0.96); border: 1px solid rgba(168, 212, 255, 0.22); border-radius: 18px; }}
+QPushButton#jumpLatest:hover {{ background: rgba(30, 46, 78, 0.98); border-color: rgba(168, 212, 255, 0.40); }}
+QTextBrowser#prose {{ background: transparent; border: none; padding: 0; font-size: 16px; color: {FROST};
+    selection-background-color: #2f5487; }}
+QTextBrowser#code {{ background: transparent; border: none; padding: 0; font-family: 'Cascadia Mono', 'Consolas';
+    font-size: 13.5px; color: #d6e6ff; selection-background-color: #2f5487; }}
+QTextBrowser#code QScrollBar:horizontal {{ height: 8px; background: transparent; margin: 0 12px 4px 12px; }}
+QTextBrowser#code QScrollBar::handle:horizontal {{ background: rgba(168, 212, 255, 0.16); border-radius: 3px; min-width: 40px; }}
+QTextBrowser#code QScrollBar::add-line:horizontal, QTextBrowser#code QScrollBar::sub-line:horizontal,
+QTextBrowser#code QScrollBar::add-page:horizontal, QTextBrowser#code QScrollBar::sub-page:horizontal {{ width: 0; background: none; }}
 QLabel#notice {{ color: {MUTED}; font-size: 12px; font-style: italic; }}
+QLineEdit#inlineEdit {{ background: #0f1a30; border: 1px solid {ICE_DEEP}; border-radius: 7px; padding: 2px 8px;
+    font-size: 14px; color: {FROST}; selection-background-color: #2f5487; }}
+QLineEdit#inlineEdit[invalid="true"] {{ border-color: {CRIMSON}; background: #2a1420; }}
+QFrame#inlineBar {{ background: rgba(18, 29, 52, 0.96); border: 1px solid rgba(168, 212, 255, 0.16); border-radius: 12px; }}
+QFrame#inlineBar[tone="ask"] {{ border-color: rgba(230, 194, 140, 0.40); }}
+QFrame#inlineBar[tone="error"] {{ border-color: rgba(226, 86, 110, 0.45); background: rgba(46, 18, 30, 0.96); }}
+QFrame#inlineBar[tone="done"] {{ border-color: rgba(127, 209, 185, 0.45); }}
+QLabel#inlineBarText {{ font-size: 13px; color: {FROST}; }}
+QPushButton#barClose {{ background: transparent; border: none; color: {MUTED}; padding: 4px 8px; }}
+QPushButton#barClose:hover {{ color: {FROST}; }}
 QLabel#error {{ color: #f3b3bd; font-size: 13px; }}
 QLabel#note {{ color: {MUTED}; font-size: 12px; background: transparent; border: none; padding: 2px 12px; }}
 QLabel#note[tone="warning"] {{ color: {AMBER}; border-color: rgba(230, 194, 140, 0.30); }}
@@ -313,6 +346,120 @@ QLabel#typeScore {{ color: {AMBER}; font-size: 13px; padding: 0 6px; }}
 """
 
 
+# Themes: her moonlit palette, recoloured. A dark theme turns her icy blues to another hue; a light theme
+# turns night into day (light becomes dark and dark light), so every colour of the app follows at once.
+# (name, hue of her blues in degrees or None to keep them, their saturation, light)
+THEMES = {
+    'moonlit': ('Moonlit frost', None, 1.0, False),
+    'crimson': ('Crimson moon', 348, 0.85, False),
+    'jade': ('Jade grove', 162, 0.8, False),
+    'gold': ('Lunar gold', 38, 0.75, False),
+    'violet': ('Violet dusk', 268, 0.9, False),
+    'ink': ('Midnight ink', None, 0.12, False),
+    'snow': ('Snowfield (light)', None, 1.0, True),
+    'blossom': ('Blossom day (light)', 340, 0.7, True),
+}
+_theme = THEMES['moonlit']
+_COLOUR = re.compile(r'#([0-9a-fA-F]{6})\b|(rgba?\(\s*)(\d+)\s*,\s*(\d+)\s*,\s*(\d+)')
+
+
+def set_theme(key):
+    """Chooses the theme for what is drawn from now on (unknown keys keep the moonlit one)."""
+    global _theme
+    _theme = THEMES.get(key, THEMES['moonlit'])
+
+
+def is_light():
+    return _theme[3]
+
+
+def _recolour(red, green, blue):
+    _, hue, saturation, light = _theme
+    h, l, s = colorsys.rgb_to_hls(red / 255, green / 255, blue / 255)
+    if 175 / 360 <= h <= 265 / 360 or s < .12:  # Her blues, and the near-greys among them.
+        if hue is not None:
+            h = (hue / 360 + h - 215 / 360) % 1
+        s = min(1, s * saturation)
+    if light:
+        l = 1 - l * .97
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return round(r * 255), round(g * 255), round(b * 255)
+
+
+def tone(text):
+    """The colours in `text` (a stylesheet, rich text, or one '#rrggbb'), in the current theme."""
+    if _theme is THEMES['moonlit']:
+        return text
+
+    def swap(match):
+        if match.group(1):
+            value = match.group(1)
+            r, g, b = _recolour(int(value[:2], 16), int(value[2:4], 16), int(value[4:], 16))
+            return f'#{r:02x}{g:02x}{b:02x}'
+        r, g, b = _recolour(int(match.group(3)), int(match.group(4)), int(match.group(5)))
+        return f'{match.group(2)}{r}, {g}, {b}'
+    return _COLOUR.sub(swap, text)
+
+
+def colour(red, green, blue, alpha=255):
+    """A QColor in the current theme."""
+    return QColor(*_recolour(red, green, blue), alpha) if _theme is not THEMES['moonlit'] else QColor(red, green, blue, alpha)
+
+
+# Fonts: her text in one of these families, at one of these sizes. Inter (bundled, open font licence) is the
+# clean, even face ChatGPT-like apps use; the others come with Windows.
+FONTS = {
+    'inter': ('Inter: clean, like ChatGPT', 'Inter'),
+    'segoe': ('Segoe UI Variable: Windows', 'Segoe UI Variable Text'),
+    'sitka': ('Sitka: a book to read', 'Sitka Text'),
+    'bahnschrift': ('Bahnschrift: crisp and geometric', 'Bahnschrift'),
+    'calibri': ('Calibri: soft and round', 'Calibri'),
+}
+SIZES = {'compact': ('Compact', .93), 'default': ('Default', 1.0), 'large': ('Large', 1.08), 'larger': ('Larger', 1.16)}
+_font = ('Inter', 1.0)
+_loaded = False
+
+
+def load_fonts():
+    """Makes the bundled fonts available (once, after the application exists)."""
+    global _loaded
+    if _loaded:
+        return
+    from PySide6.QtGui import QFontDatabase
+    for path in sorted((Path(ASSETS) / 'fonts').glob('*.ttf')):
+        QFontDatabase.addApplicationFont(str(path))
+    _loaded = True
+
+
+def set_font(key, size='default'):
+    global _font
+    load_fonts()
+    family = FONTS.get(key, FONTS['inter'])[1]
+    _font = (family, SIZES.get(size, SIZES['default'])[1])
+
+
+def font_family():
+    return _font[0]
+
+
+def _fonts(sheet):
+    family, scale = _font
+    if family != 'Segoe UI Variable Text':
+        sheet = sheet.replace("font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold';",
+                              f"font-family: '{family}', 'Segoe UI'; font-weight: 600;")
+        sheet = sheet.replace("font-family: 'Segoe UI Variable Display Light', 'Segoe UI Light';",
+                              f"font-family: '{family}', 'Segoe UI'; font-weight: 300;")
+        sheet = sheet.replace("'Segoe UI Variable Text', 'Segoe UI'", f"'{family}', 'Segoe UI'")
+    if scale != 1.0:
+        sheet = re.sub(r'font-size: (\d+(?:\.\d+)?)px', lambda m: f'font-size: {float(m.group(1)) * scale:.1f}px', sheet)
+    return sheet
+
+
+def style():
+    """The app's stylesheet in the current theme and font."""
+    return _fonts(tone(STYLE))
+
+
 def icon_button(glyph, tooltip, name='icon', checkable=False):
     button = QPushButton(ICONS[glyph])
     button.setObjectName(name)
@@ -332,8 +479,29 @@ def glyph_icon(glyph, color=ICE, size=32):
     font = QFont(ICON_FONT)
     font.setPixelSize(int(size * 0.62))
     painter.setFont(font)
-    painter.setPen(QColor(color))
+    painter.setPen(QColor(tone(color)))
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, ICONS[glyph])
+    painter.end()
+    return QIcon(pixmap)
+
+
+def badge_icon(glyph, count, color='#ffd38a', size=32):
+    """A glyph with a small count in its corner, like an unread number."""
+    pixmap = glyph_icon(glyph, color, size).pixmap(size, size)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    radius = size * .25
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(tone(color)))
+    painter.drawEllipse(QPointF(size - radius, radius), radius, radius)
+    font = QFont()
+    font.setPixelSize(int(radius * 1.45))
+    font.setBold(True)
+    painter.setFont(font)
+    painter.setPen(QColor(tone('#0b1426')))
+    painter.drawText(QRectF(size - 2 * radius, 0, 2 * radius, 2 * radius), Qt.AlignmentFlag.AlignCenter,
+                     str(count) if count < 10 else '9+')
     painter.end()
     return QIcon(pixmap)
 
@@ -388,15 +556,15 @@ class NightSky(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         width, height = self.width(), self.height()
         sky = QLinearGradient(0, 0, 0, height)
-        sky.setColorAt(0, QColor(NIGHT_HIGH))
-        sky.setColorAt(0.55, QColor('#090f1d'))
-        sky.setColorAt(1, QColor(NIGHT))
+        sky.setColorAt(0, QColor(tone(NIGHT_HIGH)))
+        sky.setColorAt(0.55, QColor(tone('#090f1d')))
+        sky.setColorAt(1, QColor(tone(NIGHT)))
         painter.fillRect(self.rect(), sky)
         centre = QPointF(width * 0.86, height * 0.06)
         halo = QRadialGradient(centre, max(width, height) * 0.55)
-        halo.setColorAt(0, QColor(168, 212, 255, 30))
-        halo.setColorAt(0.35, QColor(111, 168, 232, 10))
-        halo.setColorAt(1, QColor(111, 168, 232, 0))
+        halo.setColorAt(0, colour(168, 212, 255, 30))
+        halo.setColorAt(0.35, colour(111, 168, 232, 10))
+        halo.setColorAt(1, colour(111, 168, 232, 0))
         painter.fillRect(self.rect(), QBrush(halo))
         radius = min(width, height) * 0.09
         moon = QPainterPath()
@@ -404,10 +572,10 @@ class NightSky(QWidget):
         cut = QPainterPath()
         cut.addEllipse(centre + QPointF(radius * 0.42, -radius * 0.22), radius * 0.92, radius * 0.92)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(214, 232, 255, 12))
+        painter.setBrush(colour(214, 232, 255, 12))
         painter.drawPath(moon.subtracted(cut))
         for x, y, size, alpha in self._motes[::2]:
-            painter.setBrush(QColor(200, 225, 255, alpha * 2 // 3))
+            painter.setBrush(colour(200, 225, 255, alpha * 2 // 3) if not is_light() else colour(120, 150, 200, alpha // 3))
             painter.drawEllipse(QPointF(x * width, y * height), size * .8, size * .8)
         painter.end()
 
@@ -427,10 +595,10 @@ def style_title_bar(window):
     import ctypes
     hwnd = ctypes.c_void_p(int(window.winId()))
     dwm = ctypes.windll.dwmapi
-    for attribute, value in ((20, 1),                          # Immersive dark mode
-                             (35, _colorref(NIGHT_HIGH)),      # Caption colour
-                             (36, _colorref("#cfe3fb")),       # Caption text
-                             (34, _colorref("#22324f"))):      # Border
+    for attribute, value in ((20, 0 if is_light() else 1),    # Immersive dark mode
+                             (35, _colorref(tone(NIGHT_HIGH))),  # Caption colour
+                             (36, _colorref(tone("#cfe3fb"))),   # Caption text
+                             (34, _colorref(tone("#22324f")))):  # Border
         data = ctypes.c_int(value)
         try:
             dwm.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(data), ctypes.sizeof(data))
@@ -477,6 +645,10 @@ class WindowChrome(QObject):
 
 
 def display_font(pixels, light=True):
-    font = QFont('Segoe UI Variable Display Light' if light else 'Segoe UI Variable Display')
-    font.setPixelSize(pixels)
+    if font_family() == 'Segoe UI Variable Text':
+        font = QFont('Segoe UI Variable Display Light' if light else 'Segoe UI Variable Display')
+    else:
+        font = QFont(font_family())
+        font.setWeight(QFont.Weight.Light if light else QFont.Weight.Normal)
+    font.setPixelSize(round(pixels * _font[1]))
     return font

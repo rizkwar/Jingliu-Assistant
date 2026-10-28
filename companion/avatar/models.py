@@ -16,6 +16,74 @@ from ..core.config import PROJECT_ROOT
 MAX_FILE = 64 * 1024 * 1024
 MAX_BUNDLE = 256 * 1024 * 1024
 CURRENT_MODEL = {'id': 'current', 'name': 'AI portrait (current)', 'kind': 'mesh'}
+# Must match accessories.js.
+GLASSES = {'style': ('teacher', 'round', 'rectangle', 'oval', 'halfrim'),
+           'frame': ('silver', 'gold', 'black', 'ice', 'crimson'),
+           'lens': ('clear', 'moon', 'rose', 'dark')}
+
+
+FIT = {'scale': (.7, 1.4), 'x': (-.5, .5), 'y': (-.5, .5)}  # Nudging an outfit into place.
+
+
+def _outfit_id(value):
+    return isinstance(value, str) and len(value) == 16 and all(c in '0123456789abcdef' for c in value)
+
+
+def accessories(values):
+    """Checked accessories: {"glasses": {"on": bool, "style", "frame", "lens"}, "outfit": id or ""};
+    ValueError otherwise."""
+    if not isinstance(values, dict) or values.keys() - {'glasses', 'outfit'}:
+        raise ValueError('Invalid model accessories.')
+    result = {}
+    glasses = values.get('glasses')
+    if glasses is not None:
+        if (not isinstance(glasses, dict) or glasses.keys() - {'on', *GLASSES} or type(glasses.get('on', False)) is not bool
+                or any(glasses.get(key, options[0]) not in options for key, options in GLASSES.items())):
+            raise ValueError('Invalid glasses settings.')
+        result['glasses'] = {'on': glasses.get('on', False),
+                             **{key: glasses.get(key, options[0]) for key, options in GLASSES.items()}}
+    outfit = values.get('outfit', '')
+    if outfit != '' and not _outfit_id(outfit):
+        raise ValueError('Invalid outfit choice.')
+    if outfit:
+        result['outfit'] = outfit
+    return result
+
+
+def outfits(values):
+    """Checked outfits of a model: [{"id", "name", "eyes": [[x, y], [x, y]], "fit": {"scale", "x", "y"}}]."""
+    if not isinstance(values, list) or len(values) > 32:
+        raise ValueError('Invalid outfit list.')
+    result = []
+    for outfit in values:
+        fit = outfit.get('fit', {}) if isinstance(outfit, dict) else None
+        eyes = outfit.get('eyes') if isinstance(outfit, dict) else None
+        if (not isinstance(outfit, dict) or outfit.keys() - {'id', 'name', 'eyes', 'fit'} or not _outfit_id(outfit.get('id'))
+                or not isinstance(outfit.get('name'), str) or not 1 <= len(outfit['name']) <= 80
+                or not isinstance(eyes, list) or len(eyes) != 2
+                or any(not isinstance(eye, list) or len(eye) != 2 or any(type(v) not in {int, float} or not math.isfinite(v)
+                                                                         or abs(v) > 100000 for v in eye) for eye in eyes)
+                or not isinstance(fit, dict) or fit.keys() - FIT.keys()
+                or any(type(fit.get(key, 0 if key != 'scale' else 1)) not in {int, float}
+                       or not low <= fit.get(key, 0 if key != 'scale' else 1) <= high for key, (low, high) in FIT.items())):
+            raise ValueError('Invalid outfit entry.')
+        result.append({'id': outfit['id'], 'name': outfit['name'], 'eyes': [list(map(float, eye)) for eye in eyes],
+                       'fit': {key: float(fit.get(key, 0 if key != 'scale' else 1)) for key in FIT}})
+    return result
+
+
+def worn(model):
+    """What she actually wears: a model's accessories, without glasses while her blindfold is on. The
+    outfit comes with what the avatar needs to put it on: its picture and where her eyes are in it."""
+    chosen = accessories(model.get('accessories', {}))
+    if model.get('blindfold') and chosen.get('glasses', {}).get('on'):
+        chosen['glasses'] = {**chosen['glasses'], 'on': False}
+    outfit = next((o for o in outfits(model.get('outfits', [])) if o['id'] == chosen.get('outfit')), None)
+    chosen.pop('outfit', None)
+    if outfit:
+        chosen['outfit'] = {'id': outfit['id'], 'url': f"model/outfits/{outfit['id']}.png",
+                            'eyes': outfit['eyes'], 'fit': outfit['fit']}
+    return chosen
 
 
 def _relative(value):
@@ -215,6 +283,8 @@ class AvatarModels:
                     or len(model.get('blindfold_parameter', '')) > 80
                     or type(model.get('blindfold', False)) is not bool):
                 raise ValueError('Invalid model accessory control.')
+            accessories(model.get('accessories', {}))
+            outfits(model.get('outfits', []))
         return [dict(CURRENT_MODEL), *deepcopy(models)]
 
     def selected(self, profile):
@@ -252,6 +322,96 @@ class AvatarModels:
                 self._save(document)
                 return model
         raise ValueError('This model has no configured blindfold control.')
+
+    def _live2d(self, document, profile, model_id):
+        for model in document['characters'].get(character_key(profile), {}).get('models', []):
+            if model['id'] == model_id and model['kind'] == 'live2d':
+                return model
+        raise ValueError('Accessories and outfits are available on Live2D models.')
+
+    def set_accessories(self, profile, model_id, values):
+        """What she wears over a Live2D model (glasses, an outfit), remembered with that model. Only the
+        given kinds change: setting her glasses keeps her outfit."""
+        accessories(values)
+        self.models(profile)
+        document = self._load()
+        model = self._live2d(document, profile, model_id)
+        chosen = {**model.get('accessories', {}), **values}  # An outfit of "" takes hers off.
+        if chosen.get('outfit') and chosen['outfit'] not in {o['id'] for o in outfits(model.get('outfits', []))}:
+            raise ValueError('Choose one of her outfits.')
+        model['accessories'] = accessories(chosen)
+        self._save(document)
+        return model
+
+    def wear_outfit(self, profile, model_id, outfit_id):
+        """Puts on one of her outfits, or her own clothes again ("")."""
+        self.models(profile)
+        document = self._load()
+        model = self._live2d(document, profile, model_id)
+        if outfit_id and outfit_id not in {o['id'] for o in outfits(model.get('outfits', []))}:
+            raise ValueError('Choose one of her outfits.')
+        chosen = dict(model.get('accessories', {}))
+        chosen.pop('outfit', None)
+        if outfit_id:
+            chosen['outfit'] = outfit_id
+        model['accessories'] = accessories(chosen)
+        self._save(document)
+        return model
+
+    def add_outfit(self, profile, model_id, picture, name):
+        """Makes an outfit from a picture of her wearing it, and puts it on. Raises ValueError when the
+        picture cannot be used (see outfits.prepare)."""
+        from PySide6.QtGui import QImage
+        from .outfits import prepare
+        name = ' '.join(str(name).split())[:80] or 'Outfit'
+        self.models(profile)
+        document = self._load()
+        model = self._live2d(document, profile, model_id)
+        current = outfits(model.get('outfits', []))
+        if len(current) >= 32:
+            raise ValueError('She has 32 outfits already. Remove one first.')
+        path = Path(picture)
+        if not path.is_file() or path.stat().st_size > MAX_FILE:
+            raise ValueError('Choose a picture file under 64 MB.')
+        texture, eyes = prepare(QImage(str(path)))
+        folder = self.directory / model_id / 'outfits'
+        folder.mkdir(parents=True, exist_ok=True)
+        temporary = folder / 'incoming.png'
+        if not texture.save(str(temporary), 'PNG'):
+            raise ValueError('The outfit could not be saved.')
+        outfit_id = hashlib.sha256(temporary.read_bytes()).hexdigest()[:16]
+        os.replace(temporary, folder / f'{outfit_id}.png')
+        entry = {'id': outfit_id, 'name': name, 'eyes': [list(eye) for eye in eyes], 'fit': {'scale': 1.0, 'x': 0.0, 'y': 0.0}}
+        model['outfits'] = [o for o in current if o['id'] != outfit_id] + [entry]
+        model['accessories'] = accessories({**model.get('accessories', {}), 'outfit': outfit_id})
+        self._save(document)
+        return model
+
+    def fit_outfit(self, profile, model_id, outfit_id, fit):
+        """Nudges an outfit into place: {"scale", "x", "y"} (x and y in eye spacings)."""
+        self.models(profile)
+        document = self._load()
+        model = self._live2d(document, profile, model_id)
+        current = outfits(model.get('outfits', []))
+        for outfit in current:
+            if outfit['id'] == outfit_id:
+                outfit['fit'] = {**outfit['fit'], **fit}
+                model['outfits'] = outfits(current)
+                self._save(document)
+                return model
+        raise ValueError('Choose one of her outfits.')
+
+    def remove_outfit(self, profile, model_id, outfit_id):
+        self.models(profile)
+        document = self._load()
+        model = self._live2d(document, profile, model_id)
+        model['outfits'] = [o for o in outfits(model.get('outfits', [])) if o['id'] != outfit_id]
+        if model.get('accessories', {}).get('outfit') == outfit_id:
+            model['accessories'] = {k: v for k, v in model['accessories'].items() if k != 'outfit'}
+        self._save(document)
+        if _outfit_id(outfit_id):
+            (self.directory / model_id / 'outfits' / f'{outfit_id}.png').unlink(missing_ok=True)
+        return model
 
     def model_path(self, model):
         filename = 'layered.json' if model['kind'] == 'layered' else 'model3.json'

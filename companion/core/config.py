@@ -53,6 +53,10 @@ class Settings:
     check_ins: bool = False
     check_in_greeted: str = ""
     message_style: str = "plain"
+    theme: str = "moonlit"
+    font: str = "inter"
+    font_size: str = "default"
+    text_rendering: str = "smooth"
     sidebar_tab: str = "chats"
     last_conversation: str = ""
     chat_tools: str = field(default="", repr=False)  # --mcp-config JSON of servers allowed in conversation

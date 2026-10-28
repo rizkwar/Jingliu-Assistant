@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout,
 )
 
+from .inline import ask, tell
 from .theme import icon_button
 
 
@@ -273,7 +274,7 @@ class HistoryDialog(QDialog):
         try:
             self.store.rename_conversation(conversation_id, name)
         except (ValueError, sqlite3.Error):
-            QMessageBox.warning(self, "Could not rename", "The name could not be saved. Please try again.")
+            tell(self, "Could not rename", "The name could not be saved. Please try again.", "error")
             return
         # After the editor has finished handling its own signal.
         QTimer.singleShot(0, self, lambda: self.refresh(keep=conversation_id))
@@ -291,16 +292,16 @@ class HistoryDialog(QDialog):
         title = self.items.item(index).data(Qt.ItemDataRole.ToolTipRole) if ids else "this conversation"
         extra = (" It is the conversation open now, so a fresh one takes its place."
                  if conversation_id == self.current_id else "")
-        if QMessageBox.question(self, "Delete conversation",
-                                f"Delete “{title}” and all its messages? This cannot be undone.{extra} "
-                                "Saved memories are kept.") != QMessageBox.StandardButton.Yes:
-            return
+        ask(self, "Delete conversation", f"Delete “{title}” and all its messages? This cannot be undone.{extra} "
+            "Saved memories are kept.", "Delete", lambda: self._delete_now(conversation_id, ids, index))
+
+    def _delete_now(self, conversation_id, ids, index):
         # The next conversation keeps the selection, so clearing out several is quick.
         following = (ids[index + 1:] + ids[:index])[:1]
         try:
             self.store.delete_conversation(conversation_id)
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not delete", "The database could not be updated. Please try again.")
+            tell(self, "Could not delete", "The database could not be updated. Please try again.", "error")
             return
         self.refresh(keep=following[0] if following else None)
 
@@ -376,19 +377,22 @@ class MemoryDialog(QDialog):
                     self.items.setCurrentRow(index)
                     break
         except (ValueError, sqlite3.Error) as exc:
-            QMessageBox.warning(self, "Could not save memory", str(exc) if isinstance(exc, ValueError) else "The database could not be updated. Please try again.")
+            tell(self, "Could not save memory", str(exc) if isinstance(exc, ValueError) else "The database could not be updated. Please try again.", "error")
 
     @Slot()
     def _delete(self):
         if self.memory_id is None:
             return
-        if QMessageBox.question(self, "Delete memory", "Delete this saved memory? Conversation messages are kept separately.") != QMessageBox.StandardButton.Yes:
-            return
+        memory_id = self.memory_id
+        ask(self, "Delete memory", "Delete this saved memory? Conversation messages are kept separately.", "Delete",
+            lambda: self._delete_now(memory_id))
+
+    def _delete_now(self, memory_id):
         try:
-            self.store.delete_memory(self.memory_id)
+            self.store.delete_memory(memory_id)
             self.refresh()
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not delete", "The database could not be updated. Please try again.")
+            tell(self, "Could not delete", "The database could not be updated. Please try again.", "error")
 
 
 class ReminderDialog(QDialog):
@@ -459,7 +463,7 @@ class ReminderDialog(QDialog):
         try:
             self.store.delete_reminder(reminder_id)
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not remove", "The database could not be updated. Please try again.")
+            tell(self, "Could not remove", "The database could not be updated. Please try again.", "error")
             return
         self.refresh()
 

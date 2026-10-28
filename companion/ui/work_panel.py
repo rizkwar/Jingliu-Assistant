@@ -13,6 +13,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
+from .theme import font_family
+
 LABELS = {"start": "Working", "think": "Thinking", "read": "Reading", "type": "Writing", "command": "Running",
           "look": "Using the screen", "wait": "Waiting for you", "done": "Done", "failed": "Stopped"}
 SAMPLES = {"start": "Tidy the Downloads folder", "think": "Planning how to sort them…",
@@ -48,11 +50,11 @@ class WorkPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(33)
         self.timer.timeout.connect(self._tick)
-        self.label_font = QFont("Segoe UI Variable Text")
+        self.label_font = QFont(font_family())
         self.label_font.setPixelSize(10)
         self.label_font.setWeight(QFont.Weight.DemiBold)
         self.label_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
-        self.step_font = QFont("Segoe UI Variable Text")
+        self.step_font = QFont(font_family())
         self.step_font.setPixelSize(12)
         self.hide()
 

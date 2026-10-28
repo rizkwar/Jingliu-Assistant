@@ -361,10 +361,8 @@ class WindowTaskTests(unittest.TestCase):
         card = self.window._task_card
         self.assertTrue(card.undo_button.isVisibleTo(card))
         asked = []
-        def question(parent, title, text, *rest):
-            asked.append(text)
-            return QMessageBox.StandardButton.Yes
-        with patch.object(QMessageBox, "question", side_effect=question):
+        with patch("companion.ui.inline.InlineBar.ask",
+                   side_effect=lambda text, action, on_yes, *a, **k: (asked.append(text), on_yes())):
             card.undo_button.click()
         self.assertIn("move 1 item back", asked[0])
         self.assertIn("cannot reverse 1 command", asked[0])
@@ -393,10 +391,8 @@ class WindowTaskTests(unittest.TestCase):
         from PySide6.QtWidgets import QMessageBox
         work, journal = self.saved_task()
         asked = []
-        def question(parent, title, text, *rest):
-            asked.append(text)
-            return QMessageBox.StandardButton.Yes
-        with patch.object(QMessageBox, "question", side_effect=question):
+        with patch("companion.ui.inline.InlineBar.ask",
+                   side_effect=lambda text, action, on_yes, *a, **k: (asked.append(text), on_yes())):
             self.window._queue_cues([(0, "undotask")])  # "Undo that" in conversation.
             self.window._apply_memory_actions()
             self.app.processEvents()
@@ -416,7 +412,7 @@ class WindowTaskTests(unittest.TestCase):
         row = dialog.items.itemWidget(dialog.items.item(0))
         self.assertIn("move 1 item back", row.findChildren(type(dialog.empty))[1].text())
         dialog.undo_requested.connect(lambda j: self.window._undo_task(None, j) or dialog.refresh())
-        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+        with patch("companion.ui.inline.InlineBar.ask", side_effect=lambda text, action, on_yes, *a, **k: on_yes()):
             row.findChild(QPushButton).click()
         self.assertTrue((work / "shot.png").exists())
         self.assertEqual(dialog.items.count(), 1)  # Still listed, now marked Undone without a button.

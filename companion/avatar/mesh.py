@@ -122,6 +122,7 @@ class RendererBridge(QObject):
     qualityChanged = Signal(bool)
     framingChanged = Signal(str)
     appearanceChanged = Signal(str)
+    accessoriesChanged = Signal(str)
     lifeChanged = Signal(int, int)
     gestureRequested = Signal(str, int)
     workChanged = Signal(str, str, int)
@@ -162,7 +163,7 @@ class RendererBridge(QObject):
 class MeshDesktopAvatar(DesktopAvatar):
     preview_changed = Signal(bool, str)
 
-    def __init__(self, path, *, kind='mesh', appearance=None):
+    def __init__(self, path, *, kind='mesh', appearance=None, accessories=None):
         super().__init__()
         self.kind = kind
         self.assets = None
@@ -177,6 +178,7 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._hd = True
         self._framing = 'portrait'
         self._appearance = dict(appearance or {})
+        self._accessories = dict(accessories or {})
         self._cursor_attention = True
         self._gaze = 100
         self._hair = 45
@@ -280,6 +282,7 @@ class MeshDesktopAvatar(DesktopAvatar):
             self.set_hd(self._hd)
             self.set_framing(self._framing)
             self.set_appearance(self._appearance)
+            self.set_accessories(self._accessories)
             self.set_attention_controls(self._cursor_attention, self._gaze, self._hair)
             self.set_sleep_delay(self._sleep_minutes)
             self._sync_timer()
@@ -503,6 +506,13 @@ class MeshDesktopAvatar(DesktopAvatar):
         self._appearance = dict(values)
         if self.ready and not self.failed and not self._disposed:
             self.bridge.appearanceChanged.emit(json.dumps(self._appearance))
+
+    def set_accessories(self, values):
+        """What she wears over her model, e.g. {"glasses": {"on": True, "style": "teacher", ...}} (Live2D)."""
+        import json
+        self._accessories = dict(values)
+        if self.ready and not self.failed and not self._disposed:
+            self.bridge.accessoriesChanged.emit(json.dumps(self._accessories))
 
     def set_attention_controls(self, enabled, gaze, hair):
         self._cursor_attention = bool(enabled)

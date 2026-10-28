@@ -15,6 +15,7 @@ let cursorEnabled=true, gaze=1, hair=.45, attentionSequence=-1, cursorSequence=-
 let previewSequence=-1, pointerAt=-1e9;
 let framing='portrait';
 let appearance={};
+let accessories={};
 let sleepMinutes=5, lifeSequence=-1, gestureSequence=-1, lifeState='awake';
 const canvas = document.querySelector('canvas');
 const zzz = document.getElementById('zzz');
@@ -56,6 +57,9 @@ function reportShape(){
 }
 bridge.appearanceChanged.connect(value=>{
   appearance=JSON.parse(value);avatar?.setAppearance?.(appearance);if(paused)render();
+});
+bridge.accessoriesChanged.connect(value=>{
+  accessories=JSON.parse(value);avatar?.setAccessories?.(accessories);if(paused)render();
 });
 function render(dt = 0) {
   if (avatar && visible && !document.hidden && !disposed) {
@@ -222,6 +226,7 @@ try {
     avatar=await loadLive2DAvatar(canvas,'./model/model3.json');
     avatar.setFraming(framing);
     avatar.setAppearance(appearance);
+    avatar.setAccessories(accessories);
     reportShape();
   }else if(config.kind==='layered'){
     const {loadLayeredAvatar}=await import('./layered-avatar.js');

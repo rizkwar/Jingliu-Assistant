@@ -1,6 +1,7 @@
 """Local character assignments and a read-only, allowlisted avatar asset service."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import re
 from pathlib import Path
 import secrets
 from threading import Thread
@@ -26,6 +27,18 @@ def assigned_avatar(profile, root=PROJECT_ROOT):
     return None
 
 
+_OUTFIT = re.compile(r'model/outfits/([0-9a-f]{16})\.png')
+
+
+def _outfit(folder, name):
+    """An outfit picture from the model's outfits folder: only its own content-named PNGs."""
+    match = _OUTFIT.fullmatch(name)
+    path = folder / f'{match.group(1)}.png' if match else None
+    if path is None or not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
+        return None
+    return path.read_bytes(), 'image/png'
+
+
 class AvatarAssets:
     def __init__(self, avatar, root=PROJECT_ROOT, bridge_script=b'', *, kind='mesh'):
         web = root / "companion/avatar/web"
@@ -45,6 +58,7 @@ class AvatarAssets:
         }
         assets = {'qwebchannel.js': (bridge_script, 'text/javascript; charset=utf-8'),
                   'renderer.json': (json.dumps({'kind': kind}).encode(), 'application/json')}
+        outfits = None
         if kind == 'mesh':
             paths['avatar.mavatar'] = (Path(avatar), 'application/octet-stream')
         elif kind == 'layered':
@@ -55,7 +69,7 @@ class AvatarAssets:
                 assets['model/' + name] = (body, 'image/png' if name.endswith('.png') else 'application/json')
         elif kind == 'live2d':
             from .models import live2d_bundle
-            for name in ('live2d-avatar.js', 'live2d-rig.js', 'live2d-physics.js', 'rig-preview.js'):
+            for name in ('live2d-avatar.js', 'live2d-rig.js', 'live2d-physics.js', 'rig-preview.js', 'accessories.js'):
                 paths[name] = (web / name, 'text/javascript; charset=utf-8')
             runtime = root / '.cache/avatar-runtimes/live2d'
             for name in ('pixi.min.js', 'unsafe-eval.min.js', 'cubism4.min.js', 'live2dcubismcore.min.js'):
@@ -64,6 +78,8 @@ class AvatarAssets:
                      '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
             for name, body in live2d_bundle(avatar).items():
                 assets['model/' + name] = (body, types.get(Path(name).suffix, 'application/octet-stream'))
+            # Her outfits are read when asked for, so one made while she is shown can be put on at once.
+            outfits = Path(avatar).parent / 'outfits'
         else:
             raise ValueError('Unsupported avatar renderer.')
         for name, (path, mime) in paths.items():
@@ -78,6 +94,8 @@ class AvatarAssets:
                 host = f"127.0.0.1:{handler.server.server_port}"
                 name = handler.path.removeprefix(prefix)
                 asset = assets.get(name) if handler.path.startswith(prefix) else None
+                if asset is None and outfits is not None and handler.path.startswith(prefix):
+                    asset = _outfit(outfits, name)
                 if handler.headers.get("Host") != host or asset is None:
                     handler.send_error(404)
                     return

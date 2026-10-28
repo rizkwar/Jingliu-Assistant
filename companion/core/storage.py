@@ -14,7 +14,7 @@ from ..chat.continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 PROJECT_COLORS = ("ice", "frost", "crimson", "amber", "jade", "violet")
 PROJECT_KINDS = ("project", "study")
 CARD_LIMITS = (500, 2000)  # Characters on the front and back of a flashcard.
@@ -109,6 +109,9 @@ class Store:
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
             if "project_id" not in columns:
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT NOT NULL DEFAULT ''")
+            if "kind" not in columns:  # "chat", or "reminders": the one session where she delivers reminders.
+                self.connection.execute("ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'")
+                self.connection.execute("ALTER TABLE conversations ADD COLUMN unread INTEGER NOT NULL DEFAULT 0")
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(projects)")}
             if "kind" not in columns:  # "project", or "study": a subject with flashcards and an exam date.
                 self.connection.execute("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
@@ -325,6 +328,23 @@ class Store:
             self.connection.execute("INSERT INTO conversations(id,title,created_at,updated_at,character_key) VALUES (?, ?, ?, ?, ?)",
                                     (conversation_id, "New conversation", timestamp, timestamp, character))
         return conversation_id
+
+    def reminder_conversation(self, character="", title="Reminders"):
+        """The session where she delivers reminders, apart from your chats: found, or made once."""
+        row = self.connection.execute("SELECT id FROM conversations WHERE kind='reminders' AND character_key=? "
+                                      "ORDER BY rowid LIMIT 1", (character,)).fetchone()
+        if row:
+            return row["id"]
+        conversation_id = self.create_conversation(character)
+        with self.connection:
+            self.connection.execute("UPDATE conversations SET kind='reminders', title=? WHERE id=?", (title, conversation_id))
+        return conversation_id
+
+    def mark_unread(self, conversation_id, count=1):
+        """Adds `count` unread messages; 0 marks the conversation read."""
+        with self.connection:
+            self.connection.execute("UPDATE conversations SET unread=CASE WHEN ?=0 THEN 0 ELSE unread+? END WHERE id=?",
+                                    (count, count, conversation_id))
 
     def delete_conversation(self, conversation_id):
         stored = [item for row in self.connection.execute(

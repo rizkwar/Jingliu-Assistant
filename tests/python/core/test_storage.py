@@ -20,6 +20,19 @@ class StoreTests(unittest.TestCase):
         self.store.save_turn(turn, answer, answer, "complete")
         return turn
 
+    def test_one_reminders_session_per_character_with_an_unread_count(self):
+        inbox = self.store.reminder_conversation("jingliu", "Reminders from Jingliu")
+        self.assertEqual(self.store.reminder_conversation("jingliu"), inbox)  # Found again, not made twice.
+        self.assertNotEqual(self.store.reminder_conversation("other"), inbox)
+        row = self.store.conversation(inbox)
+        self.assertEqual((row["kind"], row["title"], row["unread"]), ("reminders", "Reminders from Jingliu", 0))
+        self.assertEqual(self.store.conversation(self.conversation)["kind"], "chat")
+        self.store.mark_unread(inbox)
+        self.store.mark_unread(inbox, 2)
+        self.assertEqual(self.store.conversation(inbox)["unread"], 3)
+        self.store.mark_unread(inbox, 0)
+        self.assertEqual(self.store.conversation(inbox)["unread"], 0)
+
     def test_conversations_and_memories_survive_database_reopen(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "companion.sqlite3"
@@ -97,7 +110,7 @@ class StoreTests(unittest.TestCase):
             with closing(Store(path)) as migrated:
                 self.assertEqual(migrated.context(conversation)[0]["content"], "Keep the original question")
                 self.assertEqual(migrated.memories()[0]["content"], "Keep this memory")
-                self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 9)
+                self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 10)
                 migrated.save_summary(conversation, "Reviewed notes", turn[1])
             with closing(Store(path)) as reopened:
                 self.assertEqual(reopened.summary(conversation)["through_id"], turn[1])
@@ -190,4 +203,4 @@ class StoreTests(unittest.TestCase):
                 self.assertEqual([row["id"] for row in store.conversations("jingliu")], ["legacy"])
                 self.assertEqual([row["id"] for row in store.conversations("luna")], [second])
                 self.assertEqual(len(store.conversations()), 2)
-                self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 9)
+                self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 10)

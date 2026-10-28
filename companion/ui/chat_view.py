@@ -9,12 +9,14 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextBlock
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
-from .theme import ICONS, glyph_icon
+from .code_block import CodeBlock, segments
+from .prose import ProseView
+from .theme import ICONS, glyph_icon, tone
 
 _FEATURES = QTextDocument.MarkdownFeature(QTextDocument.MarkdownFeature.MarkdownDialectGitHub.value
                                           | QTextDocument.MarkdownFeature.MarkdownNoHTML.value)
 _BODY = re.compile(r'<body[^>]*>(.*)</body>', re.S)
-_MONO = "font-family:'Cascadia Mono','Consolas';"
+_MONO = "font-family:'Consolas';"  # On every Windows; rich text does not fall back along a list.
 
 
 def markdown_html(text):
@@ -28,9 +30,37 @@ def markdown_html(text):
     cursor.mergeBlockFormat(spacing)
     match = _BODY.search(document.toHtml())
     html = match.group(1) if match else ''
-    html = html.replace("font-family:'monospace';", _MONO + ' background-color:#0a1222; color:#cfe6ff;')
-    html = html.replace("font-family:'Courier New,courier';", _MONO + ' background-color:#0a1222; color:#cfe6ff;')
-    return html.replace('margin-top:12px;', 'margin-top:6px;')
+    # Inline code: a soft tint, like ChatGPT's, not a typewriter font.
+    html = html.replace("font-family:'monospace';", _MONO + _INLINE)
+    html = html.replace("font-family:'Courier New,courier';", _MONO + _INLINE)
+    html = html.replace(' color:#0000ff;', _LINK)  # Qt's default link blue is lost on the night sky.
+    html = _TABLE.sub(_table, html)
+    return tone(html.replace('margin-top:12px;', 'margin-top:6px;'))  # In the chosen theme.
+
+
+_TABLE = re.compile(r'<table[^>]*>(.*?)</table>', re.S)
+
+
+def _table(match):
+    """A table in the night palette: fine borders, roomy cells, and a tinted header row."""
+    rows = match.group(1).split('</tr>', 1)
+    head = rows[0].replace('<td', '<td bgcolor="#182742"').replace('<th', '<th bgcolor="#182742"')
+    return ('<table border="1" cellspacing="0" cellpadding="8" style="border-collapse:collapse; '
+            'border-color:#2c3f60; border-style:solid; margin-top:8px; margin-bottom:8px;">'
+            + head + ('</tr>' + rows[1] if len(rows) > 1 else '') + '</table>')
+
+
+_LINK = ' color:#8cc4ff; text-decoration: underline;'
+_INLINE = ' font-size:13px; background-color:#1a2842; color:#dcecff;'
+LINK_SCHEMES = {'http', 'https', 'mailto'}
+
+
+def open_link(url):
+    """Opens a link from her reply in your browser or mail app; anything else (files, scripts) is not opened."""
+    link = QUrl(url)
+    if link.scheme().lower() not in LINK_SCHEMES or not link.isValid():
+        return False
+    return QDesktopServices.openUrl(link)
 
 
 KIND_LABELS = {'image': 'IMAGE', 'pdf': 'PDF', 'text': 'FILE'}
@@ -121,15 +151,15 @@ class Bubble(QFrame):
             for item in self.attachments:
                 cards.addWidget(AttachmentCard(item, thumbnail=150), 0, Qt.AlignmentFlag.AlignRight)
             layout.addLayout(cards)
-        self.body = QLabel()
-        self.body.setObjectName('body')
-        self.body.setWordWrap(True)
-        self.body.setTextFormat(Qt.TextFormat.PlainText if role == 'user' else Qt.TextFormat.RichText)
-        self.body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.body.setCursor(Qt.CursorShape.IBeamCursor)
-        self.body.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.body.customContextMenuRequested.connect(self._menu)
+        self.link = ''
+        self.body = self._prose()
         layout.addWidget(self.body)
+        # The rest of her reply after its first paragraphs: code boxes, and the text between them.
+        self.parts = QVBoxLayout()
+        self.parts.setContentsMargins(0, 0, 0, 0)
+        self.parts.setSpacing(8)
+        self._parts = []
+        layout.addLayout(self.parts)
         self.notice = QLabel()
         self.notice.setObjectName('notice')
         self.notice.setWordWrap(True)
@@ -178,9 +208,44 @@ class Bubble(QFrame):
     def _copy(self):
         QGuiApplication.clipboard().setText(self.text)
 
-    def _menu(self, position):
-        selected = self.body.selectedText().strip()
+    def _prose(self):
+        """Her text (Markdown, set like ChatGPT's, see prose.py) or yours (a plain label): selectable, links
+        open, right-click menu."""
+        if self.role != 'user':
+            view = ProseView()
+            view.linkHovered.connect(lambda url, view=view: self._hover_link(url, view))
+            view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            view.customContextMenuRequested.connect(lambda position, view=view: self._menu(position, view))
+            return view
+        label = QLabel()
+        label.setObjectName('body')
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.TextFormat.PlainText if self.role == 'user' else Qt.TextFormat.RichText)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse
+                                      | Qt.TextInteractionFlag.LinksAccessibleByMouse
+                                      | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        label.setOpenExternalLinks(False)  # Opened by open_link, which only allows web and mail links.
+        label.linkActivated.connect(open_link)
+        label.linkHovered.connect(lambda url, label=label: self._hover_link(url, label))
+        label.setCursor(Qt.CursorShape.IBeamCursor)
+        label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        label.customContextMenuRequested.connect(lambda position, label=label: self._menu(position, label))
+        return label
+
+    def _hover_link(self, url, label=None):
+        """Shows where a link goes before it is clicked."""
+        self.link = url
+        (label or self.body).setToolTip(url)
+
+    def _menu(self, position, label=None):
+        label = label or self.body
+        selected = label.selectedText().strip()
         menu = QMenu(self)
+        if self.link:
+            link = self.link
+            menu.addAction(glyph_icon('open'), 'Open link', lambda: open_link(link))
+            menu.addAction(glyph_icon('copy'), 'Copy link', lambda: QGuiApplication.clipboard().setText(link))
+            menu.addSeparator()
         if selected:
             menu.addAction(glyph_icon('quote'), 'Quote in reply', lambda: self.quote.emit(selected))
             menu.addAction(glyph_icon('copy'), 'Copy', lambda: QGuiApplication.clipboard().setText(selected))
@@ -188,13 +253,38 @@ class Bubble(QFrame):
             menu.addAction(glyph_icon('copy'), 'Copy message', self._copy)
         if self.role != 'user' and self.text:
             menu.addAction(glyph_icon('speaker'), 'Read aloud', lambda: self.speak.emit(selected or self.text))
-        menu.exec(self.body.mapToGlobal(position))
+        menu.exec((label.viewport() if isinstance(label, ProseView) else label).mapToGlobal(position))
 
     def set_text(self, text):
         self.text = text
-        self.body.setText(text if self.role == 'user' else markdown_html(text))
-        self.body.setVisible(bool(text) or self.role != 'user')
-        self.fit()
+        if self.role == 'user':
+            self.body.setText(text)
+            self.body.setVisible(bool(text))
+            self.fit()
+            return
+        pieces = segments(text)
+        first = pieces.pop(0) if pieces and pieces[0][0] == 'text' else None
+        self.body.set_markdown(first[1] if first else '')
+        self.body.setVisible(bool(first) or not pieces)
+        # Pieces already shown are updated in place as she writes; only new ones are added.
+        for index, piece in enumerate(pieces):
+            widget = self._parts[index] if index < len(self._parts) else None
+            if widget is not None and isinstance(widget, CodeBlock) != (piece[0] == 'code'):
+                for old in self._parts[index:]:
+                    old.deleteLater()
+                del self._parts[index:]
+                widget = None
+            if widget is None:
+                widget = CodeBlock() if piece[0] == 'code' else self._prose()
+                self.parts.addWidget(widget)
+                self._parts.append(widget)
+            if piece[0] == 'code':
+                widget.set_code(piece[1], piece[2])
+            else:
+                widget.set_markdown(piece[1])
+        for old in self._parts[len(pieces):]:
+            old.deleteLater()
+        del self._parts[len(pieces):]
 
     def fit(self):
         """A wrapped label otherwise picks a narrow width: give a short message room for one line."""
@@ -205,7 +295,7 @@ class Bubble(QFrame):
         self.body.setMinimumWidth(max(0, min(longest + 4, limit)))
 
     def set_waiting(self, frame):
-        self.body.setText('<span style="color:#8fa3c2; letter-spacing:3px;">' + '●' * (frame % 3 + 1) + '</span>')
+        self.body.setText(tone('<span style="color:#8fa3c2; letter-spacing:3px;">') + '●' * (frame % 3 + 1) + '</span>')
 
     def set_notice(self, text):
         self.notice.setText(text)
@@ -441,9 +531,50 @@ class ChatView(QScrollArea):
         self._dots = QTimer(self)
         self._dots.setInterval(320)
         self._dots.timeout.connect(self._tick)
+        # Following her as she writes: only while you are at the very bottom. Any scroll up lets go at once
+        # (a near-bottom threshold pulled a small scroll back down with each new word: a flicker).
         bar = self.verticalScrollBar()
-        bar.valueChanged.connect(lambda value: setattr(self, '_stick', value >= bar.maximum() - 48))
-        bar.rangeChanged.connect(lambda _low, high: self._stick and bar.setValue(high))
+        self._last = 0
+        self._following = False  # True while the view itself moves to the bottom.
+        bar.valueChanged.connect(self._scrolled)
+        bar.rangeChanged.connect(self._grown)
+        self.latest = QPushButton(ICONS['chevron'], self.viewport())
+        self.latest.setObjectName('jumpLatest')
+        self.latest.setToolTip('Jump to the latest message')
+        self.latest.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.latest.clicked.connect(self.scroll_to_latest)
+        self.latest.hide()
+
+    def _scrolled(self, value):
+        bar = self.verticalScrollBar()
+        if not self._following:
+            if value < self._last:
+                self._stick = False
+            if value >= bar.maximum() - 2:
+                self._stick = True
+        self._last = value
+        self._place_latest()
+
+    def _grown(self, _low, high):
+        if self._stick:
+            self._following = True
+            self.verticalScrollBar().setValue(high)
+            self._following = False
+        self._place_latest()
+
+    def scroll_to_latest(self):
+        self._stick = True
+        self._grown(0, self.verticalScrollBar().maximum())
+
+    def _place_latest(self):
+        """ChatGPT's round ↓: shown while you have scrolled up, to come back to her latest words."""
+        bar = self.verticalScrollBar()
+        away = bar.maximum() - bar.value() > 120
+        self.latest.setVisible(away)
+        if away:
+            size = 36
+            self.latest.setGeometry((self.viewport().width() - size) // 2, self.viewport().height() - size - 14, size, size)
+            self.latest.raise_()
 
     def _bubble_width(self, item=None):
         if isinstance(item, Bubble) and item.property('plain'):
@@ -469,6 +600,7 @@ class ChatView(QScrollArea):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._place_latest()
         for item in self._items:
             if isinstance(item, (Bubble, TaskCard, OfferCard)):
                 item.setMaximumWidth(self._bubble_width(item))

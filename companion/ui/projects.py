@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QBoxLayout, QFileDialog, QFrame, QHBoxLayout, QLa
 from ..chat import projects as knowledge
 from ..chat.attachments import FILE_FILTER, AttachmentError
 from ..core.paths import resolve
+from .inline import ask, tell
 from .theme import ICONS, glyph_icon, icon_button
 
 COLORS = {"ice": "#7cc0ff", "frost": "#dfe9f7", "crimson": "#ff6b85", "amber": "#f2b45c", "jade": "#4fd1a5",
@@ -39,8 +40,8 @@ STUDY_WORDS = {
     "instructions_hint": "She tutors you in every session of this subject. For example: “explain in Indonesian”, "
                          "“I learn best from worked examples” or “be strict with my quiz answers”.",
     "instructions_placeholder": "How do you learn best?",
-    "files": "Materials", "files_hint": "Lecture notes, slides, past papers. Text and PDFs are read, so she teaches "
-                                        "and quizzes from them; you can also drop files here."}
+    "files": "Materials", "files_hint": "Lecture notes, slides, past papers. Link the folder they are in (read in "
+                                        "place; each message she is shown only the parts it needs), or add files."}
 
 
 def project_icon(color, size=32, glyph="folder"):
@@ -232,11 +233,44 @@ class ProjectPage(QWidget):
         self.refresh_all.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_all.clicked.connect(self._refresh_all)
         header.addWidget(self.refresh_all)
+        self.link_folder = QPushButton("Link folder…")
+        self.link_folder.setObjectName("chip")
+        self.link_folder.setToolTip("Use a folder of materials where it is: nothing is copied, newer files are "
+                                    "picked up, and she reads only the parts each message needs")
+        self.link_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.link_folder.clicked.connect(self._link_materials)
+        header.addWidget(self.link_folder)
         add = QPushButton("Add files…")
         add.setObjectName("chip")
         add.setCursor(Qt.CursorShape.PointingHandCursor)
         add.clicked.connect(self._choose_files)
         header.addWidget(add)
+        # A subject's linked materials folder, above any files added one by one.
+        self.materials = QWidget()
+        line = QHBoxLayout(self.materials)
+        line.setContentsMargins(4, 2, 0, 2)
+        line.setSpacing(8)
+        glyph = QLabel(ICONS["folder"])
+        glyph.setObjectName("attachmentIcon")
+        line.addWidget(glyph)
+        self.materials_path = QLabel()
+        self.materials_path.setObjectName("attachmentName")
+        self.materials_path.setWordWrap(True)
+        line.addWidget(self.materials_path, 1)
+        for text, tip, slot in (("Open", "Open the folder", self._open_materials),
+                                ("Unlink", "Stop using this folder (nothing in it is deleted)",
+                                 lambda: self._update(folder=""))):
+            button = QPushButton(text)
+            button.setObjectName("chip")
+            button.setToolTip(tip)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(slot)
+            line.addWidget(button)
+        files.addWidget(self.materials)
+        self.materials_note = QLabel()
+        self.materials_note.setObjectName("rowHint")
+        self.materials_note.setWordWrap(True)
+        files.addWidget(self.materials_note)
         self.files = QListWidget()
         self.files.setObjectName("projectFiles")
         self.files.setFrameShape(QFrame.Shape.NoFrame)
@@ -334,6 +368,7 @@ class ProjectPage(QWidget):
                                + (f"; up to {knowledge.KNOWLEDGE_CHARS:,} are given to her each reply)."
                                   if characters > knowledge.KNOWLEDGE_CHARS else ")."))
         folder = project["folder"]
+        self._show_materials(study, folder)
         self.folder.setText(folder or "No folder chosen. Tasks start in your home folder.")
         self.open_folder.setEnabled(bool(folder) and Path(folder).is_dir())
         self.clear_folder.setEnabled(bool(folder))
@@ -403,8 +438,8 @@ class ProjectPage(QWidget):
         try:
             self.store.update_project(self.project_id, **fields)
         except (ValueError, sqlite3.Error) as exc:
-            QMessageBox.warning(self, "Could not save", str(exc) if isinstance(exc, ValueError)
-                                else "The project could not be saved. Please try again.")
+            tell(self, "Could not save", str(exc) if isinstance(exc, ValueError)
+                                else "The project could not be saved. Please try again.", "error")
             return False
         self.refresh()
         self.changed.emit()
@@ -442,6 +477,41 @@ class ProjectPage(QWidget):
         if folder:
             self._update(folder=str(Path(folder)))
 
+    def _link_materials(self):
+        project = self._project()
+        folder = QFileDialog.getExistingDirectory(self, "Choose the folder with this subject's materials",
+                                                  project["folder"] or str(Path.home() / "Documents"))
+        if folder and self._update(folder=str(Path(folder))):
+            from ..chat import materials
+            materials.warm(folder)  # Read now, so her first answer from it is not kept waiting.
+
+    def _open_materials(self):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self._project()["folder"]))
+
+    def _show_materials(self, study, folder):
+        """A subject's materials folder: where it is and how much of it she has read."""
+        self.link_folder.setVisible(study)
+        self.link_folder.setText("Change folder…" if folder else "Link folder…")
+        self.materials.setVisible(study and bool(folder))
+        self.materials_note.setVisible(study and bool(folder))
+        if not (study and folder):
+            return
+        from ..chat import materials
+        parts = Path(folder).parts
+        self.materials_path.setText(folder if len(parts) <= 4 else "…\\" + "\\".join(parts[-3:]))
+        self.materials_path.setToolTip(folder)
+        if not Path(folder).is_dir():
+            self.materials_note.setText("This folder cannot be found. Link it again, or unlink it.")
+            return
+        count, read, characters = materials.summary(folder)
+        self.materials_note.setText(
+            "The folder is empty." if not count else
+            f"{count} files, {read} read so far ({characters:,} characters). Each message she sees the list of "
+            f"files and only the passages related to it, up to {materials.EXCERPT_CHARS:,} characters."
+            + ("" if read == count else " The rest are being read, or are not text."))
+        if read < count:
+            materials.warm(folder)
+
     def _choose_files(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "Add files to the project", str(Path.home()), FILE_FILTER)
         self.add_files(paths)
@@ -464,7 +534,7 @@ class ProjectPage(QWidget):
         self.refresh()
         self.changed.emit()
         if problems:
-            QMessageBox.information(self, "Some files were not added", "\n".join(problems[:8]))
+            tell(self, "Some files were not added", "\n".join(problems[:8]), "info")
 
     def _choose_replacement(self, item):
         start = item.get("source") if item.get("source") and Path(item["source"]).exists() else str(Path.home())
@@ -478,11 +548,11 @@ class ProjectPage(QWidget):
             name, stored, kind, size = knowledge.store_file(path, self.project_id, self.files_root)
         except AttachmentError as exc:
             if not quiet:
-                QMessageBox.information(self, "Could not update", str(exc))
+                tell(self, "Could not update", str(exc), "info")
             return False
         except OSError:
             if not quiet:
-                QMessageBox.information(self, "Could not update", f"{Path(path).name} could not be copied.")
+                tell(self, "Could not update", f"{Path(path).name} could not be copied.", "info")
             return False
         try:
             before = self.store.update_project_file(item["id"], name, stored, kind, size, *knowledge.origin(path))
@@ -502,8 +572,8 @@ class ProjectPage(QWidget):
         self.refresh()
         self.changed.emit()
         if updated < len(changed):
-            QMessageBox.information(self, "Some files were not updated",
-                                    f"{len(changed) - updated} of {len(changed)} could not be read again.")
+            tell(self, "Some files were not updated",
+                                    f"{len(changed) - updated} of {len(changed)} could not be read again.", "info")
 
     def _remove_file(self, file_id):
         try:
@@ -532,7 +602,7 @@ class ProjectPage(QWidget):
         try:
             files = self.store.delete_project(project["id"], delete_conversations=with_chats)
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not delete", "The project could not be deleted. Please try again.")
+            tell(self, "Could not delete", "The project could not be deleted. Please try again.", "error")
             return
         knowledge.remove_stored(files, self.files_root)
         knowledge.remove_folder(project["id"], self.files_root)

@@ -8,7 +8,7 @@ import tempfile
 import time
 
 from PySide6.QtCore import QEvent, QSignalBlocker, QSize, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import (QAction, QCloseEvent, QDesktopServices, QImage, QKeyEvent, QKeySequence, QShortcut,
+from PySide6.QtGui import (QAction, QCloseEvent, QDesktopServices, QFont, QImage, QKeyEvent, QKeySequence, QShortcut,
                            QTextCursor)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMenu,
@@ -40,10 +40,11 @@ from ..voice.reference import inspect_reference, VoiceSetupError
 from ..chat import attachments
 from ..chat import reminders
 from .chat_view import AttachmentCard, ChatView
+from .inline import InlineBar, ask, edit_in_place, tell
 from .projects import ProjectPage, project_icon
 from .sidebar import Sidebar
 from .tools import ToolsPanel
-from .theme import ACTIVITY_COLORS, ICONS, STYLE, NightSky, WindowChrome, glyph_icon, icon_button, moon_icon, repolish
+from .theme import ACTIVITY_COLORS, FONTS, ICONS, SIZES, THEMES, NightSky, set_font, set_theme, style, style_title_bar, WindowChrome, glyph_icon, icon_button, moon_icon, repolish
 
 
 # Calm, everyday states that should not displace the default footer hint.
@@ -216,6 +217,10 @@ class CompanionWindow(QMainWindow):
     def __init__(self, settings: Settings, speech=None, microphone=None, store=None, preferences=None, characters=None,
                  models=None, mcp_config=None, projects_root=None):
         super().__init__()
+        set_theme(settings.theme)  # Before anything is drawn.
+        set_font(settings.font, settings.font_size)
+        from . import prose
+        prose.resolve_file = self._cited_file  # Files she cites in a reply open from this conversation's materials.
         from ..chat.projects import PROJECT_ROOT_FOLDER
         from ..core.mcp import CONFIG
         self._mcp_path = mcp_config or CONFIG
@@ -289,7 +294,9 @@ class CompanionWindow(QMainWindow):
         conversations = self.store.conversations(key)
         # The conversation open when the app last closed comes back; otherwise the latest one.
         last = next((row["id"] for row in conversations if row["id"] == settings.last_conversation), None)
-        self._conversation_id = last or (conversations[0]["id"] if conversations else self.store.create_conversation(key))
+        chats = [row["id"] for row in conversations if row.get("kind") != "reminders"]
+        self._conversation_id = last or (chats[0] if chats else self.store.create_conversation(key))
+        self._reminder_job = None  # A reminder she is writing in her Reminders session, out of view.
         self._active_turn = None
         self._reply_status = "pending"
         self._reply_notice = ""
@@ -308,7 +315,7 @@ class CompanionWindow(QMainWindow):
         self._chrome.watch(self)
         self.resize(1180, 820)
         self.setMinimumSize(460, 560)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(style())
 
         # Pages and actions shared by the sidebar and the ⋯ menu.
         def action(glyph, text, tip=""):
@@ -397,6 +404,16 @@ class CompanionWindow(QMainWindow):
         for button in (self.speak_toggle, self.more_button):
             heading.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
         main_layout.addWidget(header)
+        # Questions and notices appear here, inside the window, never as popups (see inline.py).
+        bar_row = QHBoxLayout()
+        bar_row.setContentsMargins(22, 8, 22, 0)
+        self.inline_bar = InlineBar()
+        self.inline_bar.setMaximumWidth(856)
+        bar_row.addWidget(self.inline_bar)
+        main_layout.addLayout(bar_row)
+        # Double-click her title to rename the conversation right there.
+        self.conversation_title.setToolTip("Double-click to rename")
+        self.conversation_title.installEventFilter(self)
 
         centring = QHBoxLayout()
         centring.setContentsMargins(0, 0, 0, 0)
@@ -528,8 +545,8 @@ class CompanionWindow(QMainWindow):
             label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             return label
 
-        companion_page, voice_page, avatar_page, app_page, tools_page = (
-            page(title) for title in ("Companion", "Voice", "Avatar", "App", "Tools"))
+        companion_page, voice_page, avatar_page, accessories_page, app_page, tools_page = (
+            page(title) for title in ("Companion", "Voice", "Avatar", "Accessories", "App", "Tools"))
         section(tools_page, "MCP servers")
         self.tools_panel = ToolsPanel(self._mcp_path, present=self._present)
         self.tools_panel.changed.connect(self._servers_changed)
@@ -719,6 +736,34 @@ class CompanionWindow(QMainWindow):
         self.computer_tasks.toggled.connect(self._computer_tasks_toggled)
         self._describe_tasks()
         section(settings_layout, "Window")
+        self.theme = QComboBox()
+        for key, (label, *_rest) in THEMES.items():
+            self.theme.addItem(label, key)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(settings.theme)))
+        self.theme.currentIndexChanged.connect(self._theme_changed)
+        row(settings_layout, "Theme", self.theme,
+            hint="Her moonlit night, other night skies, or a light day theme.")
+        self.font_choice = QComboBox()
+        for key, (label, _family) in FONTS.items():
+            self.font_choice.addItem(label, key)
+        self.font_choice.setCurrentIndex(max(0, self.font_choice.findData(settings.font)))
+        self.font_size = QComboBox()
+        for key, (label, _scale) in SIZES.items():
+            self.font_size.addItem(label, key)
+        self.font_size.setCurrentIndex(max(0, self.font_size.findData(settings.font_size)))
+        for control in (self.font_choice, self.font_size):
+            control.currentIndexChanged.connect(self._font_changed)
+        for index, (_label, family) in enumerate(FONTS.values()):
+            self.font_choice.setItemData(index, QFont(family, 11), Qt.ItemDataRole.FontRole)  # Each in its own face.
+        row(settings_layout, "Font", self.font_choice, hint="Inter reads like ChatGPT; code always uses a monospace face.")
+        row(settings_layout, "Text size", self.font_size)
+        self.text_rendering = QComboBox()
+        self.text_rendering.addItem("Smooth, like ChatGPT", "smooth")
+        self.text_rendering.addItem("Sharp (Windows ClearType)", "sharp")
+        self.text_rendering.setCurrentIndex(max(0, self.text_rendering.findData(settings.text_rendering)))
+        self.text_rendering.currentIndexChanged.connect(self._text_rendering_changed)
+        row(settings_layout, "Text rendering", self.text_rendering,
+            hint="Smooth reads softer on her dark sky; sharp is the Windows look. Applies when she next starts.")
         self.message_style = QComboBox()
         self.message_style.addItem("Plain text, like Codex", "plain")
         self.message_style.addItem("In a bubble", "bubble")
@@ -792,6 +837,37 @@ class CompanionWindow(QMainWindow):
         row(settings_layout, "Model framing", self.avatar_framing)
         self.avatar_blindfold = QCheckBox('Blindfold')
         self.avatar_blindfold_row = switch(settings_layout, self.avatar_blindfold)
+        # Accessories (their own tab): worn over a Live2D model, following her eyes, under her hair.
+        accessories = accessories_page
+        section(accessories, "Glasses")
+        self.glasses = QCheckBox("Wear glasses")
+        self.glasses_row = switch(accessories, self.glasses,
+                                  "They follow her eyes as she turns, tilts and blinks, and her fringe falls in front of "
+                                  "them. Hidden while she wears her blindfold.")
+        self.glasses_style = QComboBox()
+        for label, value in (("Teacher (reading glasses)", "teacher"), ("Round", "round"), ("Rectangle", "rectangle"),
+                             ("Oval", "oval"), ("Half-rim", "halfrim")):
+            self.glasses_style.addItem(label, value)
+        self.glasses_frame = QComboBox()
+        for label, value in (("Silver", "silver"), ("Gold", "gold"), ("Black", "black"), ("Glacial blue", "ice"),
+                             ("Crimson", "crimson")):
+            self.glasses_frame.addItem(label, value)
+        self.glasses_lens = QComboBox()
+        for label, value in (("Clear", "clear"), ("Moonlit blue tint", "moon"), ("Rose tint", "rose"),
+                             ("Dark (sunglasses)", "dark")):
+            self.glasses_lens.addItem(label, value)
+        self.glasses_rows = [row(accessories, "Style", self.glasses_style),
+                             row(accessories, "Frame", self.glasses_frame),
+                             row(accessories, "Lenses", self.glasses_lens)]
+        self.customize_note = QLabel("Accessories are worn over a Live2D model. Choose one in Settings → Avatar → "
+                                     "Visual model.")
+        self.customize_note.setObjectName("rowHint")
+        self.customize_note.setWordWrap(True)
+        accessories.addWidget(self.customize_note)
+        accessories.addStretch()
+        for control in (self.glasses_style, self.glasses_frame, self.glasses_lens):
+            control.currentIndexChanged.connect(self._set_glasses)
+        self.glasses.toggled.connect(self._set_glasses)
         self._refresh_avatar_models()
         self.avatar_model.currentIndexChanged.connect(self._select_avatar_model)
         self.avatar_framing.currentIndexChanged.connect(self._set_avatar_framing)
@@ -1086,6 +1162,9 @@ class CompanionWindow(QMainWindow):
         self.input.setFocus()
 
     def eventFilter(self, watched, event):
+        if watched is getattr(self, "conversation_title", None) and event.type() == QEvent.Type.MouseButtonDblClick:
+            self._rename_here()
+            return True
         if watched is self.input and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
             repolish(self.composer, focused=event.type() == QEvent.Type.FocusIn)
         return super().eventFilter(watched, event)
@@ -1239,10 +1318,10 @@ class CompanionWindow(QMainWindow):
         except ValueError as exc:
             self._activity_error = True
             self._refresh_activity()
-            QMessageBox.information(self, "Connection settings", str(exc))
+            tell(self, "Connection settings", str(exc), "info")
             return
         if len(text) > 16000:
-            QMessageBox.information(self, "Message too long", "Please keep a message under 16,000 characters.")
+            tell(self, "Message too long", "Please keep a message under 16,000 characters.", "info")
             return
         self._begin_reply(text, files)
 
@@ -1292,16 +1371,8 @@ class CompanionWindow(QMainWindow):
             self.transcript.add_message("user", "You", text, attachments=stored)
         self.transcript.begin_reply(self.settings.name)
         chat_tools = self._chat_tools()
-        prompt = reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None,
-                              avatar_cues=self.show_avatar.isChecked(),
-                              computer_tasks=self.computer_tasks.isChecked(),
-                              confirm_tasks=self.confirm_tasks.isChecked(),
-                              memory_cues=True, auto_memory=self.auto_memory.isChecked(),
-                              reminders=self._reminder_prompt(),
-                              look=self.look_at_screen.isChecked() and not looking,
-                              check_ins=self.check_ins.isChecked(),
-                              project=self._project_context(),
-                              tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None)
+        prompt = self._system_prompt(memories, summary, looking=looking, project=self._project_context(text),
+                                     tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None)
         self._task_request = self._task_offer = None
         self._look_requested = False
         self._looking = looking
@@ -1321,6 +1392,16 @@ class CompanionWindow(QMainWindow):
         self._update_conversation_title()
         worker.start()
         return True
+
+    def _system_prompt(self, memories, summary, looking=False, project=None, tools=None):
+        return reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None,
+                            avatar_cues=self.show_avatar.isChecked(),
+                            computer_tasks=self.computer_tasks.isChecked(),
+                            confirm_tasks=self.confirm_tasks.isChecked(),
+                            memory_cues=True, auto_memory=self.auto_memory.isChecked(),
+                            reminders=self._reminder_prompt(),
+                            look=self.look_at_screen.isChecked() and not looking,
+                            check_ins=self.check_ins.isChecked(), project=project, tools=tools)
 
     def _set_busy(self, busy: bool) -> None:
         self._refresh_controls()
@@ -1593,19 +1674,35 @@ class CompanionWindow(QMainWindow):
         self._refresh_sidebar()
 
     def _rename_conversation(self, conversation_id):
+        """Renamed where its name is: on its row in the sidebar, or else in the title above the chat."""
         conversation = self.store.conversation(conversation_id)
         if not conversation:
             return
-        from PySide6.QtWidgets import QInputDialog
-        title, accepted = QInputDialog.getText(self, "Rename conversation", "Name", text=conversation["title"])
-        if not accepted or not title.strip():
+        commit = lambda title: self._save_title(conversation_id, title)
+        if not self.sidebar.isVisible() or not self.sidebar.start_rename(conversation_id, conversation["title"], commit):
+            if conversation_id == self._conversation_id:
+                self._rename_here()
+
+    def _rename_here(self):
+        """The conversation's title above the chat becomes an editor in place."""
+        conversation = self.store.conversation(self._conversation_id)
+        if not conversation:
             return
+        label = self.conversation_title
+        rect = label.geometry().adjusted(-6, -3, 6, 3)
+        rect.setWidth(max(rect.width(), 260))
+        identifier = self._conversation_id
+        edit_in_place(label.parentWidget(), rect, conversation["title"], lambda title: self._save_title(identifier, title))
+
+    def _save_title(self, conversation_id, title):
         try:
             self.store.rename_conversation(conversation_id, title)
-        except (ValueError, sqlite3.Error) as exc:
-            self._flash(str(exc) if isinstance(exc, ValueError) else "Could not rename it. Please try again.")
-            return
+        except ValueError as exc:
+            return str(exc)
+        except sqlite3.Error:
+            return "Could not rename it. Please try again."
         self._update_conversation_title()
+        return None
 
     def _delete_conversation(self, conversation_id):
         conversation = self.store.conversation(conversation_id)
@@ -1615,10 +1712,11 @@ class CompanionWindow(QMainWindow):
         if current and (self._worker or self.microphone.busy):
             self._flash("Let her finish, or press Stop, before deleting this conversation.")
             return
-        if QMessageBox.question(self, "Delete conversation?",
-                                f"Delete “{conversation['title']}” and everything shared in it? This cannot be undone."
-                                ) != QMessageBox.StandardButton.Yes:
-            return
+        ask(self, "Delete conversation?",
+            f"Delete “{conversation['title']}” and everything shared in it? This cannot be undone.",
+            "Delete", lambda: self._remove_conversation(conversation_id, current))
+
+    def _remove_conversation(self, conversation_id, current):
         if current:
             self._end_handsfree()
             self._interrupt_speech()
@@ -1655,6 +1753,47 @@ class CompanionWindow(QMainWindow):
             self._place_sidebar()
 
     # Messages and model -------------------------------------------------------------------
+
+    @Slot(int)
+    def _font_changed(self, _index):
+        self.settings = replace(self.settings, font=self.font_choice.currentData(), font_size=self.font_size.currentData())
+        set_font(self.settings.font, self.settings.font_size)
+        self._restyle()
+        try:
+            self.preferences.remember(self.settings, ("font", "font_size"))
+        except (OSError, ValueError):
+            pass
+
+    @Slot(int)
+    def _text_rendering_changed(self, _index):
+        self.settings = replace(self.settings, text_rendering=self.text_rendering.currentData())
+        try:
+            self.preferences.remember(self.settings, ("text_rendering",))
+        except (OSError, ValueError):
+            return
+        tell(self, "Text rendering", "Saved. Close her from the tray and open her again to see the new text.", "done")
+
+    def _restyle(self):
+        """The window in the current theme and font, at once; her messages drawn again in them."""
+        self.setStyleSheet(style())
+        style_title_bar(self)
+        for sky in self.findChildren(NightSky):
+            sky.update()
+        if not self._worker and not self._active_turn and self.pages.currentWidget() is self.chat_page:
+            self._restore_conversation(self._conversation_id)
+        self._refresh_sidebar()
+
+    @Slot(int)
+    def _theme_changed(self, _index):
+        """The whole window takes the new colours at once; her messages are drawn again in them."""
+        key = self.theme.currentData()
+        self.settings = replace(self.settings, theme=key)
+        set_theme(key)
+        self._restyle()
+        try:
+            self.preferences.remember(self.settings, ("theme",))
+        except (OSError, ValueError):
+            pass
 
     @Slot(int)
     def _message_style_changed(self, _index):
@@ -1745,7 +1884,7 @@ class CompanionWindow(QMainWindow):
         try:
             settings = self.preferences.load(load_settings())
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "Could not reload settings", str(exc))
+            tell(self, "Could not reload settings", str(exc), "error")
             return
         conversation = self._conversation_id
         if character_key(settings.character_path) != character_key(self.settings.character_path):
@@ -1841,6 +1980,7 @@ class CompanionWindow(QMainWindow):
                 self.avatar_blindfold.setVisible(bool(selected.get('blindfold_parameter')))
                 self.avatar_blindfold_row.setVisible(bool(selected.get('blindfold_parameter')))
                 self.avatar_blindfold.setChecked(bool(selected.get('blindfold', False)))
+                self._show_customization(selected)
                 self.avatar_model_status.setText(
                     ('Experimental Live2D rig. ' + selected.get('credit', '') if live2d else
                      selected.get('credit', 'Current AI portrait. Choose another visual model to experiment.'))
@@ -1850,6 +1990,7 @@ class CompanionWindow(QMainWindow):
                 self.avatar_framing.setEnabled(False)
                 self.avatar_blindfold.hide()
                 self.avatar_blindfold_row.hide()
+                self._show_customization({'kind': 'mesh'})
                 self.avatar_model_status.setText(str(exc))
         self.avatar_model_label.setText(self.settings.name + ' visual model')
         self.add_avatar_model.setEnabled(bool(self.settings.character_path))
@@ -1880,11 +2021,46 @@ class CompanionWindow(QMainWindow):
             self.avatar_model_status.setText(str(exc))
 
     @Slot(bool)
+    def _show_customization(self, model):
+        """The Customize her controls show the selected model's accessories (Live2D only)."""
+        live2d = model.get('kind') == 'live2d'
+        glasses = model.get('accessories', {}).get('glasses', {})
+        controls = (self.glasses, self.glasses_style, self.glasses_frame, self.glasses_lens)
+        blockers = [QSignalBlocker(control) for control in controls]
+        self.glasses.setChecked(bool(glasses.get('on')))
+        for control, key, default in ((self.glasses_style, 'style', 'teacher'), (self.glasses_frame, 'frame', 'silver'),
+                                      (self.glasses_lens, 'lens', 'clear')):
+            control.setCurrentIndex(max(0, control.findData(glasses.get(key, default))))
+        del blockers
+        self.glasses_row.setVisible(live2d)
+        for line in self.glasses_rows:
+            line.setVisible(live2d)
+            line.setEnabled(self.glasses.isChecked())
+        self.customize_note.setVisible(not live2d)
+
+    def _set_glasses(self, *_):
+        values = {'glasses': {'on': self.glasses.isChecked(), 'style': self.glasses_style.currentData(),
+                              'frame': self.glasses_frame.currentData(), 'lens': self.glasses_lens.currentData()}}
+        for line in self.glasses_rows:
+            line.setEnabled(self.glasses.isChecked())
+        try:
+            model = self.avatar_models.set_accessories(self.settings.character_path, self.avatar_model.currentData(), values)
+        except (OSError, ValueError) as exc:
+            self.avatar_model_status.setText(str(exc))
+            return
+        self._wear(model)
+
+    def _wear(self, model):
+        from ..avatar.models import worn
+        if self.avatar.widget is not None and hasattr(self.avatar.widget, 'set_accessories'):
+            self.avatar.widget.set_accessories(worn(model))
+
     def _set_avatar_blindfold(self, enabled):
         try:
             model = self.avatar_models.set_blindfold(self.settings.character_path, self.avatar_model.currentData(), enabled)
             if self.avatar.widget is not None and hasattr(self.avatar.widget, 'set_appearance'):
                 self.avatar.widget.set_appearance(model.get('appearance', {}))
+            self._wear(model)  # Glasses come off for the blindfold and back on after it.
         except (OSError, ValueError) as exc:
             self.avatar_model_status.setText(str(exc))
 
@@ -1941,7 +2117,7 @@ class CompanionWindow(QMainWindow):
             settings = self.preferences.select(self._current_preferences(), character,
                                                use_profile_voice=use_profile_voice)
         except (OSError, ValueError, sqlite3.Error) as exc:
-            QMessageBox.warning(self, "Could not use character", str(exc))
+            tell(self, "Could not use character", str(exc), "error")
             self._refresh_characters()
             return False
         self._apply_settings(settings)
@@ -1971,7 +2147,7 @@ class CompanionWindow(QMainWindow):
             dialog = CharacterDialog(self.characters, self, existing=existing, draft=draft)
             self._chrome.watch(dialog)
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "Could not edit character", str(exc))
+            tell(self, "Could not edit character", str(exc), "error")
             return
         dialog.preview_requested.connect(self._preview_character_voice)
         dialog.stop_requested.connect(self._interrupt_speech)
@@ -2150,7 +2326,7 @@ class CompanionWindow(QMainWindow):
         try:
             backup.backup(self.store, path)
         except (OSError, sqlite3.Error) as exc:
-            QMessageBox.warning(self, "Backup failed", f"The backup could not be written: {exc}")
+            tell(self, "Backup failed", f"The backup could not be written: {exc}", "error")
             return
         self._flash(f"Backed up to {path}")
 
@@ -2164,15 +2340,15 @@ class CompanionWindow(QMainWindow):
         try:
             details = backup.check(path)
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "Cannot restore", str(exc))
+            tell(self, "Cannot restore", str(exc), "error")
             return
         made = details.get("created", "")[:16].replace("T", " ")
-        if QMessageBox.question(
-                self, "Restore this backup?",
-                f"Replace your conversations, memories, reminders, files and settings with the backup from {made}?\n\n"
-                "What you have now is saved first, in data/backups. Jingliu closes afterwards; open her again "
-                "to continue.") != QMessageBox.StandardButton.Yes:
-            return
+        ask(self, "Restore this backup?",
+            f"Replace your conversations, memories, reminders, files and settings with the backup from {made}? "
+            "What you have now is saved first, in data/backups. Jingliu closes afterwards; open her again to continue.",
+            "Restore", lambda: self._restore_now(path))
+
+    def _restore_now(self, path):
         self._interrupt_speech()
         if self._worker:
             self._worker.stop()
@@ -2185,13 +2361,12 @@ class CompanionWindow(QMainWindow):
         try:
             safety = backup.restore(path, PROJECT_ROOT / "data" / "backups", store=self.store)
         except (OSError, ValueError, sqlite3.Error) as exc:
-            QMessageBox.critical(self, "Restore failed",
+            QMessageBox.critical(self, "Restore failed",  # Popups here: she closes right after.
                                  f"The backup could not be restored: {exc}\nYour previous data is in data/backups.")
             self.request_quit()
             return
         QMessageBox.information(self, "Restored", "The backup is restored. Your previous data was saved as "
-                                                  f"{safety.name} in data/backups.\n\nJingliu will close now; "
-                                                  "open her again to continue.")
+                                f"{safety.name} in data/backups.\n\nJingliu will close now; open her again to continue.")
         self.request_quit()
 
     @Slot()
@@ -2204,7 +2379,7 @@ class CompanionWindow(QMainWindow):
         try:
             backup.export_text(self.store, path, self.settings.name)
         except (OSError, sqlite3.Error) as exc:
-            QMessageBox.warning(self, "Export failed", f"The export could not be written: {exc}")
+            tell(self, "Export failed", f"The export could not be written: {exc}", "error")
             return
         self._flash(f"Exported to {path}")
 
@@ -2555,8 +2730,8 @@ class CompanionWindow(QMainWindow):
                                                     f"({reminders.describe(reminder)})", can_undo=False, icon="clock")
                 else:
                     fresh.append(reminder)
-            busy = (self._worker or self._task is not None or self.microphone.busy or self.suspended
-                    or self.speech.busy)
+            busy = (self._worker or self._reminder_job or self._task is not None or self.microphone.busy
+                    or self.suspended or self.speech.busy)
             if not fresh or busy:
                 return
             reminder = fresh[0]
@@ -2566,17 +2741,94 @@ class CompanionWindow(QMainWindow):
         self._deliver_reminder(reminder)
 
     def _deliver_reminder(self, reminder):
+        """She delivers it in her Reminders session, not in the chat you are in: there, if it is open;
+        otherwise she writes it out of view, says it aloud, and the session is marked unread."""
         line = reminders.message(reminder)
         if not self.isVisible() or self.isMinimized():
             self.notify.emit(f"{self.settings.name} · Reminder", reminder["text"])
         try:
+            inbox = self._reminder_session()
+        except sqlite3.Error:
+            self.transcript.add_memory_note(f"Reminder: {reminder['text']}", can_undo=False, icon="clock")
+            return
+        try:
             self.settings.validate_connection()
-            started = self._begin_reply(line, reminder=True)
+            if self._in_conversation(inbox):
+                started = self._begin_reply(line, reminder=True)
+            else:
+                started = self._remind_out_of_view(inbox, line, reminder)
         except ValueError:
             started = False
         if not started:
-            # Without a model she cannot speak it herself; the reminder still appears.
+            # Without a model she cannot say it herself; the reminder is still left in her session.
+            self._leave_reminder(inbox, line, f"Reminder: {reminder['text']}", reminder)
+
+    def _reminder_session(self):
+        key = character_key(self.settings.character_path)
+        return self.store.reminder_conversation(key, f"Reminders from {self.settings.name}")
+
+    def _is_reminder_session(self, conversation_id):
+        conversation = self.store.conversation(conversation_id)
+        return bool(conversation and conversation.get("kind") == "reminders")
+
+    def _in_conversation(self, conversation_id):
+        return conversation_id == self._conversation_id and self.pages.currentWidget() is self.chat_page
+
+    def _remind_out_of_view(self, inbox, line, reminder):
+        try:
+            turns = self.store.context_turns(inbox)
+            memories = self.store.relevant_memories(line) if self.use_memories.isChecked() else []
+        except sqlite3.Error:
+            return False
+        context = [*recent_messages(turns), {"role": "user", "content": line, "attachments": []}]
+        worker = ReplyWorker(replace(self.settings, system_prompt=self._system_prompt(memories, None), chat_tools=""),
+                             context, self)
+        self._reminder_job = {"worker": worker, "inbox": inbox, "line": line, "reminder": reminder,
+                              "text": "", "cues": CueFilter()}
+        worker.chunk.connect(self._reminder_chunk)
+        worker.finished.connect(self._reminder_finished)
+        worker.start()
+        return True
+
+    @Slot(str, str)
+    def _reminder_chunk(self, turn_id, text):
+        job = self._reminder_job
+        if job and job["worker"].turn_id == turn_id:
+            job["text"] += job["cues"].feed(text)[0]  # Her cues are for a reply you watch; here only words.
+
+    @Slot()
+    def _reminder_finished(self):
+        job, self._reminder_job = self._reminder_job, None
+        if job is None:
+            return
+        worker = job["worker"]
+        worker.deleteLater()
+        stopped = worker.error or worker.stop_requested.is_set()
+        said = "" if stopped else (job["text"] + job["cues"].finish()).strip()
+        self._leave_reminder(job["inbox"], job["line"], said or f"Reminder: {job['reminder']['text']}",
+                             job["reminder"], spoken=bool(said))
+
+    def _leave_reminder(self, inbox, line, said, reminder, spoken=False):
+        """Saves her reminder in her session, marks it unread unless you are there, and lets you know."""
+        here = self._in_conversation(inbox)
+        try:
+            turn = self.store.start_turn(inbox, line)
+            self.store.save_turn(turn, said, said, "complete" if spoken else "local")
+            if not here:
+                self.store.mark_unread(inbox)
+        except sqlite3.Error:
             self.transcript.add_memory_note(f"Reminder: {reminder['text']}", can_undo=False, icon="clock")
+            return
+        if self._closing:
+            return
+        if here and not self._worker and not self._active_turn:
+            self._restore_conversation(inbox)
+        else:
+            self._refresh_sidebar()
+            self._flash(f"{self.settings.name} reminded you: “{reminder['text']}” · see Reminders in the sidebar")
+        if (spoken and self.auto_speak.isChecked() and self.volume.value() > 0 and not self._worker
+                and not self.speech.busy and not self.microphone.busy):
+            self.speech.speak(said, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
 
     @Slot()
     def _open_reminders(self) -> None:
@@ -2584,7 +2836,7 @@ class CompanionWindow(QMainWindow):
         try:
             dialog = ReminderDialog(self.store, self)
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not open reminders", "Reminders could not be read. Please try again.")
+            tell(self, "Could not open reminders", "Reminders could not be read. Please try again.", "error")
             return
         self._chrome.watch(dialog)
         self._present(dialog)
@@ -2630,7 +2882,11 @@ class CompanionWindow(QMainWindow):
         request = journal.details.get("request")
         if card is None and request:
             text = f"Task: {request[:200]}\n\n" + text
-        if QMessageBox.question(self, "Undo this task?", text) != QMessageBox.StandardButton.Yes:
+        ask(self, "Undo this task?", text.replace("\n\n", " "), "Undo", lambda: self._undo_now(card, journal, notes),
+            danger=False)
+
+    def _undo_now(self, card, journal, notes):
+        if journal.undone:
             return
         done, problems = journal.undo()
         if card is not None:
@@ -2836,6 +3092,11 @@ class CompanionWindow(QMainWindow):
         self.microphone.shutdown()
         self._interrupt_speech()
         self.speech.shutdown()
+        if self._reminder_job:
+            # A reminder she was still writing: the reminder itself is kept in her session.
+            self._reminder_job["worker"].stop()
+            self._reminder_job["worker"].wait(5000)
+            self._reminder_finished()
         if self._worker:
             self._closing = True
             self._stop()
@@ -2966,7 +3227,7 @@ class CompanionWindow(QMainWindow):
         try:
             reference = inspect_reference(path)
         except VoiceSetupError as exc:
-            QMessageBox.warning(self, "Reference voice", str(exc))
+            tell(self, "Reference voice", str(exc), "error")
             return
         self._interrupt_speech()
         self._reference_path = str(reference.path)
@@ -3290,8 +3551,27 @@ class CompanionWindow(QMainWindow):
         except sqlite3.Error:
             return None
 
-    def _project_context(self):
-        """What she is told about the current conversation's project, or None."""
+    def _cited_file(self, name):
+        """A file she cited by name: in the subject's materials folder or the project's files, or None."""
+        project = self._current_project()
+        if not project:
+            return None
+        wanted = name.casefold()
+        try:
+            for item in self.store.project_files(project["id"]):
+                if item["name"].casefold() == wanted:
+                    from ..core.paths import resolve
+                    return resolve(item["path"])
+        except sqlite3.Error:
+            return None
+        if project.get("folder"):
+            from ..chat import materials
+            return next((path for _, path in materials.files(project["folder"]) if path.name.casefold() == wanted), None)
+        return None
+
+    def _project_context(self, text=""):
+        """What she is told about the current conversation's project, or None. `text`: the message, which
+        picks the passages of a subject's materials folder she is shown."""
         project = self._current_project()
         if not project:
             return None
@@ -3301,7 +3581,9 @@ class CompanionWindow(QMainWindow):
             if project["kind"] == "study":
                 # A subject is a folder of sessions: she remembers what was covered in its other sessions.
                 earlier = study.recall(self.store, project, self._conversation_id, character_key(self.settings.character_path))
-                return study.context(project, files, study.stats(self.store, project["id"]), earlier)
+                recent = " ".join(m["content"] for m in self._messages[-3:-1] if m["role"] == "user")
+                return study.context(project, files, study.stats(self.store, project["id"]), earlier,
+                                     query=f"{recent}\n{text}")
             return projects.context(project, files)
         except sqlite3.Error:
             return None
@@ -3319,22 +3601,26 @@ class CompanionWindow(QMainWindow):
         self._refresh_sidebar()
 
     def _rename_project(self, project_id):
+        """Renamed on its row in the sidebar; its page's name field is editable too."""
         project = self.store.project(project_id)
         if not project:
             return
-        from PySide6.QtWidgets import QInputDialog
-        title = "Rename subject" if project["kind"] == "study" else "Rename project"
-        name, accepted = QInputDialog.getText(self, title, "Name", text=project["name"])
-        if not accepted or not name.strip():
-            return
-        try:
-            self.store.update_project(project_id, name=name)
-        except (ValueError, sqlite3.Error) as exc:
-            self._flash(str(exc) if isinstance(exc, ValueError) else "Could not rename it. Please try again.")
-            return
-        if self.project_page.project_id == project_id:
-            self.project_page.show_project(project_id)
-        self._project_changed()
+
+        def commit(name):
+            try:
+                self.store.update_project(project_id, name=name)
+            except ValueError as exc:
+                return str(exc)
+            except sqlite3.Error:
+                return "Could not rename it. Please try again."
+            if self.project_page.project_id == project_id:
+                self.project_page.show_project(project_id)
+            QTimer.singleShot(0, self._project_changed)  # After the editor has closed over the row.
+            return None
+        if not self.sidebar.start_rename(project_id, project["name"], commit, project=True):
+            self._open_project(project_id)
+            self.project_page.name.setFocus()
+            self.project_page.name.selectAll()
 
     def _delete_project(self, project_id):
         """From the sidebar's ⋯: the same choice as on the page (keep its chats, or delete them too)."""
@@ -3651,7 +3937,15 @@ class CompanionWindow(QMainWindow):
         self._conversation_id = conversation_id
         self._active_turn = None
         self._messages = context
+        if self._is_reminder_session(conversation_id):
+            self.store.mark_unread(conversation_id, 0)
+            if hasattr(self, "sidebar"):
+                self.sidebar.show_tab("chats")  # It sits at the top of your chats.
         for row in rows:
+            if row["role"] == "user" and row["display"].startswith(reminders.MARK):
+                self.transcript.add_memory_note(row["display"].replace(reminders.MARK, "Reminder", 1),
+                                                can_undo=False, icon="clock")
+                continue
             name = "You" if row["role"] == "user" else self.settings.name
             notice = row["notice"]
             if row["status"] == "pending":
@@ -3716,7 +4010,7 @@ class CompanionWindow(QMainWindow):
             dialog.deleteLater()
             self._refresh_continuity()
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not open context", "Conversation context could not be read. Please try again.")
+            tell(self, "Could not open context", "Conversation context could not be read. Please try again.", "error")
 
     @Slot()
     def _generate_summary(self) -> None:
@@ -3826,7 +4120,7 @@ class CompanionWindow(QMainWindow):
             self._restore_conversation(selected)
             dialog.deleteLater()
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not open history", "Saved conversations could not be read. Please try again.")
+            tell(self, "Could not open history", "Saved conversations could not be read. Please try again.", "error")
 
     @Slot()
     def _open_memories(self) -> None:
@@ -3839,7 +4133,7 @@ class CompanionWindow(QMainWindow):
             self._present(dialog)
             dialog.deleteLater()
         except sqlite3.Error:
-            QMessageBox.warning(self, "Could not open memories", "Saved memories could not be read. Please try again.")
+            tell(self, "Could not open memories", "Saved memories could not be read. Please try again.", "error")
 
     def _local_command(self, text) -> bool:
         parts = text.split(maxsplit=1)

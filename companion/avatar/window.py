@@ -355,6 +355,7 @@ class AvatarController(QObject):
 
     def _create_widget(self):
         from .assets import assigned_avatar
+        from .models import worn
         try:
             model = self.window.avatar_models.selected(self.window.settings.character_path)
         except (OSError, ValueError):
@@ -363,7 +364,8 @@ class AvatarController(QObject):
             if model['kind'] in {'live2d', 'layered'}:
                 from .mesh import MeshDesktopAvatar
                 widget = MeshDesktopAvatar(self.window.avatar_models.model_path(model), kind=model['kind'],
-                                           appearance=model.get('appearance', {}))
+                                           appearance=model.get('appearance', {}),
+                                           accessories=worn(model))
                 widget.set_framing(model.get('framing', 'portrait'))
                 return widget
             path = assigned_avatar(self.window.settings.character_path)

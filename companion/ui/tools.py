@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from ..core import mcp
+from .inline import ask, tell
 from .theme import ICONS
 
 SCOPE_LABELS = (("Computer tasks only", "tasks"), ("Conversations and tasks", "everywhere"))
@@ -406,19 +407,20 @@ class ToolsPanel(QWidget):
         dialog.deleteLater()
 
     def _remove(self, server):
-        if QMessageBox.question(self, "Remove server?", f"Remove “{server.name}”? She will no longer use its tools."
-                                ) == QMessageBox.StandardButton.Yes:
-            self.servers.remove(server)
-            self._save()
-            self._render()
+        def remove():
+            if server in self.servers:
+                self.servers.remove(server)
+                self._save()
+                self._render()
+        ask(self, "Remove server?", f"Remove “{server.name}”? She will no longer use its tools.", "Remove", remove)
 
     def _import(self):
         names = {server.name.lower() for server in self.servers}
         candidates = [(label, server) for label, server in mcp.import_candidates()
                       if server.name.lower() not in names and server.name.lower() not in mcp.RESERVED]
         if not candidates:
-            QMessageBox.information(self, "Nothing to import", "No new MCP servers were found in Claude Code or "
-                                    "Claude Desktop on this computer.")
+            tell(self, "Nothing to import", "No new MCP servers were found in Claude Code or "
+                                    "Claude Desktop on this computer.", "info")
             return
         dialog = ImportDialog(candidates, self)
         if self.present(dialog):

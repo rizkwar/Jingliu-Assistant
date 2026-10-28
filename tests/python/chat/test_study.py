@@ -110,6 +110,72 @@ class SubjectMemoryTests(unittest.TestCase):
         self.assertLessEqual(memory.count('"session"'), study.RECALL_SESSIONS)
 
 
+class MaterialsFolderTests(unittest.TestCase):
+    """A linked folder is read in place: she sees its index and only the passages a message needs."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.folder, self.cache = Path(temporary.name) / "Resources", Path(temporary.name) / "cache"
+        (self.folder / "week 2").mkdir(parents=True)
+        (self.folder / "normalisation.md").write_text(
+            "Filler about the course schedule. " * 80 + "Third normal form (3NF) removes transitive functional "
+            "dependencies: every non-key attribute depends on the key, the whole key and nothing but the key.",
+            encoding="utf-8")
+        (self.folder / "week 2" / "indexing.txt").write_text("A B-tree index speeds up lookups on a column.",
+                                                             encoding="utf-8")
+        (self.folder / "diagram.png").write_bytes(b"\x89PNG")
+        (self.folder / ".hidden.txt").write_text("secret", encoding="utf-8")
+
+    def test_index_and_only_the_related_passages(self):
+        from companion.chat import materials
+        text = materials.context(self.folder, "what is 3NF and transitive dependency?", self.cache)
+        self.assertIn("- normalisation.md", text)
+        self.assertIn("- week 2/indexing.txt", text)
+        self.assertNotIn(".hidden", text)
+        self.assertIn("nothing but the key", text)          # The passage the question needs…
+        self.assertNotIn("B-tree", text)                     # …not the unrelated file.
+        self.assertLess(len(text), 4000)                     # Far less than every file in full.
+        self.assertIn("Not readable as text here (listed only): diagram.png", text)
+        count, read, characters = materials.summary(self.folder, self.cache)
+        self.assertEqual((count, read), (3, 2))              # Two of three files are text; the picture is listed.
+        self.assertGreater(characters, 2700)
+
+    def test_files_are_read_once_and_again_when_changed(self):
+        from companion.chat import materials
+        path = self.folder / "week 2" / "indexing.txt"
+        materials.context(self.folder, "index", self.cache)
+        self.assertTrue(materials.is_cached(path, self.cache))
+        with patch.object(materials, "_extract", side_effect=AssertionError("read again")):
+            self.assertIn("B-tree", materials.context(self.folder, "B-tree index", self.cache))
+        path.write_text("A hash index answers equality lookups.", encoding="utf-8")
+        os.utime(path, (time.time() + 5, time.time() + 5))
+        self.assertIn("hash index", materials.context(self.folder, "hash index", self.cache))
+
+    def test_word_and_powerpoint_files_are_read_without_extra_installs(self):
+        import zipfile
+        from companion.chat import materials
+        with zipfile.ZipFile(self.folder / "slides.pptx", "w") as archive:
+            archive.writestr("ppt/slides/slide1.xml", "<p:sld><a:t>Relational algebra</a:t></p:sld>")
+            archive.writestr("ppt/slides/slide2.xml", "<p:sld><a:t>Selection sigma filters rows</a:t></p:sld>")
+        with zipfile.ZipFile(self.folder / "notes.docx", "w") as archive:
+            archive.writestr("word/document.xml", "<w:document><w:t>Projection pi keeps columns</w:t></w:document>")
+        text = materials.context(self.folder, "selection sigma and projection pi", self.cache)
+        self.assertIn("slides.pptx (2 slides)", text)
+        self.assertIn('where="slide 2"', text)
+        self.assertIn("Projection pi keeps columns", text)
+
+    def test_a_subject_with_a_folder_gives_her_its_materials(self):
+        subject = {"name": "Basdat", "description": "", "instructions": "", "folder": str(self.folder)}
+        from companion.chat import materials
+        with patch.object(materials, "CACHE", self.cache):
+            text = study.context(subject, [], query="explain third normal form")
+        self.assertIn("Materials folder:", text)
+        self.assertIn("nothing but the key", text)
+
+
 class StudyWindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -156,6 +222,33 @@ class StudyWindowTests(unittest.TestCase):
         self.store.save_turn(turn, "The mean is the sum divided by the count.", "x", "complete")
         self.window._new_chat_in_project(self.subject)
         self.assertIn("The mean is the sum divided by the count.", self.window._project_context())
+
+    def test_linking_a_materials_folder(self):
+        import tempfile
+        from pathlib import Path
+        from companion.chat import materials
+        folder = tempfile.mkdtemp()
+        cache = patch.object(materials, "CACHE", Path(tempfile.mkdtemp()))
+        cache.start()
+        self.addCleanup(cache.stop)
+        (Path(folder) / "er-diagrams.txt").write_text("An entity set is drawn as a rectangle.", encoding="utf-8")
+        page = self.window.project_page
+        self.window._open_project(self.subject)
+        self.assertTrue(page.link_folder.isVisible())
+        self.assertFalse(page.materials.isVisible())
+        with patch("companion.ui.projects.QFileDialog.getExistingDirectory", return_value=folder), \
+                patch.object(materials, "warm"):
+            page.link_folder.click()
+        self.assertEqual(self.store.project(self.subject)["folder"], str(Path(folder)))
+        self.assertTrue(page.materials.isVisible())
+        self.assertEqual(page.link_folder.text(), "Change folder…")
+        self.window._new_chat_in_project(self.subject)
+        self.assertIn("An entity set is drawn as a rectangle.", self.window._project_context("what is an entity set"))
+        page_button = next(b for b in page.materials.findChildren(type(page.link_folder)) if b.text() == "Unlink")
+        self.window._open_project(self.subject)
+        page_button.click()
+        self.assertEqual(self.store.project(self.subject)["folder"], "")
+        self.assertTrue((Path(folder) / "er-diagrams.txt").exists())  # Unlinking deletes nothing.
 
     def test_study_sessions_have_their_tools(self):
         self.assertTrue(self.window.type_bar.isVisible())

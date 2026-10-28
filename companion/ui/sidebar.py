@@ -1,5 +1,5 @@
 """The left sidebar: who she is, new chat, search, quick pages, and three tabs of conversations:
-everyday chats, projects and study subjects."""
+everyday chats (with her Reminders session on top), projects and study subjects."""
 from datetime import datetime
 from pathlib import Path
 
@@ -10,12 +10,12 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QHeaderView, Q
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .projects import project_icon
-from .theme import DIM, ICON_FONT, ICONS, glyph_icon, icon_button
+from .theme import DIM, ICON_FONT, ICONS, badge_icon, glyph_icon, icon_button
 
 RECENT_LIMIT = 60          # The full archive stays in History.
 PROJECT_CHATS = 6          # Under an open project; its page lists them all.
 ROW = 34
-ID, PINNED, PROJECT, KIND = (Qt.ItemDataRole.UserRole + offset for offset in range(4))
+ID, PINNED, PROJECT, KIND, UNREAD = (Qt.ItemDataRole.UserRole + offset for offset in range(5))
 TABS = ("chats", "projects", "study")
 TAB_LABELS = {"chats": ("Chats", "compose"), "projects": ("Projects", "folder"), "study": ("Study", "study")}
 
@@ -192,6 +192,7 @@ class Sidebar(QFrame):
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_menu)
         self.list.itemClicked.connect(self._list_clicked)
+        self.list.itemDoubleClicked.connect(lambda item: item.data(ID) and item.data(KIND) != "reminders" and self.rename_requested.emit(item.data(ID)))  # Double-click a chat to rename it.
         chats_layout.addWidget(self.list, 1)
         self.stack.addWidget(chats)
         # Projects and Study: containers with their chats beneath them.
@@ -232,6 +233,7 @@ class Sidebar(QFrame):
             tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             tree.customContextMenuRequested.connect(lambda position, tree=tree: self._tree_menu(tree, position))
             tree.itemClicked.connect(self._tree_clicked)
+            tree.itemDoubleClicked.connect(self._tree_renamed)
             tree.itemExpanded.connect(lambda item: self._folded(item, True))
             tree.itemCollapsed.connect(lambda item: self._folded(item, False))
             page_layout.addWidget(tree, 1)
@@ -286,6 +288,7 @@ class Sidebar(QFrame):
         self.settings_slot.setContentsMargins(0, 4, 0, 0)
         layout.addLayout(self.settings_slot)
         self._rows, self._everything, self._projects, self._chats, self._extras = [], [], [], {}, {}
+        self._inbox = None
         self._current = self._current_project = self._page_project = None
         self._expanded = set()
         self.show_tab("chats")
@@ -335,6 +338,9 @@ class Sidebar(QFrame):
         """`rows`: this character's conversations, newest first. `projects`: projects and subjects.
         `extras`: per subject, {"due": flashcards due}."""
         self._everything, self._projects, self._extras = list(rows), list(projects), dict(extras or {})
+        # Her Reminders session sits above your chats, apart from them.
+        self._inbox = next((row for row in rows if row.get("kind") == "reminders"), None)
+        rows = [row for row in rows if row.get("kind") != "reminders"]
         self._chats = {}
         for row in rows:
             if row.get("project_id"):
@@ -415,12 +421,17 @@ class Sidebar(QFrame):
             rows = sorted(self._rows, key=lambda row: not row.get("pinned"))
         names = {project["id"]: project["name"] for project in self._projects}
         moon, group = glyph_icon("moon"), None
+        if not words and self._inbox:
+            self._inbox_item(self._inbox)
         for row in rows:
             if not words:
                 heading = "Pinned" if row.get("pinned") else _group(row.get("updated_at"))
                 if heading != group:
                     group = heading
                     self._heading(heading)
+            if row.get("kind") == "reminders":
+                self._inbox_item(row)
+                continue
             item = QListWidgetItem(row["title"])
             item.setSizeHint(QSize(0, ROW))
             item.setData(ID, row["id"])
@@ -436,6 +447,26 @@ class Sidebar(QFrame):
                 item.setSelected(True)
                 self.list.setCurrentItem(item)
         self.list_title.setText("Results" if words else "Chats")
+
+    def _inbox_item(self, row):
+        """Her Reminders session: a bell, and the number she has left you since you last looked."""
+        unread = row.get("unread") or 0
+        item = QListWidgetItem(row["title"])
+        item.setSizeHint(QSize(0, ROW))
+        item.setData(ID, row["id"])
+        item.setData(KIND, "reminders")
+        item.setData(UNREAD, unread)
+        item.setIcon(badge_icon("bell", unread) if unread else glyph_icon("bell"))
+        if unread:
+            font = QFont()
+            font.setBold(True)
+            item.setFont(font)
+        item.setToolTip("Where she reminds you, apart from your chats"
+                        + (f" · {unread} new" if unread else f" · {_when(row.get('updated_at'))}"))
+        self.list.addItem(item)
+        if row["id"] == self._current:
+            item.setSelected(True)
+            self.list.setCurrentItem(item)
 
     def _heading(self, text):
         item = QListWidgetItem(text)
@@ -462,6 +493,31 @@ class Sidebar(QFrame):
             return
         super().keyPressEvent(event)
 
+    def start_rename(self, identifier, text, commit, project=False):
+        """Opens an editor over the row of this conversation (or project) where it is in the list. False if
+        it is not in the sidebar."""
+        from .inline import edit_in_place
+        places = [] if project else [(self.list, "chats")]
+        places += [(tree, "projects" if kind == "project" else "study") for kind, tree in self.trees.items()]
+        for view, tab in places:
+            items = ([view.item(i) for i in range(view.count())] if view is self.list else
+                     [item for i in range(view.topLevelItemCount()) for item in
+                      (view.topLevelItem(i), *(view.topLevelItem(i).child(j) for j in range(view.topLevelItem(i).childCount())))])
+            for item in items:
+                data = (lambda role: item.data(role)) if view is self.list else (lambda role: item.data(0, role))
+                kind = data(KIND) or "chat"
+                if data(ID) != identifier or (kind == "project") != project or kind in {"review", "more", "reminders"}:
+                    continue
+                self.show_tab(tab)
+                if view is not self.list and item.parent():
+                    item.parent().setExpanded(True)
+                view.scrollToItem(item)
+                for actions in self.row_actions:
+                    actions.dismiss()
+                edit_in_place(view, view.visualItemRect(item), text, commit)
+                return True
+        return False
+
     def _list_clicked(self, item):
         if item.data(ID):
             self.open_conversation.emit(item.data(ID))
@@ -483,8 +539,8 @@ class Sidebar(QFrame):
     def _buttons_for(self, item):
         """The hover buttons of a row: pin and ⋯ on a chat; new chat and ⋯ on a project or subject."""
         if isinstance(item, QListWidgetItem):
-            if not item.data(ID):
-                return []  # A date heading.
+            if not item.data(ID) or item.data(KIND) == "reminders":
+                return []  # A date heading, or her Reminders session, which stays where it is.
             return [("pin", "Unpin" if item.data(PINNED) else "Pin to the top",
                      lambda item, _button: self.pin_requested.emit(item.data(ID), not item.data(PINNED))),
                     ("more", "More", lambda item, button: self._chat_menu(
@@ -520,6 +576,13 @@ class Sidebar(QFrame):
             self.review_cards.emit(identifier)
         else:
             self.open_conversation.emit(identifier)
+
+    def _tree_renamed(self, item, _column=0):
+        kind = item.data(0, KIND)
+        if kind == "chat":
+            self.rename_requested.emit(item.data(0, ID))
+        elif kind == "project":
+            self.rename_project.emit(item.data(0, ID))
 
     def _tree_menu(self, tree, position):
         item = tree.itemAt(position)
@@ -557,7 +620,7 @@ class Sidebar(QFrame):
 
     def _list_menu(self, position):
         item = self.list.itemAt(position)
-        if item is not None and item.data(ID):
+        if item is not None and item.data(ID) and item.data(KIND) != "reminders":
             self._chat_menu(item.data(ID), item.data(PINNED), item.data(PROJECT), self.list.viewport().mapToGlobal(position))
 
     def _chat_menu(self, conversation, pinned, project, where):

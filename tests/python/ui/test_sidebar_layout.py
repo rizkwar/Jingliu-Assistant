@@ -8,7 +8,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from companion.core.storage import Store
 from companion.ui.chat_view import Bubble
@@ -78,9 +78,42 @@ class SidebarLayoutTests(unittest.TestCase):
         self.window._pin_conversation(self.pinned, False)
         self.assertEqual(self.titles()[0], "Study plan for finals")
 
+    def test_renaming_happens_in_place_not_in_a_popup(self):
+        from companion.ui.inline import InlineEditor
+        self.window._rename_conversation(self.older)  # From ⋯ → Rename: an editor over its row.
+        editor = self.window.sidebar.list.viewport().findChild(InlineEditor)
+        self.assertIsNotNone(editor)
+        self.assertEqual(editor.text(), "Study plan for finals")
+        editor.setText("x" * 200)                      # Too long: stays open, marked, with the reason.
+        editor.save()
+        self.assertTrue(editor.property("invalid"))
+        self.assertIn("120", editor.toolTip())
+        editor.setText("Finals plan")
+        editor.save()
+        self.assertEqual(self.store.conversation(self.older)["title"], "Finals plan")
+        self.assertIn("Finals plan", self.titles())
+        self.window._switch_conversation(self.older)    # The title above the chat: double-click to rename.
+        self.window._rename_here()
+        editor = self.window.conversation_title.parentWidget().findChild(InlineEditor)
+        editor.setText("Calculus finals")
+        from PySide6.QtCore import QEvent as _Event
+        from PySide6.QtGui import QKeyEvent
+        editor.keyPressEvent(QKeyEvent(_Event.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+        self.assertEqual(self.store.conversation(self.older)["title"], "Finals plan")  # Esc keeps the old name.
+
+    def test_deleting_asks_in_the_window_not_in_a_popup(self):
+        self.window._delete_conversation(self.older)
+        bar = self.window.inline_bar
+        self.assertTrue(bar.isVisibleTo(self.window))
+        self.assertIn("Study plan for finals", bar.text.text())
+        self.assertIsNotNone(self.store.conversation(self.older))  # Nothing happens until it is confirmed.
+        next(b for b in bar.findChildren(QPushButton) if b.text() == "Cancel").click()
+        self.assertFalse(bar.isVisibleTo(self.window))
+        self.assertIsNotNone(self.store.conversation(self.older))
+
     def test_deleting_the_open_conversation_moves_to_another(self):
         self.window._switch_conversation(self.older)
-        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
+        with patch("companion.ui.inline.InlineBar.ask", side_effect=lambda text, action, on_yes, *a, **k: on_yes()):
             self.window._delete_conversation(self.older)
         self.assertIsNone(self.store.conversation(self.older))
         self.assertNotEqual(self.window._conversation_id, self.older)

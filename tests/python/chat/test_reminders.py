@@ -9,6 +9,7 @@ from companion.avatar.cues import CueFilter
 from companion.core.config import DEFAULT_MODEL, Settings
 from companion.chat.prompts import reply_prompt
 from companion.core.storage import Store
+from companion.ui.sidebar import UNREAD
 from tests.qt_test_support import application
 
 SETTINGS = Settings("test-key", DEFAULT_MODEL, "Jingliu", "Profile.", tts_enabled=False)
@@ -131,19 +132,70 @@ class WindowReminderTests(unittest.TestCase):
         self.window._cancel_reminder("dentist")
         self.assertIn("No reminder matched", self.window.transcript.toPlainText())
 
-    def test_a_due_reminder_waits_until_she_is_free_then_she_delivers_it(self):
+    def test_a_due_reminder_waits_until_she_is_free_then_she_delivers_it_in_her_session(self):
         self.store.add_reminder("Study", datetime.now(timezone.utc) - timedelta(minutes=1))
         started = []
-        with patch.object(self.window, "_begin_reply", side_effect=lambda text, reminder=False: started.append(text) or True):
+        chat = self.window._conversation_id
+        with patch.object(self.window, "_begin_reply") as begin, \
+                patch.object(self.window, "_remind_out_of_view",
+                             side_effect=lambda inbox, line, reminder: started.append((inbox, line)) or True):
             self.window._worker = object()  # Busy replying.
             self.window._check_reminders()
             self.assertEqual(started, [])
             self.window._worker = None
             self.window._check_reminders()
+        begin.assert_not_called()  # Not in the chat you are in…
         self.assertEqual(len(started), 1)
-        self.assertTrue(started[0].startswith(reminders.MARK))
-        self.assertIn("Study", started[0])
+        inbox, line = started[0]
+        self.assertNotEqual(inbox, chat)  # …but in her Reminders session.
+        self.assertEqual(self.store.conversation(inbox)["kind"], "reminders")
+        self.assertTrue(line.startswith(reminders.MARK))
+        self.assertIn("Study", line)
         self.assertEqual(self.store.reminders(), [])  # Delivered once.
+
+    def test_with_her_session_open_she_reminds_you_there_as_she_writes(self):
+        inbox = self.window._reminder_session()
+        self.window._restore_conversation(inbox)
+        self.store.add_reminder("Stretch", datetime.now(timezone.utc))
+        with patch.object(self.window, "_begin_reply", return_value=True) as begin:
+            self.window._check_reminders()
+        self.assertTrue(begin.call_args.args[0].startswith(reminders.MARK))
+        self.assertTrue(begin.call_args.kwargs["reminder"])
+
+    def test_written_out_of_view_it_is_saved_there_marked_unread_and_your_chat_is_untouched(self):
+        chat = self.window._conversation_id
+        before = self.window.transcript.toPlainText()
+        reminder = {"text": "Drink water", "due_at": datetime.now(timezone.utc).isoformat()}
+        inbox = self.window._reminder_session()
+
+        class Worker:
+            turn_id, error = "t", ""
+            stop_requested = __import__("threading").Event()
+
+            def deleteLater(self):
+                pass
+
+        self.window._reminder_job = {"worker": Worker(), "inbox": inbox, "line": reminders.message(reminder),
+                                     "reminder": reminder, "text": "", "cues": CueFilter()}
+        self.window._reminder_chunk("t", "Water first. [[smile]] Then the next chapter.")
+        self.window._reminder_finished()
+        self.assertIsNone(self.window._reminder_job)
+        self.assertEqual(self.window._conversation_id, chat)
+        self.assertEqual(self.window.transcript.toPlainText(), before)
+        saved = self.store.messages(inbox)
+        self.assertTrue(saved[0]["display"].startswith(reminders.MARK))
+        self.assertEqual(saved[1]["display"], "Water first. Then the next chapter.")
+        self.assertEqual(self.store.conversation(inbox)["unread"], 1)
+        # The sidebar shows her session above your chats, with what is new; opening it reads it.
+        top = self.window.sidebar.list.item(0)
+        self.assertEqual((top.text(), top.data(UNREAD)), ("Reminders from Jingliu", 1))
+        self.assertEqual(self.window.sidebar._buttons_for(top), [])
+        self.window._switch_conversation(inbox)
+        self.assertEqual(self.store.conversation(inbox)["unread"], 0)
+        text = self.window.transcript.toPlainText()
+        self.assertIn("Reminder (", text)
+        self.assertIn("Water first. Then the next chapter.", text)
+        self.assertNotIn("You", text.split("Reminder (")[1].split("Water first")[0])  # A clock note, not your words.
 
     def test_long_missed_reminders_are_listed_not_delivered(self):
         self.store.add_reminder("Old one", datetime.now(timezone.utc) - timedelta(days=2))
@@ -152,11 +204,14 @@ class WindowReminderTests(unittest.TestCase):
         begin.assert_not_called()
         self.assertIn("Missed while the app was closed: “Old one”", self.window.transcript.toPlainText())
 
-    def test_without_a_connection_the_reminder_still_appears(self):
+    def test_without_a_connection_the_reminder_is_still_left_in_her_session(self):
         self.store.add_reminder("Drink water", datetime.now(timezone.utc))
         with patch.object(Settings, "validate_connection", side_effect=ValueError("no model")):
             self.window._check_reminders()
-        self.assertIn("Reminder: Drink water", self.window.transcript.toPlainText())
+        inbox = self.window._reminder_session()
+        self.assertEqual(self.store.messages(inbox)[-1]["display"], "Reminder: Drink water")
+        self.assertEqual(self.store.conversation(inbox)["unread"], 1)
+        self.assertEqual(self.store.reminder_conversation(self.store.conversation(inbox)["character_key"]), inbox)
 
     def test_reminders_dialog_lists_and_removes(self):
         from companion.ui.library import ReminderDialog

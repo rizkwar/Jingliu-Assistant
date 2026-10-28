@@ -7,3 +7,6 @@ python-dotenv==1.2.4
 pocket-tts==4.0.1
 sounddevice==0.5.6
 faster-whisper==1.2.1
+ziamath==0.13
+ziafont==0.11
+latex2mathml==3.81.1

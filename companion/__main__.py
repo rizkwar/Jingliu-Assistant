@@ -14,12 +14,25 @@ from .core.preferences import Preferences
 from .app.tray import TrayController
 
 
+def text_rendering(preferences_path):
+    """Smooth text (the default): greyscale, like ChatGPT in a browser, instead of ClearType's coloured
+    edges, which look thin and grainy on a dark window. Chosen in Settings; read before Qt starts."""
+    if sys.platform != "win32" or os.environ.get("QT_QPA_PLATFORM") or "-platform" in sys.argv:
+        return []
+    try:
+        import json
+        choice = json.loads(preferences_path.read_text(encoding="utf-8")).get("text_rendering", "smooth")
+    except (OSError, ValueError, AttributeError):
+        choice = "smooth"
+    return [] if choice == "sharp" else ["-platform", "windows:fontengine=freetype"]
+
+
 def main() -> int:
     # The see-through avatar window is a web page. With Qt's default Direct3D 11 backend it
     # sometimes showed a frame with the page (or parts of it) missing; OpenGL hands each
     # frame over intact. Set before the application exists; a user's own choice still wins.
     os.environ.setdefault("QSG_RHI_BACKEND", "opengl")
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv + text_rendering(PROJECT_ROOT / "data" / "preferences.json"))
     app.setApplicationName("Desktop Companion")
     app.setStyle("Fusion")
     data_dir = PROJECT_ROOT / "data"

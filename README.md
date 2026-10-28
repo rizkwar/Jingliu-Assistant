@@ -23,7 +23,9 @@ current character is **Jingliu**, always in character: reserved, composed, quiet
 - **Memory:** "remember that I take my tea without sugar". She saves it, and can also keep lasting
   preferences on her own. Every change shows in the chat with **Undo**; manage them in **⋯ → Memories**.
 - **Reminders:** "remind me at 7 to study", "every weekday at 8, remind me to stretch". She tells you
-  herself when one is due, even after a restart; **⋯ → Reminders** lists them.
+  herself when one is due, even after a restart, in her own **Reminders** session at the top of your chats,
+  never in the chat you are in: she says it aloud, and the session shows a count until you open it, where you
+  can answer her. **⋯ → Reminders** lists the upcoming ones.
 - **Conversations** are saved locally. **⋯ → History** has search, dates, rename and delete;
   **⋯ → Context** keeps notes for long chats.
 
@@ -40,7 +42,11 @@ current character is **Jingliu**, always in character: reserved, composed, quiet
 - She greets you, has idle moments, glances at your cursor, falls asleep when left alone and wakes
   when you come back. **Pet her** by stroking her head with the pointer.
 - While she works on a task she looks focused, and a small panel shows her current step.
-- Drag to move; the corner grip resizes her. **Settings → Avatar → Animation tester** plays every animation.
+- Drag to move; drag her bottom-right corner to resize her. **Settings → Avatar → Animation tester** plays every animation.
+- **Accessories** (Settings → Accessories, Live2D models): **glasses** rigged like a Live2D art mesh in her face's
+  deformer: pinned to her face mesh, they turn, tilt and look up and down exactly as her face does, sit under
+  her fringe, and stay put when she blinks: Teacher (reading glasses), Round, Rectangle, Oval or Half-rim, in silver, gold, black, glacial
+  blue or crimson, with clear, moonlit-blue, rose or dark lenses.
 
 **Three kinds of conversation**, each with its own tab above Settings: **Chats** (everyday, grouped by
 Pinned / Today / Yesterday / Previous 7 days / Older), **Projects** and **Study**. Opening a conversation
@@ -49,8 +55,10 @@ shows its tab; New chat is an everyday chat.
 **Study**
 - A **subject** is a folder of study sessions that **share her memory**: in a new session she remembers what
   you covered in the others (your saved notes, or their last exchanges) and picks up from there.
-- **Materials** she teaches and quizzes from (text and PDFs are read) and **how she teaches you**. Update a
-  material any time: **Replace…** with a newer version, or when the original file changes, **Refresh** (or
+- **Materials** she teaches and quizzes from (text and PDFs are read) and **how she teaches you**.
+  **Link folder…** uses a folder of course materials where it is (PDF, Word, PowerPoint, text and code; nothing
+  is copied, new files are picked up): each message she sees its list of files and only the passages related
+  to it, which keeps replies fast and light. Or add files one by one, and update one any time: **Replace…** with a newer version, or when the original file changes, **Refresh** (or
   **Refresh all**) brings the new version in. She tutors in its sessions: explains step by step, checks
   your understanding and grounds answers in your materials.
 - Above the message box: **Quiz me** (one question at a time, scored: *Quiz 4/5*), **Make flashcards**,
@@ -87,6 +95,18 @@ shows its tab; New chat is an everyday chat.
   (Ctrl+K), a model picker and an **Approve for me** switch in the message box, and copy / read aloud under
   each reply. Select part of a reply and right-click → **Quote in reply**. Her messages can be plain text
   or bubbles (Settings → App → Window). Shortcuts: Ctrl+N new chat, Ctrl+B sidebar, Ctrl+, settings.
+- **Replies set like ChatGPT's**: smooth greyscale text (Settings → Window → Text rendering), roomy lines,
+  `inline code` in rounded pills, files she cites shown with a file icon that **open the file** from your
+  subject's materials, centred tables, links that open in your browser, and **math** from LaTeX
+  (`$…$` in a line, `$$…$$` centred), drawn with a real math font, e.g. relational algebra like
+  `R_1 owtie_{c} R_2 = \sigma_{c}(R_1 	imes R_2)`. Scrolling up while she writes stays put; a round ↓
+  brings you back to her latest words.
+- **Code in its own box**: `</>` and the language or file name, icon buttons to **wrap long lines** and
+  **copy** (it turns into a check), and colours for keywords, strings, comments and numbers.
+- **No popups**: rename a chat, project or subject right where its name is (double-click it, or the title above the chat); questions like "Delete …?" and notices appear in a bar inside the window.
+- **Fonts**: Inter (bundled, like ChatGPT; the default), Segoe UI Variable, Sitka, Bahnschrift or Calibri, in four text sizes.
+- **Themes** (Settings → App → Window → Theme): Moonlit frost, Crimson moon, Jade grove, Lunar gold, Violet
+  dusk, Midnight ink, and two light ones, Snowfield and Blossom day. The whole window changes at once.
 - Lives in the **system tray** when closed (Quit from there); in Windows Search / Start as **Jingliu**.
 - **Start with Windows** (quietly, in the tray) and **gentle check-ins** (off by default: a greeting
   that fits the time of day, and a nudge to rest after about three hours) in Settings → App.

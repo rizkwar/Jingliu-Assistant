@@ -369,7 +369,7 @@ class WindowTests(unittest.TestCase):
         self.window.input.setPlainText("An unsent thought")
         previous = self.window.settings
         with patch("companion.ui.window.load_settings", side_effect=ValueError("Character profile has invalid TOML.")), \
-             patch("companion.ui.window.QMessageBox.warning") as warning:
+             patch("companion.ui.inline.InlineBar.tell") as warning:
             self.window._reload_settings()
         warning.assert_called_once()
         self.assertIs(self.window.settings, previous)
@@ -429,7 +429,7 @@ class WindowTests(unittest.TestCase):
 
     def test_invalid_reference_does_not_replace_current_voice(self):
         with patch("companion.ui.window.QFileDialog.getOpenFileName", return_value=("missing.wav", "")), \
-             patch("companion.ui.window.QMessageBox.warning") as warning:
+             patch("companion.ui.inline.InlineBar.tell") as warning:
             self.window.choose_reference.click()
         warning.assert_called_once()
         self.assertEqual(self.window.voice.currentData(), SETTINGS.tts_voice)

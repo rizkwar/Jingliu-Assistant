@@ -66,7 +66,7 @@ class AvatarAssetTests(unittest.TestCase):
             for name in ('index.html', 'viewer.js', 'conversation-state.js', 'render-quality.js',
                          'render-cadence.js', 'assistant-motion.js', 'avatar-life.js', 'motion-preview.js',
                          'idle-attention.js', 'stable-step.js', 'style.css', 'vendor/mesh-avatar.js',
-                         'live2d-avatar.js', 'live2d-rig.js', 'live2d-physics.js', 'rig-preview.js'):
+                         'live2d-avatar.js', 'live2d-rig.js', 'live2d-physics.js', 'rig-preview.js', 'accessories.js'):
                 (web / name).write_text('fixture')
             runtime = root / '.cache/avatar-runtimes/live2d'
             runtime.mkdir(parents=True)
