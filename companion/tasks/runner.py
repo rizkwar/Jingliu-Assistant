@@ -23,7 +23,8 @@ from ..core.config import PROJECT_ROOT
 
 SERVER = "jingliu"
 # Looking and reading need no approval; everything else reaches the approval hook.
-FREE_TOOLS = ("Read", "Glob", "Grep", "WebSearch", "WebFetch", f"mcp__{SERVER}__screenshot", f"mcp__{SERVER}__wait")
+# Using one of her skills is reading its instructions; what it then does still asks first.
+FREE_TOOLS = ("Read", "Glob", "Grep", "WebSearch", "WebFetch", "Skill", f"mcp__{SERVER}__screenshot", f"mcp__{SERVER}__wait")
 TOOLS = "Bash,PowerShell,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"
 INPUT_TOOLS = {f"mcp__{SERVER}__{name}" for name in ("click", "type_text", "press_keys", "scroll")}
 MAX_TURNS = 80
@@ -105,6 +106,8 @@ def describe(tool, values):
         "press_keys": lambda: f"Press {values.get('keys', '')}",
         "scroll": lambda: f"Scroll {'up' if (values.get('amount') or 0) > 0 else 'down'} on the screen",
         "wait": lambda: "Wait a moment",
+        "Skill": lambda: f"Use the {str(values.get('skill', '')).split(':')[-1]} skill",
+        "install_skill": lambda: f"Install the skill from {short(str(values.get('source', '')), 100)}",
         **{tool: (lambda tool=tool: FILE_STEPS[tool](values)) for tool in FILE_STEPS},
     }.get(name, lambda: f"Use {name}")()
 
@@ -284,14 +287,17 @@ class ComputerTask(QObject):
         from ..chat.claude import DEFAULT_CLAUDE_MODEL
         from ..chat.effort import claude as claude_effort
         # stream-json both ways: the app can interrupt a stuck step and steer her with a message.
+        from ..chat.skills import plugin_dir
+        skills = plugin_dir()  # Her own skills, if she has any switched on.
         session = self.session or {}
         keep = (["--resume", session["id"]] if session.get("resume") else ["--session-id", session["id"]]) \
             if session.get("id") else ["--no-session-persistence"]
         arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                      "--include-partial-messages", *keep,
-                     "--setting-sources", "", "--disable-slash-commands", "--strict-mcp-config",
+                     "--setting-sources", "", *(["--plugin-dir", skills] if skills else ["--disable-slash-commands"]),
+                     "--strict-mcp-config",
                      "--mcp-config", str(work / "mcp.json"), "--permission-prompt-tool", f"mcp__{SERVER}__approve",
-                     "--tools", TOOLS, "--allowedTools", *FREE_TOOLS, *self.trusted,
+                     "--tools", TOOLS + (",Skill" if skills else ""), "--allowedTools", *FREE_TOOLS, *self.trusted,
                      "--append-system-prompt-file", str(work / "prompt.txt"),
                      "--model", settings.claude_model or DEFAULT_CLAUDE_MODEL,
                      "--effort", claude_effort(getattr(settings, "task_effort", "medium")),

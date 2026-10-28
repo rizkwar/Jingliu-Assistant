@@ -86,6 +86,14 @@ shows its tab; New chat is an everyday chat.
   that off per server. Servers set to **Conversations and tasks** are also available while she replies with
   your Claude subscription, and each tool she uses shows as a small note in the chat.
 
+**Skills** (Settings → Tools → Skills)
+- Give her Claude Code skills (a folder with a SKILL.md): install from a GitHub link or owner/repo, add a folder, or
+  copy one of your own Claude Code skills. Switch each on or off, or remove it.
+- Ask her to install one ("install the skill at github.com/…"): she proposes it and you confirm first. In a
+  computer task she can find one on the web and install it, with your approval.
+- They are hers alone (data/skills), loaded into her replies and tasks with your Claude subscription; your own
+  Claude Code skills, hooks and plugins stay out. Commands and file changes a skill leads to still ask first.
+
 **Do things on your computer** ([computer tasks](docs/computer-tasks.md))
 - Ask casually ("my desktop is a mess") or type `/do …`. She proposes a plan and waits for your yes.
 - She **asks before** running commands, changing files, or clicking and typing, unless you turn that

@@ -54,18 +54,23 @@ def child_environment():
     return environment
 
 
-def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low', session='', resume=False, reading=False):
+def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low', session='', resume=False, reading=False,
+                  skills=None):
     # Conversation: no built-in tools, skills, CLAUDE.md or hooks. Only MCP servers the person allowed in
     # conversation are connected, and only their tools may run. With `session`, the conversation's own session is
     # started or continued (see sessions.py); without one, nothing is kept.
     keep = ['--resume', session] if session and resume else ['--session-id', session] if session else \
         ['--no-session-persistence']
+    tools = [*(READING_TOOLS if reading else ()), *(('Skill',) if skills else ())]
+    # Her own skills (skills.py) load as a plugin. Safe mode would block it, so then nothing of your Claude Code
+    # setup loads instead (no setting sources); either way your own skills, hooks and plugins stay out.
+    isolation = ['--setting-sources', '', '--plugin-dir', str(skills)] if skills else \
+        ['--safe-mode', '--disable-slash-commands']
     command = [claude_executable(), '-p', '--system-prompt-file', str(prompt_file),
-               '--tools', ','.join(READING_TOOLS) if reading else '',
-               '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', *keep,
+               '--tools', ','.join(tools), *isolation, '--strict-mcp-config', *keep,
                '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', effort, '--input-format', 'stream-json',
                '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
-    allowed = [*(READING_TOOLS if reading else ()), *(f'mcp__{name}' for name in servers if mcp_file)]
+    allowed = [*tools, *(f'mcp__{name}' for name in servers if mcp_file)]
     if mcp_file and servers:
         command += ['--mcp-config', str(mcp_file)]
     if allowed:
@@ -177,9 +182,10 @@ async def stream_claude(settings, messages):
         try:
             from .effort import claude as claude_effort
             reading = getattr(settings, 'chat_reading', False)
+            skills = getattr(settings, 'skills_dir', '') or None
             process = await run(reply_command(prompt_file, settings.claude_model, mcp_file, servers,
                                               claude_effort(getattr(settings, 'effort', 'low')), session, resume,
-                                              reading),
+                                              reading, skills),
                                 cwd=str(sessions.FOLDER) if session else folder)
         except OSError:
             raise ChatError('Could not start Claude Code. Check its installation and restart the assistant.') from None
@@ -203,7 +209,7 @@ async def stream_claude(settings, messages):
                     if inner.get('type') == 'content_block_start' and block.get('type') in {
                             'tool_use', 'server_tool_use', 'mcp_tool_use'}:
                         name = str(block.get('name') or '')
-                        if reading and name in READING_TOOLS:
+                        if (reading and name in READING_TOOLS) or (skills and name == 'Skill'):
                             after_tool = True  # Shown once its input is known (the assistant event below).
                             continue
                         if not name.startswith('mcp__') or name.removeprefix('mcp__').partition('__')[0] not in servers:
@@ -218,11 +224,13 @@ async def stream_claude(settings, messages):
                         after_tool = False
                         got_text = True
                         yield delta['text']
-                elif kind == 'assistant' and reading:
+                elif kind == 'assistant' and (reading or skills):
                     from ..tasks.runner import describe
                     for block in (event.get('message') or {}).get('content') or []:
                         if block.get('type') == 'tool_use' and block.get('name') in READING_TOOLS:
                             yield {'read': describe(block['name'], block.get('input'))}
+                        elif block.get('type') == 'tool_use' and block.get('name') == 'Skill':
+                            yield {'skill': str((block.get('input') or {}).get('skill', '')).split(':')[-1]}
                 elif kind == 'rate_limit_event':
                     info = event.get('rate_limit_info') or {}
                     from .usage import claude_windows

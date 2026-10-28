@@ -16,6 +16,7 @@ class ReplyWorker(QThread):
     limits = Signal(list)  # What is left of the plan's limits, as the service reported it while replying.
     session = Signal(dict)  # The Claude Code session this reply ran in: {id, resumed}.
     looked = Signal(str)  # A file she read or searched while replying, in coding mode ("Read views.py").
+    used_skill = Signal(str)  # One of her skills, which she used while replying.
 
     def __init__(self, settings: Settings, messages: list[dict[str, str]], parent=None):
         super().__init__(parent)
@@ -71,6 +72,8 @@ class ReplyWorker(QThread):
                                 self.session.emit(text["session"])
                             elif "read" in text:
                                 self.looked.emit(text["read"])
+                            elif "skill" in text:
+                                self.used_skill.emit(text["skill"])
                             elif "limits" in text:
                                 self.limits.emit(text["limits"])
                             else:

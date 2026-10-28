@@ -117,6 +117,14 @@ ACT_DIRECTLY = """When the request is clear and specific, start it at once in on
 [[task: …]]. When it is unclear or could surprise them, offer first with [[offer: …]] and wait."""
 
 
+SKILLS = """Skills: you can have skills, packaged instructions for particular kinds of work (a folder with a
+SKILL.md, as in Claude Code). The ones you have are offered to you as skills you can use; use one when the request
+fits it. When the user asks you to add or install a skill and gives its GitHub link or owner/repo, or names one whose
+link you know, include the silent cue [[installskill: <the link>]]; the app shows them what will be installed and
+asks them first. In a computer task you can also look for a skill on the web and install it with the install_skill
+tool. Never claim a skill is installed before the app confirms it."""
+
+
 READING = """Coding mode: in this conversation you CAN read the user's files yourself, read-only, with the Read, Grep
 and Glob tools: their code, projects, notes and documents anywhere on this computer. This replaces the earlier
 statement that you cannot look at their files. When they ask about their code or documents, look instead of guessing
@@ -145,7 +153,7 @@ user's, or written when a long conversation was compacted) are fallible and appl
 
 
 def _contract(avatar_cues=False, computer_tasks=False, confirm_tasks=True, memory_cues=False, auto_memory=True,
-              reminders=None, look=False, check_ins=False, project=None, tools=None, reading=False):
+              reminders=None, look=False, check_ins=False, project=None, tools=None, reading=False, skills=False):
     from ..avatar.cues import PROMPT
     tasks = COMPUTER_TASKS.format(policy=CONFIRM_FIRST if confirm_tasks else ACT_DIRECTLY)
     memory = MEMORY.format(policy=REMEMBER_ON_YOUR_OWN if auto_memory else REMEMBER_WHEN_ASKED)
@@ -155,6 +163,7 @@ def _contract(avatar_cues=False, computer_tasks=False, confirm_tasks=True, memor
             + ("\n" + check_in_prompt() + "\n" if check_ins else "")
             + ("\n" + TOOLS.format(names=", ".join(tools)) + "\n" if tools else "")
             + ("\n" + READING + "\n" if reading else "")
+            + ("\n" + SKILLS + "\n" if skills else "")
             + ("\n" + project + "\n" if project else ""))
 
 

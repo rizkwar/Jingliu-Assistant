@@ -514,6 +514,9 @@ class CompanionWindow(QMainWindow):
         self.pages = motion.FadingStack()  # Settings, pages and the chat crossfade into one another.
         self.pages.setObjectName("pages")
         self.pages.setMaximumWidth(820)  # A centred reading column, as wide as ChatGPT's.
+        # Settings and other pages need more room than a conversation's reading column.
+        self.pages.currentChanged.connect(
+            lambda _index: self.pages.setMaximumWidth(820 if self.pages.currentWidget() is self.chat_page else 1120))
         column = QWidget()
         column.setObjectName("column")
         self.chat_page = column
@@ -649,6 +652,11 @@ class CompanionWindow(QMainWindow):
         self.tools_panel = ToolsPanel(self._mcp_path, present=self._present)
         self.tools_panel.changed.connect(self._servers_changed)
         tools_page.addWidget(self.tools_panel)
+        section(tools_page, "Skills")
+        from .skills_panel import SkillsPanel
+        self.skills_panel = SkillsPanel()
+        self.skills_panel.installed.connect(self._skills_installed)
+        tools_page.addWidget(self.skills_panel)
         tools_page.addStretch()
         self.mcp_servers = list(self.tools_panel.servers)
         settings_layout = companion_page
@@ -1553,10 +1561,12 @@ class CompanionWindow(QMainWindow):
         session = self._session or {}
         worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools, effort=level,
                                      claude_session=session.get("id", ""), claude_resume=session.get("resume", False),
-                                     chat_reading=self._coding_on()), context, self)
+                                     chat_reading=self._coding_on(), skills_dir=self._skills_dir()), context, self)
         self._count_usage(worker, self._conversation_id)
         self._read_note, self._read_files = None, []
         worker.looked.connect(self._looked)
+        worker.used_skill.connect(lambda name: self.transcript.add_memory_note(
+            f"Used the {name} skill", can_undo=False, icon="idea"))
         worker.session.connect(self._session_started)
         worker.usage.connect(self._reply_used)
         self._worker = worker
@@ -1608,12 +1618,38 @@ class CompanionWindow(QMainWindow):
             avatar_cues=self.show_avatar.isChecked(), computer_tasks=self.computer_tasks.isChecked(),
             confirm_tasks=self.confirm_tasks.isChecked(), memory_cues=True, auto_memory=self.auto_memory.isChecked(),
             look=self.look_at_screen.isChecked(), check_ins=self.check_ins.isChecked(), project=project,
-            tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None, reading=reading)
+            tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None, reading=reading,
+            skills=self.settings.llm_provider == "claude")
         if session:
             session["coding"] = reading
         latest = {"role": "user", "content": text, "attachments": stored, "context": app_context,
                   "since": session["since"] if session else []}
         return system, [*recent_messages(turns), latest], session
+
+    def _skills_dir(self):
+        """Her skills' plugin folder for a Claude reply, or "" (none switched on, or another service)."""
+        if self.settings.llm_provider != "claude":
+            return ""
+        from ..chat.skills import plugin_dir
+        return plugin_dir() or ""
+
+    def _offer_skill(self, source):
+        """She asked to install a skill: you see where from, and say yes first."""
+        source = " ".join(source.split())[:300]
+        ask(self, "Install a skill for her?", f"From {source}. A skill is a set of instructions she follows; read it "
+            "first if you don't know where it comes from. You can switch it off or remove it in Settings → Tools.",
+            "Install", lambda: self._install_skill(source), danger=False)
+
+    def _install_skill(self, source):
+        if not self.skills_panel.install(source):
+            self.transcript.add_note("Another skill is still installing; try again in a moment.", "warning")
+
+    def _skills_installed(self, names):
+        if names:
+            self.transcript.add_memory_note("Skill installed: " + ", ".join(names) + " · Settings → Tools",
+                                            can_undo=False, icon="idea")
+        elif self.skills_panel.status.text():
+            self.transcript.add_note(self.skills_panel.status.text(), "warning")
 
     def _coding_on(self, conversation_id=None):
         """Coding mode for a conversation: as you set it, or on in a project's chats. It needs Claude Code."""
@@ -2886,7 +2922,8 @@ class CompanionWindow(QMainWindow):
                     "remind": self._set_reminder, "unremind": self._cancel_reminder,
                     # After her reply is shown, so the confirmation comes after her words.
                     "undotask": lambda _: QTimer.singleShot(0, self, self._undo_latest),
-                    "card": self._add_card, "score": self._score, "focus": self._focus_cue}
+                    "card": self._add_card, "score": self._score, "focus": self._focus_cue,
+                    "installskill": lambda source: QTimer.singleShot(0, self, lambda: self._offer_skill(source))}
         self._new_cards = []
         for action, detail in actions:
             handlers[action](detail)
@@ -3914,10 +3951,13 @@ class CompanionWindow(QMainWindow):
                 self._memory_actions.append((name, detail))
             elif name == "undotask":
                 self._memory_actions.append((name, ""))
+            elif name == "installskill" and detail:
+                self._memory_actions.append((name, detail))
             elif name == "look":
                 self._look_requested = True
         cues = [(offset, cue) for offset, cue in cues if cue.partition(":")[0] not in
-                {"task", "offer", "remember", "forget", "remind", "unremind", "undotask", "look", "card", "score", "focus"}]
+                {"task", "offer", "remember", "forget", "remind", "unremind", "undotask", "look", "card", "score", "focus",
+                 "installskill"}]
         # Spoken replies show each expression as the voice reaches it; silent ones show it at once.
         self._pending_cues.extend(cues)
         if not self._streaming_voice:

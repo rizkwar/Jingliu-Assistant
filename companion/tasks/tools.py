@@ -46,6 +46,11 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}},
     {"name": "make_folder", "description": "Create a folder, with any missing parents (undoable).",
      "inputSchema": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}},
+    # A new skill for her: a GitHub link (a repository or a folder in one) or a local folder with a SKILL.md.
+    {"name": "install_skill", "description": "Install a skill (a folder with a SKILL.md) for yourself, from a GitHub "
+     "link such as https://github.com/owner/repo or https://github.com/owner/repo/tree/main/skills/name, owner/repo, or a "
+     "local folder. The user approves it first. It can be used from your next reply or task.",
+     "inputSchema": {"type": "object", "required": ["source"], "properties": {"source": {"type": "string"}}}},
 ]
 FILE_TOOLS = {"move_path", "copy_path", "delete_path", "make_folder"}
 state = {"factor": None}
@@ -95,6 +100,13 @@ def call(name, arguments):
         return text(json.dumps(decision))
     if name in FILE_TOOLS:
         return file_operation(name, arguments)
+    if name == "install_skill":
+        from ..chat.skills import SkillError, install
+        try:
+            names = install(str(arguments.get("source", "")))
+        except SkillError as exc:
+            return text(str(exc), error=True)
+        return text("Installed: " + ", ".join(names) + ". You can use it from your next reply or task.")
     from . import desktop
     if name == "screenshot":
         path = Path(tempfile.gettempdir()) / f"jingliu-screen-{os.getpid()}.jpg"

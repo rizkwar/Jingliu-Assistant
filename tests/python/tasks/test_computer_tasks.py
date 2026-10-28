@@ -52,7 +52,7 @@ class ToolServerTests(unittest.TestCase):
         self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
         names = {tool["name"] for tool in replies[1]["result"]["tools"]}
         self.assertEqual(names, {"approve", "screenshot", "click", "type_text", "press_keys", "scroll", "wait",
-                                 "move_path", "copy_path", "delete_path", "make_folder"})
+                                 "move_path", "copy_path", "delete_path", "make_folder", "install_skill"})
         self.assertIn("error", replies[2])
 
 
