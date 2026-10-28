@@ -365,6 +365,20 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.window.voice.count(), 1)
         self.assertEqual(speech.calls[-1], (character.preview, character.reference, 70))
 
+    def test_opening_settings_keeps_a_maximized_window_maximized(self):
+        from PySide6.QtCore import Qt
+        self.window.showMaximized()
+        self.app.processEvents()
+        self.window.open_settings()
+        self.app.processEvents()
+        self.assertTrue(self.window.windowState() & Qt.WindowState.WindowMaximized)
+        self.window.showMinimized()                      # From the taskbar or tray: back as it was.
+        self.app.processEvents()
+        self.window.show_companion()
+        self.app.processEvents()
+        self.assertTrue(self.window.windowState() & Qt.WindowState.WindowMaximized)
+        self.assertFalse(self.window.windowState() & Qt.WindowState.WindowMinimized)
+
     def test_invalid_character_reload_keeps_current_profile_and_draft(self):
         self.window.input.setPlainText("An unsent thought")
         previous = self.window.settings

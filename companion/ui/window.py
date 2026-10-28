@@ -3003,10 +3003,16 @@ class CompanionWindow(QMainWindow):
 
     @Slot()
     def show_companion(self) -> None:
-        self.showNormal()
+        self._bring_to_front()
+        QTimer.singleShot(500, self, self._warm_voice)  # Reloads the voice if it was closed while away.
+
+    def _bring_to_front(self):
+        """Shows the window from the tray or the taskbar, as it was: maximized or full screen stays so
+        (showNormal() would shrink it back to a window)."""
+        self.setWindowState((self.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive)
+        self.show()
         self.raise_()
         self.activateWindow()
-        QTimer.singleShot(500, self, self._warm_voice)  # Reloads the voice if it was closed while away.
 
     @Slot()
     def _save_memory_when_idle(self):
@@ -3419,9 +3425,7 @@ class CompanionWindow(QMainWindow):
         if self.microphone.state in {"opening", "recording"}:
             self._finish_recording()
         elif not self.microphone.busy:
-            self.showNormal()
-            self.raise_()
-            self.activateWindow()
+            self._bring_to_front()
             self._begin_recording()
 
     @Slot(str)
