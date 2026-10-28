@@ -24,7 +24,7 @@ TEST_GROUPS = (
                            ("Using the screen", "test:work:look"), ("Waiting for approval", "test:work:wait"),
                            ("Task done", "test:work:done"), ("Task failed", "test:work:failed"))),
     ("Sleep cycle", (("Get drowsy", "test:drowsy"), ("Nod off", "test:nodOff"), ("Fall asleep", "test:sleep"),
-                     ("Wake gently", "test:wake"), ("Wake startled", "test:wakeStartled"))),
+                     ("Dream", "test:dream"), ("Wake gently", "test:wake"), ("Wake startled", "test:wakeStartled"))),
 )
 TESTS = {name for _, items in TEST_GROUPS for _, name in items if name.startswith("test:")}
 PROMPT = (

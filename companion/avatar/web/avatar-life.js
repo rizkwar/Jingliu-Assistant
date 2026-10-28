@@ -242,6 +242,10 @@ export class AvatarLife {
     if(name==='poke'){this.poke();return true;}
     if(name==='fluster'){this.wake('startled');this.side=this.random()<.5?-1:1;this.play('fluster',{replace:true});return true;}
     if(name==='nodOff'){this.play('nodOff',{replace:true});return true;}
+    if(name==='dream'){  // Asleep, then a dream: a dreamy smile and its bubble.
+      if(this.state!=='asleep'){this.state='asleep';this.base={...REST,...BASE.asleep};this.sleepWeight=1;}
+      this.quiet=0;this.hoverTime=0;this.play('dreamSmile',{replace:true});this.events.push('dream:☾');
+      this.nextSleepMoment=9+this.random()*14;return true;}
     if(name==='pet'){this.petDemo=3.5;return true;}
     return false;
   }

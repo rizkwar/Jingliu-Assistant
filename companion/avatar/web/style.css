@@ -13,10 +13,6 @@ canvas { display:block; width:100%; height:100%; }/* Sleep: soft letters drift u
   72% { opacity:.65; }
   100% { transform:translate(var(--dx), var(--dy)) rotate(14deg) scale(1.1); opacity:0; }
 }
-/* Moonlight: a soft glow behind her head that swells and settles with each sleeping breath. */
-#moonglow { position:absolute; left:0; top:0; width:0; height:0; opacity:0; pointer-events:none; z-index:-1;
-  border-radius:50%; transform:translate(-50%,-50%);
-  background:radial-gradient(circle, rgba(178,214,255,.30) 0%, rgba(126,174,240,.14) 38%, rgba(126,174,240,0) 70%); }
 /* Frost motes drifting down around her while she sleeps. */
 #frost { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
 #frost i { position:absolute; width:var(--s); height:var(--s); border-radius:50%; opacity:0;
@@ -33,20 +29,22 @@ canvas { display:block; width:100%; height:100%; }/* Sleep: soft letters drift u
 #dreams { position:absolute; left:0; top:0; width:0; height:0; pointer-events:none;
   font-family:'Segoe UI Symbol','Segoe UI',sans-serif; }
 #dreams .bubble { position:absolute; left:0; top:0; opacity:0; animation:dream 5.6s ease-out forwards; }
-#dreams .bubble b { position:absolute; left:.9em; top:-2.6em; width:2.1em; height:2.1em; border-radius:50%;
+#dreams .bubble b { position:absolute; left:.85em; top:-2.75em; width:2.3em; height:2.3em; border-radius:50%;
+  font-size:1.05em;
   display:flex; align-items:center; justify-content:center; font-weight:normal; color:#eaf4ff;
   background:rgba(18,30,56,.62); border:1px solid rgba(168,212,255,.55);
   box-shadow:0 0 10px rgba(111,168,232,.55), inset 0 0 8px rgba(168,212,255,.25);
   text-shadow:0 0 6px rgba(150,200,255,.95); }
 #dreams .bubble s, #dreams .bubble u { position:absolute; border-radius:50%; text-decoration:none;
   background:rgba(18,30,56,.62); border:1px solid rgba(168,212,255,.5); }
-#dreams .bubble s { left:0; top:0; width:.35em; height:.35em; }
-#dreams .bubble u { left:.4em; top:-.75em; width:.6em; height:.6em; }
+#dreams .bubble s { left:0; top:0; width:.38em; height:.38em; }
+#dreams .bubble u { left:.4em; top:-.8em; width:.62em; height:.62em; }
+/* Up and to the right, beside her head; viewer.js starts it far enough in that it ends inside the window. */
 @keyframes dream {
   0% { transform:translate(0,8px) scale(.35); opacity:0; }
-  14% { transform:translate(3px,-4px) scale(1); opacity:1; }
-  72% { transform:translate(12px,-22px) scale(1.04); opacity:.95; }
-  100% { transform:translate(20px,-40px) scale(1.1); opacity:0; }
+  14% { transform:translate(2px,-4px) scale(1); opacity:1; }
+  72% { transform:translate(8px,-20px) scale(1.03); opacity:.95; }
+  100% { transform:translate(12px,-34px) scale(1.06); opacity:0; }
 }
 #dreams .heart { position:absolute; left:0; top:0; color:#ffb3c6; font-size:var(--size); opacity:0;
   text-shadow:0 0 6px rgba(255,140,170,.9); animation:heart 2.6s ease-out forwards; }

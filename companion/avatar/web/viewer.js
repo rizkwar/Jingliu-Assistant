@@ -19,7 +19,7 @@ let accessories={};
 let sleepMinutes=5, lifeSequence=-1, gestureSequence=-1, lifeState='awake';
 const canvas = document.querySelector('canvas');
 const zzz = document.getElementById('zzz');
-const frost = document.getElementById('frost'), moonglow = document.getElementById('moonglow');
+const frost = document.getElementById('frost');
 const dreams = document.getElementById('dreams');
 let nextZ = 0, nextMote = 0;
 // One drifting piece of the sleeping scene: removed when its animation ends.
@@ -241,19 +241,19 @@ function showSleep() {
   if(amount>0&&avatar?.headAnchor){
     const rect=canvas.getBoundingClientRect(),anchor=avatar.headAnchor();
     const x=rect.left+anchor.x*rect.width,y=rect.top+anchor.y*rect.height,size=anchor.size*rect.height;
-    zzz.style.left=`${x}px`;zzz.style.top=`${y}px`;
-    zzz.style.fontSize=`${Math.max(15,Math.min(30,size*.032))}px`;
-    dreams.style.left=`${x-rect.width*.1}px`;dreams.style.top=`${y+size*.02}px`;
-    dreams.style.fontSize=zzz.style.fontSize;
-    // Moonlight behind her head, swelling a little with each breath.
-    const glow=Math.max(60,size*.42),breath=life.breath??.5;
-    moonglow.style.left=`${x-rect.width*.17}px`;moonglow.style.top=`${y+size*.09}px`;
-    moonglow.style.width=moonglow.style.height=`${glow*(.94+.12*breath)}px`;
-    moonglow.style.opacity=(amount*(.55+.45*breath)).toFixed(3);
+    // Everything that drifts stays inside the window: the z's keep room to rise and sway, and a dream
+    // bubble starts far enough in to finish its rise to the right still in view.
+    const font=Math.max(15,Math.min(30,size*.032)),inside=(value,low,high)=>Math.max(low,Math.min(high,value));
+    zzz.style.left=`${inside(x,rect.left+font,rect.right-font*3.4)}px`;
+    zzz.style.top=`${inside(y,rect.top+font*4.4,rect.bottom)}px`;
+    zzz.style.fontSize=`${font}px`;
+    dreams.style.left=`${inside(x-rect.width*.08,rect.left+font,rect.right-font*3.9-14)}px`;
+    dreams.style.top=`${inside(y-size*.01,rect.top+font*3.6+36,rect.bottom)}px`;
+    dreams.style.fontSize=`${font}px`;
     const now=performance.now();
     if(amount>.2&&now>=nextZ){spawnZ();nextZ=now+between(900,1700)/Math.max(.5,amount);}
     if(amount>.2&&now>=nextMote){spawnMote(rect);nextMote=now+between(450,1100);}
-  }else moonglow.style.opacity='0';
+  }
 }
 function sync() {
   cancelAnimationFrame(frame); frame = 0; cadence.restart();
