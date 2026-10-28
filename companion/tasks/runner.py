@@ -285,8 +285,8 @@ class ComputerTask(QObject):
         from ..chat.effort import claude as claude_effort
         # stream-json both ways: the app can interrupt a stuck step and steer her with a message.
         session = self.session or {}
-        keep = (["--resume", session["id"]] if session.get("resume") else ["--session-id", session["id"], "--name",
-                f"{settings.name} task"]) if session.get("id") else ["--no-session-persistence"]
+        keep = (["--resume", session["id"]] if session.get("resume") else ["--session-id", session["id"]]) \
+            if session.get("id") else ["--no-session-persistence"]
         arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                      "--include-partial-messages", *keep,
                      "--setting-sources", "", "--disable-slash-commands", "--strict-mcp-config",
@@ -296,22 +296,34 @@ class ComputerTask(QObject):
                      "--model", settings.claude_model or DEFAULT_CLAUDE_MODEL,
                      "--effort", claude_effort(getattr(settings, "task_effort", "medium")),
                      "--max-turns", str(MAX_TURNS), "--add-dir", *drives()]
-        earlier = "\n".join(f"{m['role']}: {m['content']}" for m in context[-6:] if m.get("content"))
-        self.prompt = (("Recent conversation, for context:\n" + earlier + "\n\n") if earlier else "") + \
-            "The task to do now:\n" + self.request
+        # In the conversation's own session the window passes everything the session lacks: the recent messages
+        # for a new one, the messages since its last reply for a continuing one. Without a session, the last few.
+        shown = context if session.get("id") else context[-6:]
+        earlier = "\n".join(f"{m['role']}: {m['content']}" for m in shown if m.get("content"))
+        heading = "Since your last reply in this conversation:\n" if session.get("resume") else \
+            "Recent conversation, for context:\n"
+        self.prompt = ((heading + earlier + "\n\n") if earlier else "") + "The task to do now:\n" + self.request
         if session.get("resume"):
-            # Her earlier task in this conversation is above: what she read and found is still in front of her.
-            self.prompt = ("A new task in the same conversation. Your earlier task's work is above: reuse what you "
-                           "already read and found instead of reading it again, and check only what may have changed "
-                           "since (a file's modified time, or a quick Grep). Report on this new task only.\n\n"
+            # One mind: the conversation, and any earlier task's work, is above.
+            self.prompt = ("A task in this conversation. Everything above is still yours: what you discussed, and what "
+                           "earlier tasks read and found. Reuse it instead of reading it again, and check only what may "
+                           "have changed (a file's modified time, or a quick Grep). Report on this task only.\n\n"
                            + self.prompt)
+        start = folder if folder and folder.is_dir() else Path.home()
+        if session.get("id"):
+            # The session lives in the app's own folder, so tasks start there; she works where the task belongs.
+            from ..chat.sessions import FOLDER
+            FOLDER.mkdir(parents=True, exist_ok=True)
+            self.prompt += (f"\n\nYour shell starts in an app folder. Work in {start} unless the task says otherwise: "
+                            "use full paths, or change to it first.")
+            start = FOLDER
         environment = QProcessEnvironment.systemEnvironment()
         for name in list(environment.keys()):
             # A configured API key would bill the API instead of the subscription.
             if name.endswith(("API_KEY", "AUTH_TOKEN")) or name.startswith("CLAUDE_CODE_") or name == "CLAUDECODE":
                 environment.remove(name)
         self.process.setProcessEnvironment(environment)
-        self.process.setWorkingDirectory(str(folder if folder and folder.is_dir() else Path.home()))
+        self.process.setWorkingDirectory(str(start))
         self.process.setProgram(claude_executable() or "claude")
         self.process.setArguments(arguments)
 

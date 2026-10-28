@@ -7,8 +7,10 @@ longer matches it (a message was edited or deleted, the model or notes changed),
 long enough for the cache to expire. Claude Code keeps each session's transcript on this computer; the app deletes
 it with the conversation, when the session is replaced, and after SESSION_DAYS.
 
-Computer tasks continue the conversation's previous task session for a while, so files she read for one task are
-still in front of her for the next.
+Computer tasks run in the same session as the conversation, so she is one mind, as Claude Code is: what a task
+read and did is in front of her when you talk afterwards, and what you discussed is in front of the task. When a
+session grows large, the app compacts it, like Claude Code: older exchanges become the conversation's notes, and the
+next reply starts a fresh session from the notes and the recent messages.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -24,12 +26,12 @@ from .continuity import split_turns
 
 
 FOLDER = PROJECT_ROOT / "data" / "claude-sessions"  # Where chat sessions run: an empty folder of their own.
-ROTATE_TOKENS = 40_000  # A session larger than this starts again from the recent window.
-MAX_TURNS = 40
+COMPACT_TOKENS = 60_000  # After a reply or task, a session larger than this is compacted.
+CODING_COMPACT_TOKENS = 100_000  # Coding chats keep more in mind (files she read).
+ROTATE_TOKENS = 150_000  # A session larger than this starts again even if compacting failed.
+MAX_TURNS = 60
 IDLE_SECONDS = 55 * 60  # The cache lasts an hour; after that, resuming a large session would process it all again.
 COLD_TOKENS = 12_000  # A cold session smaller than this is still worth continuing.
-TASK_ROTATE_TOKENS = 120_000
-TASK_IDLE_SECONDS = 3 * 60 * 60
 SESSION_DAYS = 30
 
 
@@ -115,7 +117,7 @@ def plan(store, conversation_id, turns, model, notes, moment=None):
         return {"id": row["session_id"], "resume": True, "since": _messages(since), "sent": sent,
                 "seed_from": row["seed_from"], "turns": row["turns"], "size": row["size"]}
     if row:
-        forget_chat(store, conversation_id)
+        forget(store, conversation_id)
     return {"id": str(uuid4()), "resume": False, "since": [], "sent": [], "seed_from": window_seed(turns), "turns": 0,
             "size": 0}
 
@@ -132,15 +134,7 @@ def record(store, conversation_id, session, model, notes, through_id, size, firs
 
 
 def forget(store, conversation_id):
-    """Ends a conversation's sessions: their rows and Claude Code's transcripts."""
-    for get, drop in ((store.chat_session, store.drop_chat_session), (store.task_session, store.drop_task_session)):
-        row = get(conversation_id)
-        if row:
-            drop(conversation_id)
-            delete_transcript(row["session_id"])
-
-
-def forget_chat(store, conversation_id):
+    """Ends a conversation's session: its row and Claude Code's transcript."""
     row = store.chat_session(conversation_id)
     if row:
         store.drop_chat_session(conversation_id)
@@ -173,35 +167,21 @@ def dedupe(context, sent):
     return text, kept
 
 
-def task_plan(store, conversation_id, cwd, model, moment=None):
-    """The session a computer task runs in: the conversation's last task session while it is recent and was in the
-    same folder, so she still has what she read; otherwise a new one."""
-    row = store.task_session(conversation_id)
-    if row:
-        fresh = (row["cwd"] == str(cwd) and row["model"] == model and row["size"] <= TASK_ROTATE_TOKENS
-                 and _age(row["updated_at"], moment) <= TASK_IDLE_SECONDS and transcripts(row["session_id"]))
-        if fresh:
-            return {"id": row["session_id"], "resume": True, "tasks": row["tasks"]}
-        store.drop_task_session(conversation_id)
-        delete_transcript(row["session_id"])
-    return {"id": str(uuid4()), "resume": False, "tasks": 0}
-
-
-def record_task(store, conversation_id, session, cwd, model, size):
-    store.save_task_session(conversation_id, session_id=session["id"], cwd=str(cwd), model=model, size=int(size or 0),
-                            tasks=session.get("tasks", 0) + 1)
+def needs_compacting(row, coding=False):
+    """Whether a conversation's session has grown enough to compact."""
+    limit = CODING_COMPACT_TOKENS if coding else COMPACT_TOKENS
+    return bool(row) and (row["size"] >= limit or row["turns"] >= MAX_TURNS - 1)
 
 
 def cleanup(store, moment=None):
-    """Transcripts that are no longer needed: replaced chat sessions, old task sessions, and anything past
-    SESSION_DAYS in the app's own session folder."""
+    """Transcripts that are no longer needed: sessions past SESSION_DAYS, and any in the app's own session folder
+    that no conversation uses (replaced, or left by a task that was stopped)."""
     moment = moment or _now()
-    for kind, conversation_id, session_id, updated in store.sessions():
-        limit = TASK_IDLE_SECONDS if kind == "task" else SESSION_DAYS * 86400
-        if _age(updated, moment) > limit:
-            (store.drop_task_session if kind == "task" else store.drop_chat_session)(conversation_id)
+    for conversation_id, session_id, updated in store.sessions():
+        if _age(updated, moment) > SESSION_DAYS * 86400:
+            store.drop_chat_session(conversation_id)
             delete_transcript(session_id)
-    kept = {session_id for _, _, session_id, _ in store.sessions()}
+    kept = {session_id for _, session_id, _ in store.sessions()}
     folder = claude_home() / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(FOLDER.resolve()))
     if folder.is_dir():
         for path in folder.glob("*.jsonl"):

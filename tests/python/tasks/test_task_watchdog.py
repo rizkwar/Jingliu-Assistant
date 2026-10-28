@@ -57,6 +57,20 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(arguments[arguments.index("--effort") + 1], "high")
         task.folder.cleanup()
 
+    def test_a_task_continues_the_conversation_session_from_the_app_folder(self):
+        from companion.chat.sessions import FOLDER
+        session = {"id": "11111111-1111-1111-1111-111111111111", "resume": True}
+        since = [{"role": "user", "content": "Also the PDFs"}, {"role": "assistant", "content": "Of course."}]
+        task = ComputerTask("Tidy", since, SETTINGS, session=session)
+        arguments = task.process.arguments()
+        self.assertEqual(arguments[arguments.index("--resume") + 1], session["id"])
+        self.assertNotIn("--no-session-persistence", arguments)
+        self.assertEqual(Path(task.process.workingDirectory()), FOLDER)  # Where the session's transcript lives.
+        self.assertIn("Everything above is still yours", task.prompt)
+        self.assertIn("Since your last reply in this conversation:\nuser: Also the PDFs", task.prompt)
+        self.assertIn(f"Work in {Path.home()}", task.prompt)
+        task.folder.cleanup()
+
     def test_the_same_step_three_times_is_steered_then_wrapped_up_then_stopped(self):
         for index in range(3):
             self.task._handle(tool("Read", index, file_path="C:/notes/a.md"))

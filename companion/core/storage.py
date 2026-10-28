@@ -14,7 +14,7 @@ from ..chat.continuity import MAX_SUMMARY_CHARS
 
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "companion.sqlite3"
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 PROJECT_COLORS = ("ice", "frost", "crimson", "amber", "jade", "violet")
 PROJECT_KINDS = ("project", "study")
 CARD_LIMITS = (500, 2000)  # Characters on the front and back of a flashcard.
@@ -113,11 +113,7 @@ class Store:
                 notes TEXT NOT NULL DEFAULT '', passages TEXT NOT NULL DEFAULT '[]', size INTEGER NOT NULL DEFAULT 0,
                 turns INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS task_sessions (
-                conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-                session_id TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
-                size INTEGER NOT NULL DEFAULT 0, tasks INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
-            );
+            DROP TABLE IF EXISTS task_sessions;
         """)
         with self.connection:
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(conversations)")}
@@ -130,6 +126,8 @@ class Store:
             if "kind" not in columns:  # "chat", or "reminders": the one session where she delivers reminders.
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'")
                 self.connection.execute("ALTER TABLE conversations ADD COLUMN unread INTEGER NOT NULL DEFAULT 0")
+            if "coding" not in columns:  # Coding mode: -1 off, 1 on, 0 as its place suggests (on in a project with a folder).
+                self.connection.execute("ALTER TABLE conversations ADD COLUMN coding INTEGER NOT NULL DEFAULT 0")
             columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(projects)")}
             if "kind" not in columns:  # "project", or "study": a subject with flashcards and an exam date.
                 self.connection.execute("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
@@ -391,26 +389,19 @@ class Store:
         with self.connection:
             self.connection.execute("DELETE FROM chat_sessions WHERE conversation_id=?", (conversation_id,))
 
-    def task_session(self, conversation_id):
-        row = self.connection.execute("SELECT * FROM task_sessions WHERE conversation_id=?", (conversation_id,)).fetchone()
-        return dict(row) if row else None
-
-    def save_task_session(self, conversation_id, **values):
-        values = {**values, "conversation_id": conversation_id, "updated_at": values.get("updated_at") or now()}
-        names = ", ".join(values)
-        with self.connection:
-            self.connection.execute(f"INSERT OR REPLACE INTO task_sessions({names}) VALUES ({', '.join('?' * len(values))})",
-                                    tuple(values.values()))
-
-    def drop_task_session(self, conversation_id):
-        with self.connection:
-            self.connection.execute("DELETE FROM task_sessions WHERE conversation_id=?", (conversation_id,))
-
     def sessions(self):
-        """Every session the app keeps: [(kind, conversation, session id, updated at)]."""
-        return [(row["kind"], row["conversation_id"], row["session_id"], row["updated_at"]) for row in self.connection.execute(
-            "SELECT 'chat' kind, conversation_id, session_id, updated_at FROM chat_sessions "
-            "UNION ALL SELECT 'task', conversation_id, session_id, updated_at FROM task_sessions")]
+        """Every session the app keeps: [(conversation, session id, updated at)]."""
+        return [(row["conversation_id"], row["session_id"], row["updated_at"]) for row in self.connection.execute(
+            "SELECT conversation_id, session_id, updated_at FROM chat_sessions")]
+
+    def coding(self, conversation_id):
+        """The conversation's coding mode: 1 on, -1 off, 0 not chosen."""
+        row = self.connection.execute("SELECT coding FROM conversations WHERE id=?", (conversation_id,)).fetchone()
+        return row["coding"] if row else 0
+
+    def set_coding(self, conversation_id, on):
+        with self.connection:
+            self.connection.execute("UPDATE conversations SET coding=? WHERE id=?", (1 if on else -1, conversation_id))
 
     def mark_unread(self, conversation_id, count=1):
         """Adds `count` unread messages; 0 marks the conversation read."""

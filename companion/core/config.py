@@ -51,6 +51,7 @@ class Settings:
     task_effort: str = "medium"  # The same for computer tasks (no auto).
     claude_session: str = field(default="", repr=False)  # For one reply: the conversation's Claude Code session,
     claude_resume: bool = field(default=False, repr=False)  # and whether it continues (see chat/sessions.py).
+    chat_reading: bool = field(default=False, repr=False)  # For one reply: coding mode, reading files herself.
     auto_memory: bool = True
     look_at_screen: bool = True
     barge_in: bool = True

@@ -15,6 +15,7 @@ class ReplyWorker(QThread):
     usage = Signal(dict)  # The tokens this reply used: {model, input, output, cached}.
     limits = Signal(list)  # What is left of the plan's limits, as the service reported it while replying.
     session = Signal(dict)  # The Claude Code session this reply ran in: {id, resumed}.
+    looked = Signal(str)  # A file she read or searched while replying, in coding mode ("Read views.py").
 
     def __init__(self, settings: Settings, messages: list[dict[str, str]], parent=None):
         super().__init__(parent)
@@ -58,7 +59,8 @@ class ReplyWorker(QThread):
         async with httpx.AsyncClient(timeout=timeout) as client:
             # A total deadline also bounds a provider that only sends keep-alives.
             try:
-                async with asyncio.timeout(180):
+                # Reading files in coding mode takes longer than a plain reply.
+                async with asyncio.timeout(600 if getattr(self.settings, "chat_reading", False) else 180):
                     async for text in stream_reply(client, self.settings, self.messages):
                         if self.stop_requested.is_set():
                             return
@@ -67,6 +69,8 @@ class ReplyWorker(QThread):
                                 self.usage.emit(text["usage"])
                             elif "session" in text:
                                 self.session.emit(text["session"])
+                            elif "read" in text:
+                                self.looked.emit(text["read"])
                             elif "limits" in text:
                                 self.limits.emit(text["limits"])
                             else:

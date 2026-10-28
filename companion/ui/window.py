@@ -303,7 +303,9 @@ class CompanionWindow(QMainWindow):
         self._session = None  # The Claude Code session the reply in progress runs in (chat/sessions.py).
         self._task_view = None  # The running task's progress and conversation, kept apart from its card.
         self._task_card = None
-        self._task_session = (None, None, None, None)
+        self._compactor = None  # Compacting a long conversation's older messages into its notes, in the background.
+        self._read_note, self._read_files = None, []
+        self._task_session = None  # The conversation session a running task continues.
         QTimer.singleShot(4000, self._clean_sessions)
         self._active_turn = None
         self._reply_status = "pending"
@@ -1100,6 +1102,15 @@ class CompanionWindow(QMainWindow):
         self.approve_chip.setToolTip("On: she runs commands, changes files and uses the mouse and keyboard for a task "
                                      "without asking you first. Each step still shows in the chat, and tasks can be undone.")
         tools.addWidget(self.approve_chip)
+        self.coding_chip = QPushButton("Coding")
+        self.coding_chip.setObjectName("chipToggle")
+        self.coding_chip.setIcon(glyph_icon("code", color="#8fa3c2"))
+        self.coding_chip.setIconSize(QSize(20, 20))
+        self.coding_chip.setCheckable(True)
+        self.coding_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coding_chip.toggled.connect(self._coding_toggled)
+        tools.addWidget(self.coding_chip)
+        self._refresh_coding_chip()
         self.record_button = icon_button("mic", "Hold to talk · or press Ctrl+Alt+Space · up to 60 seconds")
         self.record_button.pressed.connect(self._begin_recording)
         self.record_button.released.connect(self._finish_recording)
@@ -1376,6 +1387,7 @@ class CompanionWindow(QMainWindow):
         except (OSError, ValueError):
             pass  # E.g. a half-typed OpenRouter ID; the choice still applies to this session.
         self._refresh_usage_note()  # Each service has its own limits.
+        self._refresh_coding_chip()
 
     @Slot()
     def _send(self) -> None:
@@ -1394,6 +1406,11 @@ class CompanionWindow(QMainWindow):
                 return
             self._offer_card.close_offer("Not now." if answer == "no" else "You answered in the chat.",
                                          "failed" if answer == "no" else "done")
+        if (self._task is not None and self._task_view and self._task_view["conversation"] == self._conversation_id
+                and not files and hasattr(self._task, "steer")):
+            self.input.clear()
+            self._steer_task(self._task, text, typed=True)
+            return
         try:
             self.settings.validate_connection()
         except ValueError as exc:
@@ -1463,9 +1480,11 @@ class CompanionWindow(QMainWindow):
         self._refresh_effort_picker()
         session = self._session or {}
         worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools, effort=level,
-                                     claude_session=session.get("id", ""), claude_resume=session.get("resume", False)),
-                             context, self)
+                                     claude_session=session.get("id", ""), claude_resume=session.get("resume", False),
+                                     chat_reading=self._coding_on()), context, self)
         self._count_usage(worker, self._conversation_id)
+        self._read_note, self._read_files = None, []
+        worker.looked.connect(self._looked)
         worker.session.connect(self._session_started)
         worker.usage.connect(self._reply_used)
         self._worker = worker
@@ -1492,7 +1511,10 @@ class CompanionWindow(QMainWindow):
         from ..chat.prompts import split_prompt
         notes = summary["content"] if summary else None
         session = None
-        if self.settings.llm_provider == "claude":
+        task_here = self._task is not None and bool(self._task_view) and \
+            self._task_view["conversation"] == self._conversation_id
+        reading = self._coding_on()
+        if self.settings.llm_provider == "claude" and not task_here:  # A running task here has the session.
             try:
                 session = sessions.plan(self.store, self._conversation_id, turns,
                                         self.settings.claude_model or DEFAULT_CLAUDE_MODEL, notes)
@@ -1514,10 +1536,63 @@ class CompanionWindow(QMainWindow):
             avatar_cues=self.show_avatar.isChecked(), computer_tasks=self.computer_tasks.isChecked(),
             confirm_tasks=self.confirm_tasks.isChecked(), memory_cues=True, auto_memory=self.auto_memory.isChecked(),
             look=self.look_at_screen.isChecked(), check_ins=self.check_ins.isChecked(), project=project,
-            tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None)
+            tools=list(json.loads(chat_tools)["mcpServers"]) if chat_tools else None, reading=reading)
+        if session:
+            session["coding"] = reading
         latest = {"role": "user", "content": text, "attachments": stored, "context": app_context,
                   "since": session["since"] if session else []}
         return system, [*recent_messages(turns), latest], session
+
+    def _coding_on(self, conversation_id=None):
+        """Coding mode for a conversation: as you set it, or on in a project's chats. It needs Claude Code."""
+        if self.settings.llm_provider != "claude":
+            return False
+        conversation_id = conversation_id or self._conversation_id
+        try:
+            chosen = self.store.coding(conversation_id)
+            conversation = self.store.conversation(conversation_id) if not chosen else None
+            project = self.store.project(conversation["project_id"]) if conversation and conversation["project_id"] else None
+        except sqlite3.Error:
+            return False
+        return chosen > 0 if chosen else bool(project and project.get("kind") == "project")
+
+    def _refresh_coding_chip(self):
+        claude = self.settings.llm_provider == "claude"
+        with QSignalBlocker(self.coding_chip):
+            self.coding_chip.setChecked(self._coding_on())
+        self.coding_chip.setEnabled(claude)
+        self.coding_chip.setToolTip(
+            "Coding mode for this chat: she reads your files herself (read-only, without asking) and keeps more of "
+            "the conversation in mind. Changing files and running commands still go through a task. "
+            "On by itself in a project's chats." if claude else
+            "Coding mode needs your Claude subscription (Settings → Companion → Response model).")
+
+    def _coding_toggled(self, on):
+        try:
+            self.store.set_coding(self._conversation_id, on)
+        except sqlite3.Error:
+            return
+        self.transcript.add_memory_note("Coding mode on: I can read your files myself in this chat." if on else
+                                        "Coding mode off for this chat.", can_undo=False, icon="code")
+
+    def _looked(self, summary):
+        """What she read while replying, gathered in one note: "Looked at views.py, models.py and 2 more"."""
+        from shiboken6 import isValid
+        if summary.startswith("Search in files for "):
+            name = "searched " + summary.removeprefix("Search in files for ")
+        elif summary.startswith("Look for files: "):
+            name = "looked for " + summary.removeprefix("Look for files: ")
+        else:
+            name = Path(summary.removeprefix("Read ").strip()).name or summary
+        if name not in self._read_files:
+            self._read_files.append(name)
+        shown = self._read_files[:3]
+        text = "Looked at " + ", ".join(shown) + (f" and {len(self._read_files) - 3} more" if len(self._read_files) > 3 else "")
+        if self._read_note is not None and isValid(self._read_note):
+            self._read_note.settle(text)
+        else:
+            self._read_note = self.transcript.add_memory_note(text, can_undo=False, icon="document")
+        self._read_note.setToolTip("\n".join(self._read_files))
 
     def _session_started(self, info):
         """Claude Code started a fresh session after all (its transcript was gone): it begins at the window."""
@@ -1542,9 +1617,63 @@ class CompanionWindow(QMainWindow):
                 sessions.record(self.store, session["conversation"], session, session["model"], session["notes"],
                                 turn[1], session["size"], first_user_id=turn[0])
             else:
-                sessions.forget_chat(self.store, session["conversation"])
+                sessions.forget(self.store, session["conversation"])
         except (sqlite3.Error, OSError):
             pass
+
+    def _maybe_compact(self, conversation_id):
+        """Like Claude Code's compacting: when a conversation has grown long, her older exchanges become its notes
+        (written on Haiku, shown under Context), and the next reply starts from the notes and the recent messages.
+        With Claude this happens when the session is large; elsewhere, once older messages no longer fit the window."""
+        from ..chat import sessions
+        from ..chat.continuity import MAX_SUMMARY_CHARS, summary_batch
+        if self._compactor is not None or self._closing or self.suspended:
+            return
+        claude = self.settings.llm_provider == "claude"
+        try:
+            row = self.store.chat_session(conversation_id)
+            if claude and not sessions.needs_compacting(row, self._coding_on(conversation_id)):
+                return
+            summary = self.store.summary(conversation_id)
+            batch = summary_batch(self.store.context_turns(conversation_id), summary["content"] if summary else "",
+                                  summary["through_id"] if summary else 0)
+        except (sqlite3.Error, ValueError):
+            return
+        if not batch.count:
+            if claude:
+                sessions.forget(self.store, conversation_id)  # Nothing older to keep: start again from the recent ones.
+            return
+        if not claude and batch.count < 6:
+            return
+        worker = ReplyWorker(replace(self.settings, system_prompt=SUMMARY_PROMPT, effort="low", chat_tools="",
+                                     **self._light_model()), [{"role": "user", "content": batch.source}], self)
+        job = {"worker": worker, "conversation": conversation_id, "batch": batch, "text": "", "limit": MAX_SUMMARY_CHARS}
+        worker.chunk.connect(lambda _turn, text: job.__setitem__("text", job["text"] + text))
+        worker.finished.connect(self._compacted)
+        self._count_usage(worker, conversation_id)
+        self._compactor = job
+        worker.start()
+
+    def _compacted(self):
+        from ..chat import sessions
+        job, self._compactor = self._compactor, None
+        if job is None:
+            return
+        worker = job["worker"]
+        worker.deleteLater()
+        text = job["text"].strip()
+        if worker.error or worker.stop_requested.is_set() or not text or len(text) > job["limit"]:
+            return  # The conversation goes on as it was; compacting is tried again later.
+        try:
+            self.store.save_summary(job["conversation"], text, job["batch"].through_id)
+            sessions.forget(self.store, job["conversation"])  # The next reply starts from the notes.
+        except (ValueError, sqlite3.Error, OSError):
+            return
+        if self._in_conversation(job["conversation"]) and not self._closing:
+            count = job["batch"].count
+            self.transcript.add_memory_note(f"Compacted {count} older exchange{'s' if count != 1 else ''} into this "
+                                            "chat's notes (see Context)", can_undo=False, icon="context")
+            self._refresh_continuity()
 
     def _system_prompt(self, memories, summary, looking=False, project=None, tools=None):
         return reply_prompt(self.settings.system_prompt, memories, summary["content"] if summary else None,
@@ -1696,6 +1825,8 @@ class CompanionWindow(QMainWindow):
         task_turn = self._active_turn
         self._save_active_turn()
         self._finish_session(task_turn, not interrupted and not worker.error)
+        if not interrupted and not worker.error:
+            QTimer.singleShot(0, lambda conversation=self._conversation_id: self._maybe_compact(conversation))
         self.transcript.end_reply(notice="Reply stopped" if interrupted and not worker.error else "",
                                   error=worker.error)
         if not worker.error:
@@ -2790,16 +2921,21 @@ class CompanionWindow(QMainWindow):
         from ..chat import sessions
         from ..chat.claude import DEFAULT_CLAUDE_MODEL
         project = self._current_project()
-        folder = Path(project["folder"]) if project and project.get("folder") else None
-        cwd = folder if folder and folder.is_dir() else Path.home()
         model = self.settings.claude_model or DEFAULT_CLAUDE_MODEL
+        # One mind: the task continues this conversation's session, so what you discussed is in front of her,
+        # and afterwards what the task read and found is in front of her when you talk.
         try:
-            session = sessions.task_plan(self.store, self._conversation_id, cwd, model)
+            turns = self.store.context_turns(self._conversation_id)
+            summary = self.store.summary(self._conversation_id)
+            notes = summary["content"] if summary else None
+            session = sessions.plan(self.store, self._conversation_id, turns, model, notes)
+            session.update(conversation=self._conversation_id, notes=notes, model=model)
+            context = session["since"] if session["resume"] else recent_messages(turns)
         except sqlite3.Error:
             session = None
         task = ComputerTask(request, context, self.settings, self, servers=self.mcp_servers, project=project,
                             session=session)
-        self._task_session = (self._conversation_id, session, cwd, model)
+        self._task_session = session
         if hasattr(task, "usage"):
             conversation = self._conversation_id
             task.usage.connect(lambda counts: self._record_usage(conversation, "claude", counts))
@@ -2863,23 +2999,26 @@ class CompanionWindow(QMainWindow):
         if card is not None:
             card.set_status(text, state)
 
-    def _finish_task_session(self, task):
-        """A task that reached its report leaves its session for the next task here; a stopped one ends it."""
+    def _finish_task_session(self, task, turn):
+        """A task that reached its report leaves the conversation's session holding it, so you can talk about what
+        she did; a stopped one ends the session (the next reply starts from the messages)."""
         from ..chat import sessions
-        conversation, session, cwd, model = getattr(self, "_task_session", (None, None, None, None))
-        self._task_session = (None, None, None, None)
+        session, self._task_session = getattr(self, "_task_session", None), None
         if not session or task is None:
             return
         try:
-            if getattr(task, "reported", False):
-                sessions.record_task(self.store, conversation, session, cwd, model, task.context_size)
+            if getattr(task, "reported", False) and turn:
+                sessions.record(self.store, session["conversation"], session, session["model"], session["notes"],
+                                turn[1], task.context_size, first_user_id=turn[0])
+                QTimer.singleShot(0, lambda: self._maybe_compact(session["conversation"]))
+            elif getattr(task, "reported", False):
+                pass  # No saved turn to tie it to: the session still holds the task, and goes on as it was.
             else:
-                self.store.drop_task_session(conversation)
-                sessions.delete_transcript(session["id"])
+                sessions.forget(self.store, session["conversation"])
         except (sqlite3.Error, OSError):
             pass
 
-    def _steer_task(self, task, text):
+    def _steer_task(self, task, text, typed=False):
         """Something said while she works reaches her at once; a step waiting for approval is declined with it."""
         if task is None or task is not self._task or not hasattr(task, "steer"):
             return
@@ -2887,7 +3026,10 @@ class CompanionWindow(QMainWindow):
             if dialog.windowTitle() == "Allow this step?" and dialog.isVisible():
                 dialog.hide()
                 dialog.deleteLater()
-        self._task_view["steps"].append("You: " + text)  # The card already shows it.
+        if typed:
+            self._task_progress("You: " + text)  # Typed in the message box: shown on the card too.
+        else:
+            self._task_view["steps"].append("You: " + text)  # The card already shows it.
         task.steer(text)
         self._task_status("Working…", "working")
 
@@ -2936,7 +3078,6 @@ class CompanionWindow(QMainWindow):
 
     def _task_finished(self, report, succeeded):
         task, self._task = self._task, None
-        self._finish_task_session(task)
         card = self._visible_task_card()  # None when you are in another chat.
         view, self._task_view = self._task_view, None
         here = bool(view) and view["conversation"] == self._conversation_id
@@ -2963,6 +3104,7 @@ class CompanionWindow(QMainWindow):
                 self.store.save_turn(self._task_turn, shown, shown, "complete")
             except sqlite3.Error:
                 pass
+        self._finish_task_session(task, self._task_turn)  # After the report is saved, which the session now holds.
         self.avatar.work("done" if succeeded else "failed", report)
         journal = getattr(task, "journal", None)
         if journal is not None and journal.undoable():
@@ -3490,6 +3632,10 @@ class CompanionWindow(QMainWindow):
         self.microphone.shutdown()
         self._interrupt_speech()
         self.speech.shutdown()
+        if self._compactor:
+            self._compactor["worker"].stop()
+            self._compactor["worker"].wait(5000)
+            self._compactor = None
         if self._reminder_job:
             # A reminder she was still writing: the reminder itself is kept in her session.
             self._reminder_job["worker"].stop()
@@ -4360,6 +4506,8 @@ class CompanionWindow(QMainWindow):
                 self._last_reply = row["display"]
                 self._last_reply_id = row["id"]
         self.replay.setEnabled(bool(self._last_reply))
+        if hasattr(self, "coding_chip"):
+            self._refresh_coding_chip()
         if getattr(self, "_task", None) is not None and self._task_view and self._task_view["conversation"] == conversation_id:
             self._show_task_card()  # Back in the chat where she is working: her progress, as it is now.
         self._update_conversation_title()

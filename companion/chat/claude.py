@@ -12,6 +12,7 @@ from .llm import ChatError
 
 
 DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5'
+READING_TOOLS = ('Read', 'Grep', 'Glob')  # Coding mode: she reads files herself, read-only, without asking.
 CLAUDE_MODELS = (
     ('Claude Sonnet 5.5', 'claude-sonnet-5-5'),
     ('Claude Opus 5.5', 'claude-opus-5-5'),
@@ -53,18 +54,25 @@ def child_environment():
     return environment
 
 
-def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low', session='', resume=False):
+def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low', session='', resume=False, reading=False):
     # Conversation: no built-in tools, skills, CLAUDE.md or hooks. Only MCP servers the person allowed in
     # conversation are connected, and only their tools may run. With `session`, the conversation's own session is
     # started or continued (see sessions.py); without one, nothing is kept.
     keep = ['--resume', session] if session and resume else ['--session-id', session] if session else \
         ['--no-session-persistence']
-    command = [claude_executable(), '-p', '--system-prompt-file', str(prompt_file), '--tools', '',
+    command = [claude_executable(), '-p', '--system-prompt-file', str(prompt_file),
+               '--tools', ','.join(READING_TOOLS) if reading else '',
                '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', *keep,
                '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', effort, '--input-format', 'stream-json',
                '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+    allowed = [*(READING_TOOLS if reading else ()), *(f'mcp__{name}' for name in servers if mcp_file)]
     if mcp_file and servers:
-        command += ['--mcp-config', str(mcp_file), '--allowedTools', *(f'mcp__{name}' for name in servers)]
+        command += ['--mcp-config', str(mcp_file)]
+    if allowed:
+        command += ['--allowedTools', *allowed]
+    if reading:
+        from ..tasks.runner import drives
+        command += ['--add-dir', *drives()]  # Reading reaches the whole computer, as it does in tasks.
     return command
 
 
@@ -168,8 +176,10 @@ async def stream_claude(settings, messages):
             mcp_file.write_text(settings.chat_tools, encoding='utf-8')
         try:
             from .effort import claude as claude_effort
+            reading = getattr(settings, 'chat_reading', False)
             process = await run(reply_command(prompt_file, settings.claude_model, mcp_file, servers,
-                                              claude_effort(getattr(settings, 'effort', 'low')), session, resume),
+                                              claude_effort(getattr(settings, 'effort', 'low')), session, resume,
+                                              reading),
                                 cwd=str(sessions.FOLDER) if session else folder)
         except OSError:
             raise ChatError('Could not start Claude Code. Check its installation and restart the assistant.') from None
@@ -193,6 +203,9 @@ async def stream_claude(settings, messages):
                     if inner.get('type') == 'content_block_start' and block.get('type') in {
                             'tool_use', 'server_tool_use', 'mcp_tool_use'}:
                         name = str(block.get('name') or '')
+                        if reading and name in READING_TOOLS:
+                            after_tool = True  # Shown once its input is known (the assistant event below).
+                            continue
                         if not name.startswith('mcp__') or name.removeprefix('mcp__').partition('__')[0] not in servers:
                             raise ChatError('Claude attempted a tool operation. Conversation was stopped; tools are not enabled here.')
                         after_tool = True
@@ -205,6 +218,11 @@ async def stream_claude(settings, messages):
                         after_tool = False
                         got_text = True
                         yield delta['text']
+                elif kind == 'assistant' and reading:
+                    from ..tasks.runner import describe
+                    for block in (event.get('message') or {}).get('content') or []:
+                        if block.get('type') == 'tool_use' and block.get('name') in READING_TOOLS:
+                            yield {'read': describe(block['name'], block.get('input'))}
                 elif kind == 'rate_limit_event':
                     info = event.get('rate_limit_info') or {}
                     from .usage import claude_windows

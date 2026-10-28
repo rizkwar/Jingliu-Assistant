@@ -110,7 +110,7 @@ class StoreTests(unittest.TestCase):
             with closing(Store(path)) as migrated:
                 self.assertEqual(migrated.context(conversation)[0]["content"], "Keep the original question")
                 self.assertEqual(migrated.memories()[0]["content"], "Keep this memory")
-                self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 12)
+                self.assertEqual(migrated.connection.execute("PRAGMA user_version").fetchone()[0], 13)
                 migrated.save_summary(conversation, "Reviewed notes", turn[1])
             with closing(Store(path)) as reopened:
                 self.assertEqual(reopened.summary(conversation)["through_id"], turn[1])
@@ -203,4 +203,4 @@ class StoreTests(unittest.TestCase):
                 self.assertEqual([row["id"] for row in store.conversations("jingliu")], ["legacy"])
                 self.assertEqual([row["id"] for row in store.conversations("luna")], [second])
                 self.assertEqual(len(store.conversations()), 2)
-                self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 12)
+                self.assertEqual(store.connection.execute("PRAGMA user_version").fetchone()[0], 13)

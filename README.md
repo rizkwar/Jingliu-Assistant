@@ -118,9 +118,16 @@ shows its tab; New chat is an everyday chat.
   the first reused 93-96%). Her instructions stay the same from message to message; the time, reminders, memories
   and study passages travel with your message, and passages she already has are not sent again. A chat starts a
   fresh session when you edit or delete a message, change model, after a long pause, or when it grows large.
-  Computer tasks in the same chat continue the last task's session for up to three hours, so she does not re-read
-  files she just read. Reminders out of view, check-ins and summaries run on Haiku. Usage shows how much came from
-  the cache.
+  **One mind, like Claude Code:** computer tasks run in the chat's own session, so what you discussed is in front of
+  the task, and what the task read and found is in front of her when you talk afterwards. Typing in that chat while
+  she works reaches her as you type it ("use the PDF folder too"). **Compacting:** when a chat grows long, her
+  older exchanges become the chat's notes (on Haiku; see and edit them under Context) and she carries on from the
+  notes and recent messages, with a small "Compacted" note in the chat. Reminders out of view, check-ins and
+  summaries run on Haiku. Usage shows how much came from the cache.
+- **Coding mode** (the **Coding** chip in the message box, per chat; on by itself in a project's chats): she reads
+  your files herself, read-only and without asking, with search first and big files in parts, and a note lists
+  what she looked at. It keeps more of the conversation in mind before compacting. Changing files and running
+  commands still go through a task. Needs your Claude subscription.
 - **Effort** (beside the model in the message box, or Settings): how hard she thinks. **Auto** (the default)
   keeps small talk light and thinks harder for code, maths, study and contest problems; or choose Low, Medium,
   High, Extra high or Max. Computer tasks have their own level (Medium by default). Reminders, check-ins and
@@ -189,9 +196,9 @@ settings, characters) and `voices/`. Neither is ever committed to Git.
 - What you send goes to the model provider you chose, with her profile, recent context, relevant
   memories and conversation notes. Speech synthesis and recognition are local.
 - Audio from the microphone stays in memory and is never saved to a file.
-- **Sessions:** Claude Code keeps a transcript of each chat's session (and of recent tasks) under
-  `~/.claude/projects` on this computer. The app deletes it with the chat, when a session is replaced, after three
-  hours for tasks and after 30 days for chats.
+- **Sessions:** Claude Code keeps a transcript of each chat's session (tasks included) under `~/.claude/projects`
+  on this computer, in a folder of the app's own. The app deletes it with the chat, when a session is replaced or
+  compacted, and after 30 days.
 - **Usage** keeps only token counts per reply (with the chat and model) and the latest limits each service
   reported, in `data/usage-limits.json`; never what was said.
 

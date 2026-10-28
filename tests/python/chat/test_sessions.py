@@ -121,35 +121,30 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(json.loads(resume_turn(history[-1:][:1] and [{**history[-1], "since": []}]))["message"][
             "content"][0]["text"].startswith("<app_context>"))
 
-    def test_tasks_continue_the_last_task_session_in_the_same_folder_for_a_while(self):
-        first = sessions.task_plan(self.store, self.chat, "C:/carbon", "claude-sonnet-5-5")
-        self.assertFalse(first["resume"])
-        self.transcript(first["id"], "C--carbon")
-        sessions.record_task(self.store, self.chat, first, "C:/carbon", "claude-sonnet-5-5", 40_000)
-        second = sessions.task_plan(self.store, self.chat, "C:/carbon", "claude-sonnet-5-5")
-        self.assertEqual((second["resume"], second["id"], second["tasks"]), (True, first["id"], 1))
-        elsewhere = sessions.task_plan(self.store, self.chat, "C:/other", "claude-sonnet-5-5")
-        self.assertFalse(elsewhere["resume"])
-        self.assertEqual(sessions.transcripts(first["id"]), [])  # A replaced task session is deleted.
+    def test_a_large_or_long_session_needs_compacting_and_coding_chats_keep_more(self):
+        self.reply("Hello", "Hm.", size=59_000)
+        row = self.store.chat_session(self.chat)
+        self.assertFalse(sessions.needs_compacting(row))
+        self.assertTrue(sessions.needs_compacting({**row, "size": 61_000}))
+        self.assertFalse(sessions.needs_compacting({**row, "size": 61_000}, coding=True))
+        self.assertTrue(sessions.needs_compacting({**row, "size": 101_000}, coding=True))
+        self.assertTrue(sessions.needs_compacting({**row, "turns": sessions.MAX_TURNS - 1}))
+        self.assertFalse(sessions.needs_compacting(None))
 
     def test_cleanup_keeps_what_is_used_and_deleting_a_chat_ends_its_sessions(self):
         first = self.reply("Hello", "Hm.")
         own = re.sub(r"[^A-Za-z0-9]", "-", str(sessions.FOLDER.resolve()))  # How Claude Code names the folder.
         stray = Path(self.home.name) / "projects" / own / "22222222-2222-2222-2222-222222222222.jsonl"
         stray.parent.mkdir(parents=True, exist_ok=True)
-        stray.write_text("{}", encoding="utf-8")
+        stray.write_text("{}", encoding="utf-8")  # Left by a task that was stopped, say.
         kept = self.transcript(first["id"], stray.parent.name)
-        task = sessions.task_plan(self.store, self.chat, "C:/carbon", "m")
-        self.transcript(task["id"], "C--carbon")
-        sessions.record_task(self.store, self.chat, task, "C:/carbon", "m", 100)
-        self.store.connection.execute("UPDATE task_sessions SET updated_at=?",
-                                      ((datetime.now(timezone.utc) - timedelta(hours=4)).isoformat(),))
         sessions.cleanup(self.store)
         self.assertFalse(stray.exists())  # Not any conversation's session.
         self.assertTrue(kept.exists())
-        self.assertIsNone(self.store.task_session(self.chat))  # An old task session.
-        sessions.forget(self.store, self.chat)
-        self.assertFalse(kept.exists())
+        self.store.connection.execute("UPDATE chat_sessions SET updated_at=?",
+                                      ((datetime.now(timezone.utc) - timedelta(days=31)).isoformat(),))
+        sessions.cleanup(self.store)
+        self.assertFalse(kept.exists())  # A month old.
         self.assertIsNone(self.store.chat_session(self.chat))
 
     def test_cache_reuse_is_shown_as_a_share_of_what_was_read(self):
