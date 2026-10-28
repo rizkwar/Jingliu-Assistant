@@ -177,9 +177,16 @@ async def stream_codex(settings, messages):
         response = await connection.rpc('thread/start', params)
         thread = response['thread']['id']
         images = [{'type':'localImage', 'path':item['path']} for item in files if item['kind'] == 'image']
-        await connection.rpc('turn/start', {'threadId':thread, 'input':[{'type':'text',
+        from .effort import codex as codex_effort
+        turn = {'threadId':thread, 'input':[{'type':'text',
             'text':json.dumps(history, ensure_ascii=False), 'text_elements':[]}, *images],
-            'sandboxPolicy':{'type':'readOnly','networkAccess':False}})
+            'sandboxPolicy':{'type':'readOnly','networkAccess':False},
+            'effort':codex_effort(getattr(settings, 'effort', 'low'))}
+        try:
+            await connection.rpc('turn/start', turn)
+        except ChatError:
+            turn.pop('effort')  # A model that does not offer this effort still answers at its own.
+            await connection.rpc('turn/start', turn)
         phases, streamed = {}, set()
         got_text = False
         tokens = None

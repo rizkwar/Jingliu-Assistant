@@ -113,7 +113,9 @@ class TaskAndReplyTests(unittest.TestCase):
             servers = [mcp.Server(name="notes", command="uvx", args=["notes"], ask=False),
                        mcp.Server(name="github", transport="http", url="https://x.test/mcp")]
             project = {"name": "Exam", "folder": folder, "instructions": "Use the past papers."}
-            task = ComputerTask("Make a revision sheet", [], TASK_SETTINGS, servers=servers, project=project)
+            # Its journal goes in the temporary folder too, never in the person's real task history.
+            task = ComputerTask("Make a revision sheet", [], TASK_SETTINGS, servers=servers, project=project,
+                                undo_root=Path(folder) / "undo")
             try:
                 arguments = task.process.arguments()
                 config = json.loads((Path(task.folder.name) / "mcp.json").read_text(encoding="utf-8"))

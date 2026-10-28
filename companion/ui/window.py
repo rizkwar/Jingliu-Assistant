@@ -575,6 +575,16 @@ class CompanionWindow(QMainWindow):
         section(settings_layout, "Response model")
         self.connection = ConnectionPanel(settings)
         settings_layout.addWidget(self.connection)
+        from ..chat.effort import LEVELS
+        self.reply_effort = QComboBox()
+        for key, (name, meaning) in LEVELS.items():
+            self.reply_effort.addItem(f"{name}: {meaning[0].lower() + meaning[1:]}", key)
+        self.reply_effort.setCurrentIndex(max(0, self.reply_effort.findData(settings.effort)))
+        self.reply_effort.currentIndexChanged.connect(
+            lambda _index: self._choose_effort("effort", self.reply_effort.currentData()))
+        row(settings_layout, "Reply effort", self.reply_effort,
+            hint="How hard she thinks before answering. Auto keeps small talk light and thinks harder for code, "
+                 "maths and study. Also in the message box, beside the model.")
         self.connection.changed.connect(self._connection_changed)
         section(settings_layout, "Character")
         self.character_label = QLabel()
@@ -747,6 +757,17 @@ class CompanionWindow(QMainWindow):
                                       "and Stop cancels the task.")
         switch(settings_layout, self.approve_steps, "Off: she does them at once; each step still shows in the chat.")
         self.approve_steps.toggled.connect(self._approve_steps_toggled)
+        from ..chat.effort import LEVELS, TASK_LEVELS
+        self.task_effort = QComboBox()
+        for key in TASK_LEVELS:
+            self.task_effort.addItem(f"{LEVELS[key][0]}: {LEVELS[key][1].lower()}", key)
+        self.task_effort.setCurrentIndex(max(0, self.task_effort.findData(settings.task_effort)))
+        self.task_effort.setToolTip("How hard she thinks while working on a task. Medium suits most tasks; "
+                                    "higher is for tricky ones and uses your limits faster.")
+        self.task_effort.currentIndexChanged.connect(
+            lambda _index: self._choose_effort("task_effort", self.task_effort.currentData()))
+        row(settings_layout, "Task effort", self.task_effort,
+            hint="How hard she thinks while she works on your computer. Also under the effort menu in the message box.")
         self.tasks_hint = tasks_hint = QLabel()
         tasks_hint.setObjectName("hint")
         tasks_hint.setWordWrap(True)
@@ -1099,6 +1120,19 @@ class CompanionWindow(QMainWindow):
         self.model_menu.aboutToShow.connect(self._fill_model_menu)
         self.model_picker.setMenu(self.model_menu)
         tools.addWidget(self.model_picker)
+        # How hard she thinks, for replies and for computer tasks.
+        self.effort_picker = QPushButton()
+        self.effort_picker.setObjectName("modelPicker")
+        self.effort_picker.setIcon(glyph_icon("chevron", color="#8fa3c2"))
+        self.effort_picker.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.effort_picker.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.effort_menu = QMenu(self)
+        self.effort_menu.setToolTipsVisible(True)
+        self.effort_menu.aboutToShow.connect(self._fill_effort_menu)
+        self.effort_picker.setMenu(self.effort_menu)
+        self._auto_effort = ""
+        tools.addWidget(self.effort_picker)
+        self._refresh_effort_picker()
         tools.addWidget(self.record_button)
         tools.addWidget(self.hands_free)
         self.stop_button = icon_button("stop", "Stop the reply, voice or recording")
@@ -1421,13 +1455,19 @@ class CompanionWindow(QMainWindow):
         self._memory_actions = []
         self._cues, self._pending_cues, self._spoken_chars = CueFilter(), [], 0
         self._worker_kind = "reply"
-        worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools), context, self)
+        from ..chat.effort import LEVELS, resolve
+        level = resolve(self.settings.effort, text, stored, study=(self._current_project() or {}).get("kind") == "study")
+        self._auto_effort = level if self.settings.effort == "auto" else ""
+        self._refresh_effort_picker()
+        worker = ReplyWorker(replace(self.settings, system_prompt=prompt, chat_tools=chat_tools, effort=level), context, self)
         self._count_usage(worker, self._conversation_id)
         self._worker = worker
         worker.chunk.connect(self._on_chunk)
         worker.tool_used.connect(self._tool_used)
         worker.finished.connect(self._on_finished)
         self._set_busy(True)
+        if level != "low":
+            self.status.setText(f"Thinking · {LEVELS[level][0].lower()} effort…")
         self._streaming_voice = self.auto_speak.isChecked() and self.volume.value() > 0
         self._voice_for_reply = self._streaming_voice
         if self._streaming_voice:
@@ -1897,6 +1937,48 @@ class CompanionWindow(QMainWindow):
                 item.triggered.connect(lambda _=False, index=index: combo.setCurrentIndex(index))
         menu.addSeparator()
         menu.addAction(glyph_icon("settings"), "Change service…", self._open_model_settings)
+
+    def _refresh_effort_picker(self):
+        from ..chat.effort import LEVELS
+        key = self.settings.effort if self.settings.effort in LEVELS else "auto"
+        name, meaning = LEVELS[key]
+        self.effort_picker.setText(f"{name} effort")
+        tip = f"How hard she thinks before replying: {name}. {meaning}."
+        if key == "auto" and self._auto_effort:
+            tip += f" For your last message she chose {LEVELS[self._auto_effort][0]}."
+        task = LEVELS.get(self.settings.task_effort, LEVELS["medium"])[0]
+        self.effort_picker.setToolTip(tip + f"\nComputer tasks: {task}.")
+
+    def _fill_effort_menu(self):
+        from PySide6.QtGui import QActionGroup
+        from ..chat.effort import LEVELS, TASK_LEVELS
+        menu = self.effort_menu
+        menu.clear()
+        for title, field, keys in (("Replies", "effort", list(LEVELS)), ("Computer tasks", "task_effort", TASK_LEVELS)):
+            if field == "task_effort":
+                menu.addSeparator()
+            heading = menu.addAction(title)  # A heading: sections have no visible title in this style.
+            heading.setEnabled(False)
+            group = QActionGroup(menu)
+            for key in keys:
+                name, meaning = LEVELS[key]
+                item = menu.addAction(name)
+                item.setToolTip(meaning)
+                item.setCheckable(True)
+                item.setChecked(getattr(self.settings, field) == key)
+                group.addAction(item)
+                item.triggered.connect(lambda _=False, field=field, key=key: self._choose_effort(field, key))
+
+    def _choose_effort(self, field, key):
+        self.settings = replace(self.settings, **{field: key})
+        self._refresh_effort_picker()
+        combo = getattr(self, "task_effort" if field == "task_effort" else "reply_effort", None)
+        if combo is not None and combo.currentData() != key:
+            combo.setCurrentIndex(max(0, combo.findData(key)))
+        try:
+            self.preferences.remember(self.settings, (field,))  # Remembered at once, like the model.
+        except (OSError, ValueError):
+            pass
 
     def _open_model_settings(self):
         self.open_settings()
@@ -2636,6 +2718,10 @@ class CompanionWindow(QMainWindow):
         self._task, self._task_card, self._task_turn, self._task_ack = task, card, turn, acknowledgement
         task.step.connect(card.add_step)
         task.step.connect(self._task_step)
+        if hasattr(task, "activity"):
+            task.activity.connect(card.set_live)
+            task.activity.connect(self._task_activity)
+        card.steer.connect(lambda text, task=task: self._steer_task(task, text))
         task.approval.connect(self._ask_approval)
         task.finished.connect(self._task_finished)
         self.avatar.work("start", request)
@@ -2643,7 +2729,27 @@ class CompanionWindow(QMainWindow):
         task.start()
         self._refresh_stop_button()
 
+    def _steer_task(self, task, text):
+        """Something said while she works reaches her at once; a step waiting for approval is declined with it."""
+        if task is not self._task or not hasattr(task, "steer"):
+            return
+        for dialog in self.findChildren(QDialog):
+            if dialog.windowTitle() == "Allow this step?" and dialog.isVisible():
+                dialog.hide()
+                dialog.deleteLater()
+        task.steer(text)
+        if self._task_card is not None:
+            self._task_card.set_status("Working…", "working")
+
+    def _task_activity(self, text):
+        """Her face follows what she is doing between steps, changing only when the kind of work does."""
+        kind = "think" if text == "Thinking…" else "type" if text.startswith("Writing") else ""
+        if kind and kind != getattr(self, "_activity_kind", None):
+            self._activity_kind = kind
+            self.avatar.work(kind, text)
+
     def _task_step(self, summary):
+        self._activity_kind = None
         from ..tasks.runner import step_kind
         self.avatar.work(step_kind(summary), summary)
 
@@ -2832,8 +2938,8 @@ class CompanionWindow(QMainWindow):
         except sqlite3.Error:
             return False
         context = [*recent_messages(turns), {"role": "user", "content": line, "attachments": []}]
-        worker = ReplyWorker(replace(self.settings, system_prompt=self._system_prompt(memories, None), chat_tools=""),
-                             context, self)
+        worker = ReplyWorker(replace(self.settings, system_prompt=self._system_prompt(memories, None), chat_tools="",
+                                     effort="low"), context, self)
         self._count_usage(worker, inbox)
         self._reminder_job = {"worker": worker, "inbox": inbox, "line": line, "reminder": reminder,
                               "text": "", "cues": CueFilter()}
@@ -4150,7 +4256,7 @@ class CompanionWindow(QMainWindow):
         self._activity_error = False
         self._summary_through = batch.through_id
         self._worker_kind = "summary"
-        worker = ReplyWorker(replace(self.settings, system_prompt=SUMMARY_PROMPT),
+        worker = ReplyWorker(replace(self.settings, system_prompt=SUMMARY_PROMPT, effort="low"),
                              [{"role": "user", "content": batch.source}], self)
         self._count_usage(worker, self._conversation_id)
         self._worker = worker

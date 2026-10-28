@@ -8,6 +8,7 @@ and looking are allowed; commands, file changes and input actions ask the person
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import string
@@ -28,6 +29,11 @@ INPUT_TOOLS = {f"mcp__{SERVER}__{name}" for name in ("click", "type_text", "pres
 MAX_TURNS = 80
 UNDO_ROOT = PROJECT_ROOT / "data" / "task_undo"
 TIME_LIMIT_MS = 20 * 60 * 1000
+# The watchdog: a task is stuck when it repeats itself, goes quiet, or one step runs far too long.
+QUIET_SECONDS = 4 * 60
+LONG_STEP_SECONDS = 5 * 60
+WRAP_UP_SECONDS = 2 * 60
+LOOKING = {f"mcp__{SERVER}__screenshot", f"mcp__{SERVER}__wait"}
 
 TASK_PROMPT = """You are {name}, the user's desktop companion, now carrying out a task they asked you to do
 on their Windows computer. Their home folder is {home}. You may work anywhere on the computer.
@@ -44,6 +50,14 @@ How to work:
 - The user can undo your task afterwards. To move, rename, copy or delete files and folders, or to create
   folders, always use the move_path, copy_path, delete_path and make_folder tools, and use Write or Edit for
   file contents: those changes can be reversed. Use commands only for what these tools cannot do.
+- Never get stuck waiting. Do not run commands that wait for input or never end in the foreground (servers,
+  watchers, interactive prompts, `pause`); start apps with Start-Process; start a server in the background
+  only when the task needs one, and stop it when done. Do not poll the screen or wait over and over: if
+  something does not change after two or three checks, try another way or report it.
+- Read economically. Search with Grep or Glob before opening files; read large files in parts (offset and
+  limit); do not read a file again unless it changed; read independent files in parallel. Do not take a
+  screenshot again unless something on screen should have changed.
+- The app may tell you mid-task that you seem stuck, or pass on a message from the user. Follow it.
 
 When you finish, reply with a short report in {name}'s own voice (first person, composed, warm, no
 stage directions or asterisks), two to four sentences: what you did, where to find the result, and
@@ -202,6 +216,7 @@ class ComputerTask(QObject):
     step = Signal(str)
     approval = Signal(object)
     finished = Signal(str, bool)  # report, succeeded
+    activity = Signal(str)  # What she is doing right now, between steps ("Thinking…", "Writing notes.md · 40 lines")
 
     def __init__(self, request, context, settings, parent=None, undo_root=None, servers=(), project=None):
         super().__init__(parent)
@@ -230,6 +245,15 @@ class ComputerTask(QObject):
         self.limit.setSingleShot(True)
         self.limit.setInterval(TIME_LIMIT_MS)
         self.limit.timeout.connect(lambda: self.stop("That task ran past twenty minutes, so I stopped it."))
+        # Watchdog state: what is running, what she has done, and how she is being steered.
+        self.pending, self.running, self.calls, self.log = [], {}, [], []
+        self.last_event = time.monotonic()
+        self.building, self.last_live = None, 0.0
+        self.steering, self.queued, self.stuck_count, self.wrap_up_at = False, None, 0, None
+        self.watchdog = QTimer(self)
+        self.watchdog.setInterval(5000)
+        self.watchdog.timeout.connect(self._watch)
+        self.step.connect(self._logged)
         self._prepare(context, settings)
 
     def _prepare(self, context, settings):
@@ -253,12 +277,16 @@ class ComputerTask(QObject):
                        + "\n")
         (work / "prompt.txt").write_text(prompt, encoding="utf-8")
         from ..chat.claude import DEFAULT_CLAUDE_MODEL
-        arguments = ["-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence",
+        from ..chat.effort import claude as claude_effort
+        # stream-json both ways: the app can interrupt a stuck step and steer her with a message.
+        arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                     "--include-partial-messages", "--no-session-persistence",
                      "--setting-sources", "", "--disable-slash-commands", "--strict-mcp-config",
                      "--mcp-config", str(work / "mcp.json"), "--permission-prompt-tool", f"mcp__{SERVER}__approve",
                      "--tools", TOOLS, "--allowedTools", *FREE_TOOLS, *self.trusted,
                      "--append-system-prompt-file", str(work / "prompt.txt"),
-                     "--model", settings.claude_model or DEFAULT_CLAUDE_MODEL, "--effort", "medium",
+                     "--model", settings.claude_model or DEFAULT_CLAUDE_MODEL,
+                     "--effort", claude_effort(getattr(settings, "task_effort", "medium")),
                      "--max-turns", str(MAX_TURNS), "--add-dir", *drives()]
         earlier = "\n".join(f"{m['role']}: {m['content']}" for m in context[-6:] if m.get("content"))
         self.prompt = (("Recent conversation, for context:\n" + earlier + "\n\n") if earlier else "") + \
@@ -279,9 +307,103 @@ class ComputerTask(QObject):
             return
         self.step.emit("Starting…")
         self.process.start()
-        self.process.write(self.prompt.encode("utf-8"))
-        self.process.closeWriteChannel()
+        self._send(self.prompt)
         self.limit.start()
+        self.watchdog.start()
+
+    def _send(self, text):
+        self._write({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}})
+
+    def _write(self, payload):
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            self.process.write((json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8"))
+
+    def steer(self, message, by_person=True):
+        """Interrupts what she is doing and gives her `message`; she carries on from there.
+        A step waiting for approval is declined with the message instead, which reaches her the same way."""
+        if self.done or not message.strip():
+            return
+        text = (f"The user says, while you work: {message.strip()}\nTake this into account and continue the task."
+                if by_person else message)
+        waiting = [request for request in self.pending if not request.answered]
+        if waiting:
+            for request in waiting:
+                request.answer(False, "Not run. " + text)
+            return
+        self.steering, self.queued = True, text
+        self._write({"type": "control_request", "request_id": "steer-" + secrets.token_hex(4),
+                     "request": {"subtype": "interrupt"}})
+        QTimer.singleShot(15000, self._release)  # If the interrupt has nothing to stop, send it anyway.
+
+    def _release(self):
+        if self.steering and self.queued and not self.done:
+            self.steering, text, self.queued = False, self.queued, None
+            self._send(text)
+
+    def _logged(self, text):
+        self.log.append([round(time.time(), 1), text[:300]])
+
+    def _live(self, text, force=False):
+        now = time.monotonic()
+        if force or now - self.last_live > .4:
+            self.last_live = now
+            self.activity.emit(text)
+
+    def _watch(self):
+        """Every few seconds: is she stuck? Waiting for the person never counts."""
+        if self.done:
+            return
+        now = time.monotonic()
+        if any(not request.answered for request in self.pending):
+            self.last_event = now
+            return
+        if self.wrap_up_at and now > self.wrap_up_at:
+            self.stop("I got stuck and couldn't get past it, so I stopped. " + self._progress())
+            return
+        if self.steering:
+            return
+        long_steps = [summary for started, summary in self.running.values() if now - started > LONG_STEP_SECONDS]
+        if long_steps:
+            self._stuck(f"the step \"{long_steps[0]}\" has been running for over {LONG_STEP_SECONDS // 60} minutes")
+        elif not self.running and now - self.last_event > QUIET_SECONDS:
+            self._stuck(f"nothing has happened for {QUIET_SECONDS // 60} minutes")
+
+    def _looping(self):
+        """Why her last steps look like a loop, or an empty string."""
+        if len(self.calls) >= 3 and len(set(self.calls[-3:])) == 1:
+            return "you did the same step three times in a row: " + describe(*self._call(self.calls[-1]))
+        recent = self.calls[-10:]
+        if len(recent) == 10 and sum(name in LOOKING for name, _ in map(self._call, recent)) >= 8:
+            return "you have been waiting and looking at the screen over and over"
+        reads = [values.get("file_path") for name, values in map(self._call, self.calls) if name == "Read"]
+        path = self._call(self.calls[-1])[1].get("file_path") if self.calls else None
+        if path and reads.count(path) >= 4:
+            return f"you have read {path} four times; use what you already read"
+        return ""
+
+    @staticmethod
+    def _call(signature):
+        name, values = signature
+        return name, json.loads(values)
+
+    def _stuck(self, reason):
+        """First time: steer her to another way. Second: ask for her report. Then stop."""
+        self.stuck_count += 1
+        self.last_event = time.monotonic()
+        self.running.clear()
+        if self.stuck_count == 1:
+            self.step.emit("Seemed stuck, so trying another way")
+            self.steer(f"The app noticed you seem stuck: {reason}. Do not repeat that. Try a different approach; "
+                       "if that part cannot be done, skip it and carry on with the rest of the task.", by_person=False)
+        elif self.stuck_count == 2:
+            self.step.emit("Still stuck, so wrapping up")
+            self.wrap_up_at = time.monotonic() + WRAP_UP_SECONDS
+            self.steer(f"You still seem stuck: {reason}. Stop working now. Reply with your report: what you "
+                       "finished, what you could not do, and why.", by_person=False)
+
+    def _progress(self):
+        done = [text for _, text in self.log if text not in ("Starting…",)][-3:]
+        return ("The last things I did: " + "; ".join(done) + ".") if done else ""
 
     def stop(self, report="You stopped the task, so I left things as they were at that moment."):
         if self.done:
@@ -291,6 +413,7 @@ class ComputerTask(QObject):
 
     def _approval(self, request):
         request.on_allow = self._record
+        self.pending = [item for item in self.pending if not item.answered] + [request]
         group = approval_group(request.tool)
         if self.done:
             request.answer(False, "The task has ended.")
@@ -322,20 +445,72 @@ class ComputerTask(QObject):
                 event = json.loads(line)
             except ValueError:
                 continue
-            if event.get("type") == "assistant":
-                for block in (event.get("message") or {}).get("content") or []:
-                    # Only steps that need no approval are announced here; approved ones are
-                    # announced as they are allowed.
-                    name = block.get("name") or ""
-                    if block.get("type") == "tool_use" and (name in FREE_TOOLS or (self.trusted and name.startswith(self.trusted))):
-                        self.step.emit(describe(block.get("name", ""), block.get("input")))
-            elif event.get("type") == "result":
-                text = str(event.get("result") or "").strip()
-                ok = not event.get("is_error") and event.get("subtype") == "success"
-                if not text:
-                    text = ("I couldn't finish within the number of steps I'm allowed. Here is where I stopped."
-                            if event.get("subtype") == "error_max_turns" else "I couldn't finish that task.")
-                self._finish(text, ok)
+            self._handle(event)
+
+    def _handle(self, event):
+        """One stream-json event from her run."""
+        self.last_event = time.monotonic()
+        kind = event.get("type")
+        if kind == "stream_event":
+            self._partial(event.get("event") or {})
+        elif kind == "assistant":
+            for block in (event.get("message") or {}).get("content") or []:
+                if block.get("type") != "tool_use":
+                    continue
+                # Only steps that need no approval are announced here; approved ones are
+                # announced as they are allowed.
+                name, values = block.get("name") or "", block.get("input") or {}
+                self.running[block.get("id")] = (time.monotonic(), describe(name, values))
+                self.calls.append((name, json.dumps(values, sort_keys=True, ensure_ascii=False)))
+                if name in FREE_TOOLS or (self.trusted and name.startswith(self.trusted)):
+                    self.step.emit(describe(name, values))
+                loop = self._looping()
+                if loop and not self.steering:
+                    self._stuck(loop)
+        elif kind == "user":
+            content = (event.get("message") or {}).get("content")
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    self.running.pop(block.get("tool_use_id"), None)
+        elif kind == "result" and self.steering:
+            # The interrupted turn ends here; she continues with the message.
+            self.steering, text, self.queued = False, self.queued, None
+            self.running.clear()
+            if text:
+                self._send(text)
+        elif kind == "result":
+            text = str(event.get("result") or "").strip()
+            ok = not event.get("is_error") and event.get("subtype") == "success"
+            if not text:
+                text = ("I couldn't finish within the number of steps I'm allowed. Here is where I stopped."
+                        if event.get("subtype") == "error_max_turns" else "I couldn't finish that task.")
+            self._finish(text, ok)
+
+    def _partial(self, inner):
+        """Live progress between steps, from the reply as it streams."""
+        kind = inner.get("type")
+        block = inner.get("content_block") or {}
+        if kind == "content_block_start":
+            if block.get("type") == "thinking":
+                self._live("Thinking…", force=True)
+            elif block.get("type") == "text":
+                self._live("Writing…", force=True)
+            elif block.get("type") == "tool_use":
+                self.building = {"name": block.get("name") or "", "json": ""}
+                self._live(describe(self.building["name"], {}).replace(" the file ", " a file") + "…", force=True)
+        elif kind == "content_block_delta" and self.building and (inner.get("delta") or {}).get("type") == "input_json_delta":
+            self.building["json"] += inner["delta"].get("partial_json") or ""
+            name, partial = self.building["name"], self.building["json"]
+            path = re.search(r'"(?:file_path|path)"\s*:\s*"((?:[^"\\]|\\.)*)"', partial)
+            where = Path(json.loads(f'"{path.group(1)}"')).name if path else ""
+            if name in ("Write", "Edit") and where:
+                body = re.split(r'"(?:content|new_string)"\s*:\s*"', partial, maxsplit=1)
+                lines = len(re.findall(r'(?<!\\)(?:\\\\)*\\n', body[1])) + 1 if len(body) > 1 and body[1] else 0
+                self._live(f"Writing {where}" + (f" · {lines} lines" if lines else "") + "…")
+            elif name in ("Bash", "PowerShell"):
+                self._live("Preparing a command…")
+        elif kind == "content_block_stop":
+            self.building = None
 
     def _exited(self, *_):
         self._read()
@@ -351,8 +526,14 @@ class ComputerTask(QObject):
             return
         self.done = True
         self.limit.stop()
+        self.watchdog.stop()
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            self.process.closeWriteChannel()  # Nothing more to say; anything she left running ends with her.
+            QTimer.singleShot(3000, self.process.kill)
         try:
-            self.journal.describe_task(finished=time.time(), succeeded=bool(succeeded), report=report[:600])
+            # The steps and when they happened, to see later where a task got stuck.
+            self.journal.describe_task(finished=time.time(), succeeded=bool(succeeded), report=report[:600],
+                                       steps=self.log[-200:], stuck=self.stuck_count)
         except OSError:
             pass
         self.finished.emit(report, succeeded)

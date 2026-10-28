@@ -91,6 +91,10 @@ shows its tab; New chat is an everyday chat.
 - She **asks before** running commands, changing files, or clicking and typing, unless you turn that
   off in Settings → App. **Stop** cancels at any time.
 - **Undo any task:** the task card's **Undo**, "undo that", `/undo`, or **⋯ → Recent tasks** (7 days).
+- **Never silently stuck:** the card shows what she is doing between steps ("Thinking…", "Writing guide.md · 84
+  lines…") with a timer. If she repeats a step, goes quiet for 4 minutes or one step runs over 5, she is
+  stopped mid-step and told to try another way; stuck again, she reports what she finished. Type in the
+  card's **Tell her something…** box to steer her while she works ("use the venv python").
 
 **The app**
 - **A Codex-style window** under the moonlit sky: a sidebar with New chat, Memories, Reminders, Recent tasks, Usage
@@ -109,6 +113,10 @@ shows its tab; New chat is an everyday chat.
 - **No Windows title bar**, like Claude's app: her header is the title bar (drag it, double-click to maximize,
   drag to a screen edge to snap, hover maximize for Snap Layouts), with thin minimize, maximize and close
   buttons in its corner; the shadow, rounded corners and animations stay.
+- **Effort** (beside the model in the message box, or Settings): how hard she thinks. **Auto** (the default)
+  keeps small talk light and thinks harder for code, maths, study and contest problems; or choose Low, Medium,
+  High, Extra high or Max. Computer tasks have their own level (Medium by default). Reminders, check-ins and
+  summaries always use Low.
 - **Usage** in the sidebar: how much of her plan is left, as moons that wane as you use it (Claude's 5-hour
   session and week, ChatGPT's windows via Codex, or your OpenRouter credit), each with when it resets. The
   sidebar shows the window closest to running out ("62% left", amber below 20%). The page also has 14 days of

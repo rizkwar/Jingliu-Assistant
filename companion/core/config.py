@@ -47,6 +47,8 @@ class Settings:
     computer_tasks: bool = True
     confirm_tasks: bool = True
     approve_steps: bool = True
+    effort: str = "auto"  # How hard she thinks before a reply: auto, low, medium, high, xhigh or max.
+    task_effort: str = "medium"  # The same for computer tasks (no auto).
     auto_memory: bool = True
     look_at_screen: bool = True
     barge_in: bool = True

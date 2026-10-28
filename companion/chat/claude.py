@@ -52,12 +52,12 @@ def child_environment():
     return environment
 
 
-def reply_command(prompt_file, model, mcp_file=None, servers=()):
+def reply_command(prompt_file, model, mcp_file=None, servers=(), effort='low'):
     # Conversation: no built-in tools, skills, CLAUDE.md, hooks or saved sessions. Only MCP servers the
     # person allowed in conversation are connected, and only their tools may run.
     command = [claude_executable(), '-p', '--system-prompt-file', str(prompt_file), '--tools', '',
                '--safe-mode', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence',
-               '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', 'low', '--input-format', 'stream-json',
+               '--model', model or DEFAULT_CLAUDE_MODEL, '--effort', effort, '--input-format', 'stream-json',
                '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
     if mcp_file and servers:
         command += ['--mcp-config', str(mcp_file), '--allowedTools', *(f'mcp__{name}' for name in servers)]
@@ -143,7 +143,9 @@ async def stream_claude(settings, messages):
         if servers:
             mcp_file.write_text(settings.chat_tools, encoding='utf-8')
         try:
-            process = await run(reply_command(prompt_file, settings.claude_model, mcp_file, servers), cwd=folder)
+            from .effort import claude as claude_effort
+            process = await run(reply_command(prompt_file, settings.claude_model, mcp_file, servers,
+                                              claude_effort(getattr(settings, 'effort', 'low'))), cwd=folder)
         except OSError:
             raise ChatError('Could not start Claude Code. Check its installation and restart the assistant.') from None
         try:

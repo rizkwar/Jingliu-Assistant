@@ -84,6 +84,7 @@ async def stream_reply(
         async for text in stream_claude(settings, messages):
             yield text
         return
+    from .effort import openrouter as openrouter_reasoning
     try:
         turns = [openrouter_message(message) for message in messages]
     except OSError as exc:
@@ -94,7 +95,7 @@ async def stream_reply(
         "stream": True,
         "max_tokens": 4096,
         "temperature": 0.7,
-        "reasoning": {"enabled": False, "exclude": True},
+        "reasoning": openrouter_reasoning(getattr(settings, "effort", "low")),
         "usage": {"include": True},  # The last event then carries the reply's token counts.
     }
     try:

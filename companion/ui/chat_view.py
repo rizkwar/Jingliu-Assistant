@@ -3,10 +3,11 @@ from pathlib import Path
 import re
 
 from datetime import datetime
+import time
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication, QPixmap, QTextBlockFormat, QTextCursor, QTextDocument
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout,
                                QWidget)
 
 from .code_block import CodeBlock, segments
@@ -317,6 +318,7 @@ class TaskCard(QFrame):
     """A computer task in progress: the request, her latest steps, and the state."""
     STEPS = 6
     undo_requested = Signal()
+    steer = Signal(str)  # Something the person tells her while she works.
 
     def __init__(self, speaker, request, parent=None):
         super().__init__(parent)
@@ -338,6 +340,22 @@ class TaskCard(QFrame):
         self.list.setWordWrap(True)
         self.list.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.list)
+        # What she is doing right now, and for how long: a long wait is visible, never a silent freeze.
+        self.live = QLabel()
+        self.live.setObjectName('taskLive')
+        self.live.setTextFormat(Qt.TextFormat.PlainText)
+        self.live.hide()
+        layout.addWidget(self.live)
+        self.live_text, self.live_since = '', time.monotonic()
+        self.clock = QTimer(self)
+        self.clock.timeout.connect(self._tick)
+        self.clock.start(1000)
+        self.message = QLineEdit()
+        self.message.setObjectName('taskMessage')
+        self.message.setPlaceholderText('Tell her something while she works… (Enter)')
+        self.message.setToolTip('She stops what she is doing, reads this, and carries on with it in mind')
+        self.message.returnPressed.connect(self._steer)
+        layout.addWidget(self.message)
         footer = QHBoxLayout()
         footer.setSpacing(8)
         self.status = QLabel()
@@ -359,6 +377,29 @@ class TaskCard(QFrame):
     def add_step(self, text):
         self.steps.append(text)
         self.list.setText('\n'.join('· ' + step for step in self.steps[-self.STEPS:]))
+        self.set_live('')
+
+    def set_live(self, text):
+        """The line under the steps: what she is doing now, with how long it has taken."""
+        if text != self.live_text:
+            self.live_text, self.live_since = text, time.monotonic()
+        self._tick()
+
+    def _tick(self):
+        seconds = int(time.monotonic() - self.live_since)
+        working = self.status.property('state') == 'working'
+        text = self.live_text or ('Working…' if working and seconds >= 20 else '')
+        self.live.setVisible(bool(text) and working)
+        if text:
+            # After half a minute on one thing, the time shows, so a slow step is never mistaken for a freeze.
+            self.live.setText(text + (f'  ·  {seconds // 60}:{seconds % 60:02d}' if seconds >= 30 else ''))
+
+    def _steer(self):
+        text = self.message.text().strip()
+        if text:
+            self.message.clear()
+            self.add_step('You: ' + text)
+            self.steer.emit(text)
 
     def set_status(self, text, state):
         self.status_text = text
@@ -366,6 +407,14 @@ class TaskCard(QFrame):
         self.status.setProperty('state', state)
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)
+        running = state in ('working', 'approval')
+        self.message.setVisible(running)
+        if not running:
+            self.clock.stop()
+            self.live.hide()
+        elif not self.clock.isActive():
+            self.clock.start(1000)
+        self._tick()
 
     def plain(self):
         return '\n'.join(['Task: ' + self.request, *self.steps, self.status_text])

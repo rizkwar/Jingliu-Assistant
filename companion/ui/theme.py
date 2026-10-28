@@ -108,6 +108,10 @@ QFrame#task {{ background: rgba(12, 20, 38, 0.72); border: 1px solid rgba(168, 2
 QLabel#taskTitle {{ font-size: 14px; color: {FROST}; }}
 QLabel#taskSteps {{ font-size: 12px; color: {MUTED}; font-family: 'Cascadia Mono', 'Consolas'; }}
 QLabel#taskStatus {{ font-size: 12px; font-weight: 600; color: {ICE}; }}
+QLabel#taskLive {{ font-size: 12px; color: {ICE}; font-style: italic; }}
+QLineEdit#taskMessage {{ background: rgba(168, 212, 255, 0.05); border: 1px solid rgba(168, 212, 255, 0.12);
+    border-radius: 8px; padding: 5px 9px; font-size: 13px; color: {FROST}; margin-top: 4px; }}
+QLineEdit#taskMessage:focus {{ border-color: rgba(168, 212, 255, 0.45); }}
 QLabel#taskStatus[state="approval"] {{ color: {AMBER}; }}
 QLabel#taskStatus[state="done"] {{ color: #7fd1b9; }}
 QLabel#taskStatus[state="failed"] {{ color: #f3b3bd; }}
