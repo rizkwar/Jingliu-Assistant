@@ -197,3 +197,31 @@ test('micro-moments keep long tasks from looking frozen',()=>{
   assert.ok(['focusHard','checkIn','lipPress'].filter(name=>seen.has(name)).length>=2,`varied moments: ${[...seen]}`);
   assert.ok(life.test('work:look')&&life.snapshot().working==='look');
 });
+
+test('asleep she is never a still picture: she lolls, shifts, dreams, and hearts rise when petted',()=>{
+  const life=new AvatarLife(random(11),afternoon);life.setSleepDelay(2);
+  run(life,200,10);assert.equal(life.state,'asleep');
+  life.takeEvents();
+  const tilts=[],played=new Set();let eyesOpen=false;
+  for(let i=0;i<120*30;i++){
+    const layer=life.update(1/30);
+    if(i%15===0)tilts.push(layer.angleZ);
+    for(const name of life.snapshot().gestures)played.add(name);
+    if(layer.eyes>-.9)eyesOpen=true;
+  }
+  assert.equal(life.state,'asleep','her own sleep moments never wake her');
+  assert.ok(!eyesOpen,'eyes stay closed through every sleep moment');
+  assert.ok(Math.max(...tilts)-Math.min(...tilts)>2,'the head lolls, it is not still');
+  assert.ok(played.size>=3,`several kinds of sleep moments (${[...played]})`);
+  const events=life.takeEvents();
+  assert.ok(events.some(event=>event.startsWith('dream:')),'a dream shows above her');
+  // A shift settles her onto the other side for a while.
+  life.lean=0;life.leanTarget=0;life.gestures=[];life.nextSleepMoment=0;
+  const pick=life.random;life.random=()=>0;run(life,.1);life.random=pick;
+  assert.ok(life.snapshot().gestures.includes('sleepShift')&&life.leanTarget!==0);
+  // Petted in her sleep: she smiles and little hearts float up, and she stays asleep.
+  life.pet(true,.5);run(life,4);
+  assert.equal(life.state,'asleep');
+  assert.ok(life.takeEvents().includes('heart'));
+  life.pet(false,.5);
+});

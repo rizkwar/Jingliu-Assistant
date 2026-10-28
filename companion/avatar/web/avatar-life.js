@@ -84,6 +84,34 @@ Object.assign(GESTURES,{
   taskDone:{duration:2.6,at(t){const k=pulse(t,.1,.45,1.6,2.5);
     return {angleY:-4*pulse(t,.15,.35,.45,.8)+1.5*k,eyeSmile:.85*k,eyes:-.32*k,mouthForm:.8*k,cheek:.35*k,lift:1.5*k};}},
 });
+// Asleep she is not a still picture: she shifts, nuzzles, sighs, dreams and murmurs. Eyes stay closed.
+Object.assign(GESTURES,{
+  // Settling into a new position: a slow roll of the head to the other side, the shoulders following.
+  sleepShift:{duration:4.6,at(t,side){const k=pulse(t,.2,1.6,2.6,4.4),hitch=pulse(t,1.2,1.5,1.7,2.3);
+    return {angleZ:-7*side*k,angleX:-4*side*k,shoulders:3*side*pulse(t,.5,1.4,2.2,3.6),lift:2.2*hitch,mouthOpen:.06*hitch,
+      browY:.12*hitch};}},
+  // Nuzzling deeper into the pillow: the head dips, turns a little, and settles with a contented face.
+  nuzzle:{duration:3.6,at(t,side){const dip=pulse(t,.1,.7,1.2,2.4),rub=Math.sin(t*5.2)*pulse(t,.4,.8,1.6,2.2);
+    const content=pulse(t,1.0,1.8,2.6,3.5);
+    return {angleY:-4*dip,angleX:3*rub*side,angleZ:2*side*dip,eyeSmile:.5*content,mouthForm:.45*content,cheek:.25*content};}},
+  // A long breath in, then out: shoulders rise and fall, lips part on the way out.
+  deepSigh:{duration:4.8,at(t){const inhale=pulse(t,0,1.4,1.7,2.2),exhale=pulse(t,1.8,2.6,3.2,4.6);
+    return {lift:4.5*inhale-2.5*exhale,shoulders:2.5*inhale-1.5*exhale,angleY:1.6*inhale-1.8*exhale,mouthOpen:.14*exhale,
+      browY:.15*inhale};}},
+  // A good dream: a smile comes and goes, cheeks warm.
+  dreamSmile:{duration:5.4,at(t){const k=pulse(t,.4,1.6,3.6,5.2);
+    return {eyeSmile:.85*k,mouthForm:.75*k,cheek:.55*k,angleZ:1.5*Math.sin(t*1.3)*k};}},
+  // A troubling dream: brows draw together for a moment, then smooth out.
+  dreamFrown:{duration:4.2,at(t){const k=pulse(t,.2,.9,1.8,3.2),relax=pulse(t,2.6,3.2,3.5,4.1);
+    return {browAngle:.55*k,browY:-.25*k,mouthForm:-.4*k,angleX:-2*k,lift:-1*relax};}},
+  // Talking in her sleep: lips move faintly, a few soundless words.
+  murmur:{duration:3.4,at(t){const k=pulse(t,.15,.5,2.4,3.3),words=Math.max(0,Math.sin(t*9.5))*Math.max(0,Math.sin(t*2.1+.6));
+    return {mouthOpen:.2*words*k,mouthForm:.25*k,browY:.1*k,angleZ:1.2*Math.sin(t*1.9)*k};}},
+});
+// Sleep moments and their dream, shown as a little bubble above her: [gesture, weight, dream glyph or ''].
+const SLEEP_MOMENTS=[['sleepShift',.24,''],['nuzzle',.18,''],['deepSigh',.18,''],['dreamSmile',.18,'☾'],
+  ['dreamFrown',.1,'❄'],['murmur',.12,'♪']];
+
 // While she works on a computer task: a composed, focused face, with motion for each kind of step.
 const VARIED=new Set(['nod','ack']);
 const WORK_FACE={eyes:-.14,browY:-.12,browAngle:-.2,mouthForm:-.1,angleY:-2.5};
@@ -123,6 +151,7 @@ export class AvatarLife {
     this.side=1;this.events=[];this.mood=null;this.moodWeight=0;this.moodOffsets={};
     this.petActive=false;this.petWeight=0;this.petTime=0;this.petX=.5;this.petDemo=0;
     this.working=null;this.workWeight=0;this.waitWeight=0;this.nextWorkMoment=6;
+    this.nextSleepMoment=8;this.lean=0;this.leanTarget=0;this.nextHeart=0;
   }
   // 0 never sleeps. Night hours (23:00–05:00) shorten the delay: she is the moon's.
   setSleepDelay(minutes){this.sleepDelay=Number.isFinite(minutes)&&minutes>0?minutes*60:0;}
@@ -205,7 +234,7 @@ export class AvatarLife {
     if(name.startsWith('work:')){this.work(name.slice(5));return true;}
     if(name==='drowsy'){this.wake('gentle');this.gestures=[];this.state='drowsy';this.quiet=0;this.play('yawn');
       this.nextNod=6;this.events.push('drowsy');return true;}
-    if(name==='sleep'){this.gestures=[];this.state='asleep';this.quiet=0;this.events.push('asleep');return true;}
+    if(name==='sleep'){this.gestures=[];this.state='asleep';this.quiet=0;this.hoverTime=0;this.events.push('asleep');return true;}
     if(name==='wake'||name==='wakeStartled'){
       if(this.state==='awake'){this.state='asleep';this.base={...REST,...BASE.asleep};this.sleepWeight=1;}
       this.wake(name==='wake'?'gentle':'startled');return true;}
@@ -253,6 +282,7 @@ export class AvatarLife {
     }
     this.gestures=this.gestures.filter(g=>g.time<GESTURES[g.name].duration);
     this.expressVoice(dt,layer);
+    this.sleepMotion(dt,layer);
     for(const [key,[low,high]] of Object.entries(BOUNDS))layer[key]=clamp(layer[key],low,high);
     const [rate2,depth]=BREATH[this.state];
     this.breathRate+=(rate2-this.breathRate)*(1-Math.exp(-dt*.8));
@@ -266,6 +296,19 @@ export class AvatarLife {
       alertness:this.state==='awake'?1:this.state==='drowsy'?.45:0,zzz:this.sleepWeight,state:this.state,
       focus:this.workWeight,working:this.working?.kind??null};
     return this.layer;
+  }
+  // Asleep, the head is never quite still: it lolls slowly, nods a little with each breath, and leans to
+  // whichever side she last settled on.
+  sleepMotion(dt,layer){
+    const w=this.sleepWeight??0;
+    this.lean+=(this.leanTarget-this.lean)*(1-Math.exp(-dt*.35));
+    if(this.state!=='asleep')this.leanTarget=0;
+    if(w<.002)return;
+    const t=this.time;
+    layer.angleZ+=(this.lean*4.5+Math.sin(t*.31)*1.5+Math.sin(t*.73+2)*.5)*w;
+    layer.angleX+=(this.lean*2.5+Math.sin(t*.19+1)*1.8)*w;
+    layer.angleY+=Math.sin(this.breathPhase+.6)*1.1*w;
+    layer.bodyX+=Math.sin(t*.23+.4)*.8*w;
   }
   applyMood(dt,layer){
     const mood=this.mood;
@@ -351,6 +394,24 @@ export class AvatarLife {
     }
   }
   updateMoments(dt){
+    if(this.state==='asleep'){
+      // Every so often a sleep moment: a shift, a nuzzle, a sigh, a dream. Dreams show above her.
+      this.nextSleepMoment-=dt;
+      if(this.nextSleepMoment<=0&&!this.gestures.length&&!this.petActive){
+        const total=SLEEP_MOMENTS.reduce((sum,[,weight])=>sum+weight,0);
+        let pick=this.random()*total,chosen=SLEEP_MOMENTS[0];
+        for(const moment of SLEEP_MOMENTS){pick-=moment[1];if(pick<=0){chosen=moment;break;}}
+        const [name,,dream]=chosen;
+        if(name==='sleepShift'){this.side=this.leanTarget>0?-1:this.leanTarget<0?1:(this.random()<.5?-1:1);this.leanTarget=-this.side;}
+        else this.side=this.random()<.5?-1:1;
+        this.play(name);
+        if(dream)this.events.push('dream:'+dream);
+        this.nextSleepMoment=9+this.random()*14;
+      }
+      // Petted in her sleep: now and then a little heart floats up.
+      if(this.petActive){this.nextHeart-=dt;if(this.nextHeart<=0){this.events.push('heart');this.nextHeart=1.4+this.random()*.8;}}
+      return;
+    }
     if(this.state==='drowsy'){
       this.nextNod-=dt;
       if(this.nextNod<=0&&!this.gestures.length){this.play('nodOff');this.nextNod=9+this.random()*6;}

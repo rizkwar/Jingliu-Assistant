@@ -40,7 +40,10 @@ current character is **Jingliu**, always in character: reserved, composed, quiet
 **A living desktop avatar** ([Live2D avatar guide](docs/live2d-avatar.md))
 - She **chooses her own expressions** as she talks (smile, blush, laugh, wink, nods…), with lip-sync.
 - She greets you, has idle moments, glances at your cursor, falls asleep when left alone and wakes
-  when you come back. **Pet her** by stroking her head with the pointer.
+  when you come back. **Pet her** by stroking her head with the pointer. Asleep she is never a still
+  picture: her head lolls and nods with her breath, she shifts to the other side, nuzzles, sighs and murmurs,
+  dreams (a little bubble rises: ☾, ❄ or ♪), "z"s drift up, frost motes fall, a soft moonlight glows with
+  her breath, and petting her makes small hearts float up.
 - While she works on a task she looks focused, and a small panel shows her current step.
 - Drag to move; drag her bottom-right corner to resize her. **Settings → Avatar → Animation tester** plays every animation.
 - **Accessories** (Settings → Accessories, Live2D models): **glasses** rigged like a Live2D art mesh in her face's

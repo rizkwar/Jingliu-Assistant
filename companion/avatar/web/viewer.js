@@ -19,6 +19,43 @@ let accessories={};
 let sleepMinutes=5, lifeSequence=-1, gestureSequence=-1, lifeState='awake';
 const canvas = document.querySelector('canvas');
 const zzz = document.getElementById('zzz');
+const frost = document.getElementById('frost'), moonglow = document.getElementById('moonglow');
+const dreams = document.getElementById('dreams');
+let nextZ = 0, nextMote = 0;
+// One drifting piece of the sleeping scene: removed when its animation ends.
+function drift(container, tag, className, text, vars, life) {
+  if (container.childElementCount > 24) return null;
+  const piece = document.createElement(tag);
+  if (className) piece.className = className;
+  if (text) piece.textContent = text;
+  for (const [name, value] of Object.entries(vars)) piece.style.setProperty(name, value);
+  container.appendChild(piece);
+  setTimeout(() => piece.remove(), life * 1000 + 400);
+  return piece;
+}
+const between = (low, high) => low + Math.random() * (high - low);
+function spawnZ() {
+  const life = between(3.6, 5.2);
+  drift(zzz, 'span', 'z', Math.random() < .3 ? 'Z' : 'z', {'--size': `${between(.75, 1.5).toFixed(2)}em`,
+    '--dx': `${between(1.2, 2.4).toFixed(2)}em`, '--dy': `${-between(2.8, 4.2).toFixed(2)}em`,
+    '--sway': `${between(-.6, .6).toFixed(2)}em`, '--tilt': `${between(-14, 10).toFixed(0)}deg`, '--life': `${life.toFixed(2)}s`}, life);
+}
+function spawnMote(rect) {
+  const life = between(5, 8.5), x = rect.left + rect.width * between(.12, .88), y = rect.top + rect.height * between(0, .35);
+  const piece = drift(frost, 'i', '', '', {'--s': `${between(2, 4.6).toFixed(1)}px`, '--o': between(.35, .8).toFixed(2),
+    '--dx': `${between(-28, 28).toFixed(0)}px`, '--dy': `${between(70, 150).toFixed(0)}px`,
+    '--sway': `${between(-16, 16).toFixed(0)}px`, '--life': `${life.toFixed(2)}s`}, life);
+  if (piece) { piece.style.left = `${x}px`; piece.style.top = `${y}px`; }
+}
+function spawnDream(glyph) {
+  const bubble = drift(dreams, 'div', 'bubble', '', {}, 5.6);
+  if (!bubble) return;
+  bubble.innerHTML = '<s></s><u></u><b></b>';
+  bubble.querySelector('b').textContent = glyph;
+}
+function spawnHeart() {
+  drift(dreams, 'span', 'heart', '\u2661', {'--size': `${between(14, 20).toFixed(0)}px`, '--sway': `${between(-10, 10).toFixed(0)}px`}, 2.6);
+}
 const sparkles = document.getElementById('sparkles');
 // A finished task: a ring of ice crystals scatters from beside her head.
 function sparkleBurst() {
@@ -192,16 +229,36 @@ function showSleep() {
   if(life?.state&&life.state!==lifeState){lifeState=life.state;bridge.reportLife?.(lifeState);}
   const amount=life?Math.max(0,Math.min(1,(life.zzz-.35)/.5)):0;
   zzz.style.opacity=amount.toFixed(3);
+  frost.style.opacity=amount.toFixed(3);
+  // Her dreams, and the hearts from petting her while she sleeps, come as life events.
+  if(life&&visual.life.events.some(event=>event.startsWith('dream:')||event==='heart')){
+    for(const event of visual.life.events){
+      if(event.startsWith('dream:'))spawnDream(event.slice(6));
+      else if(event==='heart')spawnHeart();
+    }
+    visual.life.events=visual.life.events.filter(event=>!event.startsWith('dream:')&&event!=='heart');
+  }
   if(amount>0&&avatar?.headAnchor){
     const rect=canvas.getBoundingClientRect(),anchor=avatar.headAnchor();
-    zzz.style.left=`${rect.left+anchor.x*rect.width}px`;zzz.style.top=`${rect.top+anchor.y*rect.height}px`;
-    zzz.style.fontSize=`${Math.max(15,Math.min(30,anchor.size*rect.height*.032))}px`;
-  }
+    const x=rect.left+anchor.x*rect.width,y=rect.top+anchor.y*rect.height,size=anchor.size*rect.height;
+    zzz.style.left=`${x}px`;zzz.style.top=`${y}px`;
+    zzz.style.fontSize=`${Math.max(15,Math.min(30,size*.032))}px`;
+    dreams.style.left=`${x-rect.width*.1}px`;dreams.style.top=`${y+size*.02}px`;
+    dreams.style.fontSize=zzz.style.fontSize;
+    // Moonlight behind her head, swelling a little with each breath.
+    const glow=Math.max(60,size*.42),breath=life.breath??.5;
+    moonglow.style.left=`${x-rect.width*.17}px`;moonglow.style.top=`${y+size*.09}px`;
+    moonglow.style.width=moonglow.style.height=`${glow*(.94+.12*breath)}px`;
+    moonglow.style.opacity=(amount*(.55+.45*breath)).toFixed(3);
+    const now=performance.now();
+    if(amount>.2&&now>=nextZ){spawnZ();nextZ=now+between(900,1700)/Math.max(.5,amount);}
+    if(amount>.2&&now>=nextMote){spawnMote(rect);nextMote=now+between(450,1100);}
+  }else moonglow.style.opacity='0';
 }
 function sync() {
   cancelAnimationFrame(frame); frame = 0; cadence.restart();
   const running=!paused && visible && !document.hidden && avatar && !disposed;
-  zzz.classList.toggle('paused',!running);
+  document.body.classList.toggle('paused',!running);
   if (running) frame = requestAnimationFrame(tick);
 }
 bridge.pauseChanged.connect(value => { paused = value; if (paused) {stopPreview();visual?.suspend();resetVoice();} sync(); });

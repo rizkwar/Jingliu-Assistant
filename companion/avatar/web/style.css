@@ -3,16 +3,60 @@ canvas { display:block; width:100%; height:100%; }/* Sleep: soft letters drift u
 #zzz { position:absolute; left:0; top:0; width:0; height:0; opacity:0; pointer-events:none;
   font-family:'Segoe UI Variable Display Light','Segoe UI Light',sans-serif; font-style:italic; font-size:22px;
   color:#e3f0ff; text-shadow:0 0 6px rgba(150,200,255,.9), 0 0 14px rgba(111,168,232,.6); }
-#zzz span { position:absolute; left:0; bottom:0; opacity:0; animation:drift 4.2s ease-out infinite; }
-#zzz span:nth-child(2) { animation-delay:1.4s; font-size:1.25em; }
-#zzz span:nth-child(3) { animation-delay:2.8s; font-size:1.55em; }
-#zzz.paused span { animation-play-state:paused; }
+/* Each z is its own: a size, a path that sways as it rises, a life of a few seconds (see viewer.js). */
+#zzz .z { position:absolute; left:0; bottom:0; opacity:0; font-size:var(--size);
+  animation:drift var(--life) cubic-bezier(.25,.6,.35,1) forwards; }
 @keyframes drift {
-  0% { transform:translate(0,0) rotate(-8deg) scale(.6); opacity:0; }
-  18% { opacity:.95; }
-  70% { opacity:.7; }
-  100% { transform:translate(1.6em,-3.2em) rotate(10deg) scale(1.05); opacity:0; }
+  0% { transform:translate(0,0) rotate(-12deg) scale(.45); opacity:0; }
+  14% { opacity:.95; }
+  45% { transform:translate(calc(var(--dx) * .35 + var(--sway)), calc(var(--dy) * .45)) rotate(var(--tilt)) scale(.85); }
+  72% { opacity:.65; }
+  100% { transform:translate(var(--dx), var(--dy)) rotate(14deg) scale(1.1); opacity:0; }
 }
+/* Moonlight: a soft glow behind her head that swells and settles with each sleeping breath. */
+#moonglow { position:absolute; left:0; top:0; width:0; height:0; opacity:0; pointer-events:none; z-index:-1;
+  border-radius:50%; transform:translate(-50%,-50%);
+  background:radial-gradient(circle, rgba(178,214,255,.30) 0%, rgba(126,174,240,.14) 38%, rgba(126,174,240,0) 70%); }
+/* Frost motes drifting down around her while she sleeps. */
+#frost { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+#frost i { position:absolute; width:var(--s); height:var(--s); border-radius:50%; opacity:0;
+  background:rgba(232,244,255,.95); box-shadow:0 0 5px rgba(150,200,255,.95), 0 0 11px rgba(111,168,232,.6);
+  animation:mote var(--life) linear forwards; }
+@keyframes mote {
+  0% { transform:translate(0,0); opacity:0; }
+  15% { opacity:var(--o); }
+  50% { transform:translate(calc(var(--dx) * .5 + var(--sway)), calc(var(--dy) * .5)); }
+  82% { opacity:var(--o); }
+  100% { transform:translate(var(--dx), var(--dy)); opacity:0; }
+}
+/* Dreams: a little bubble rises with what she dreams of (a moon, frost, a song); a heart when petted. */
+#dreams { position:absolute; left:0; top:0; width:0; height:0; pointer-events:none;
+  font-family:'Segoe UI Symbol','Segoe UI',sans-serif; }
+#dreams .bubble { position:absolute; left:0; top:0; opacity:0; animation:dream 5.6s ease-out forwards; }
+#dreams .bubble b { position:absolute; left:.9em; top:-2.6em; width:2.1em; height:2.1em; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; font-weight:normal; color:#eaf4ff;
+  background:rgba(18,30,56,.62); border:1px solid rgba(168,212,255,.55);
+  box-shadow:0 0 10px rgba(111,168,232,.55), inset 0 0 8px rgba(168,212,255,.25);
+  text-shadow:0 0 6px rgba(150,200,255,.95); }
+#dreams .bubble s, #dreams .bubble u { position:absolute; border-radius:50%; text-decoration:none;
+  background:rgba(18,30,56,.62); border:1px solid rgba(168,212,255,.5); }
+#dreams .bubble s { left:0; top:0; width:.35em; height:.35em; }
+#dreams .bubble u { left:.4em; top:-.75em; width:.6em; height:.6em; }
+@keyframes dream {
+  0% { transform:translate(0,8px) scale(.35); opacity:0; }
+  14% { transform:translate(3px,-4px) scale(1); opacity:1; }
+  72% { transform:translate(12px,-22px) scale(1.04); opacity:.95; }
+  100% { transform:translate(20px,-40px) scale(1.1); opacity:0; }
+}
+#dreams .heart { position:absolute; left:0; top:0; color:#ffb3c6; font-size:var(--size); opacity:0;
+  text-shadow:0 0 6px rgba(255,140,170,.9); animation:heart 2.6s ease-out forwards; }
+@keyframes heart {
+  0% { transform:translate(0,0) scale(.4); opacity:0; }
+  20% { transform:translate(var(--sway),-10px) scale(1.1); opacity:1; }
+  100% { transform:translate(calc(var(--sway) * -1),-56px) scale(.9); opacity:0; }
+}
+/* Paused (hidden window, suspended): everything drifting stops where it is. */
+body.paused #zzz *, body.paused #frost *, body.paused #dreams * { animation-play-state:paused; }
 
 /* A finished task: ice crystals scatter from her and melt away. */
 #sparkles { position:absolute; left:0; top:0; width:0; height:0; pointer-events:none; }
