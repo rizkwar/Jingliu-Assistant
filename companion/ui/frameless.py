@@ -8,7 +8,7 @@ or maximize. Elsewhere (other platforms, tests) the ordinary frame stays."""
 import ctypes
 import sys
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QAbstractSlider, QAbstractSpinBox, QComboBox,
                                QHBoxLayout, QLineEdit, QPushButton, QTabBar, QWidget)
@@ -24,6 +24,26 @@ INTERACTIVE = (QAbstractButton, QLineEdit, QComboBox, QAbstractScrollArea, QAbst
 
 def available():
     return sys.platform == 'win32' and QGuiApplication.platformName() == 'windows'
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long), ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [('cbSize', ctypes.c_ulong), ('rcMonitor', RECT), ('rcWork', RECT), ('dwFlags', ctypes.c_ulong)]
+
+
+def work_area(hwnd):
+    """The work area (the screen less the taskbar) of the monitor the window is on, in physical pixels."""
+    user32 = ctypes.windll.user32
+    user32.MonitorFromWindow.restype = ctypes.c_void_p
+    monitor = user32.MonitorFromWindow(ctypes.c_void_p(hwnd), 2)  # The nearest monitor.
+    info = MONITORINFO()
+    info.cbSize = ctypes.sizeof(MONITORINFO)
+    if not monitor or not user32.GetMonitorInfoW(ctypes.c_void_p(monitor), ctypes.byref(info)):
+        return None
+    return info.rcWork
 
 
 class WindowControls(QWidget):
@@ -87,7 +107,29 @@ class Frame(QObject):
             self._native_styles()
         elif event.type() == QEvent.Type.WindowStateChange:
             self.controls.refresh()
+            if self.prepared:
+                QTimer.singleShot(0, self._frame_changed)  # Once Windows has the new state: fit it again.
+        elif event.type() == QEvent.Type.Show and self.prepared and self.window.isMaximized():
+            QTimer.singleShot(0, self._frame_changed)  # Back from the tray, maximized.
         return False
+
+    def _frame_changed(self):
+        """Asks Windows to work out the window's frame again (WM_NCCALCSIZE), so maximized content fits, with
+        square corners and no border while maximized (after a restore, Windows would keep rounding them)."""
+        try:
+            hwnd = ctypes.c_void_p(int(self.window.winId()))
+            self._corners(hwnd)
+            ctypes.windll.user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
+        except (OSError, AttributeError):
+            pass
+
+    def _corners(self, hwnd):
+        maximized = bool(ctypes.windll.user32.IsZoomed(hwnd))
+        dwm = ctypes.windll.dwmapi
+        corner = ctypes.c_int(1 if maximized else 2)  # Square when maximized, round otherwise (Windows 11).
+        dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), ctypes.sizeof(corner))
+        border = ctypes.c_uint(0xFFFFFFFE if maximized else 0xFFFFFFFF)  # No border line, or the default.
+        dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border), ctypes.sizeof(border))
 
     def _native_styles(self):
         """Gives the frameless window back the styles behind the shadow, snapping and animations."""
@@ -116,18 +158,14 @@ class Frame(QObject):
         from ctypes import wintypes
         msg = wintypes.MSG.from_address(int(message))
         if msg.message == WM_NCCALCSIZE and msg.wParam:
-            if self.window.isMaximized():
-                # Maximized, Windows hangs the frame off the screen's edges: keep the content on screen.
-                class RECT(ctypes.Structure):
-                    _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long), ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
-                rect = RECT.from_address(msg.lParam)
-                user32 = ctypes.windll.user32
-                dpi = user32.GetDpiForWindow(msg.hWnd)
-                inset = user32.GetSystemMetricsForDpi(32, dpi) + user32.GetSystemMetricsForDpi(92, dpi)
-                rect.left += inset
-                rect.top += inset
-                rect.right -= inset
-                rect.bottom -= inset
+            # Windows' own idea of the state, not Qt's: they differ for a moment after the tray or a minimize.
+            if ctypes.windll.user32.IsZoomed(msg.hWnd):
+                # Maximized, the content fills the monitor's work area exactly. Windows usually hangs the frame off
+                # the screen's edges, but after a restore it may not, so a fixed inset would leave a gap.
+                work = work_area(msg.hWnd)
+                if work is not None:
+                    rect = RECT.from_address(msg.lParam)
+                    rect.left, rect.top, rect.right, rect.bottom = work.left, work.top, work.right, work.bottom
             return True, 0
         if msg.message == WM_NCHITTEST:
             hit = self.hit(self.window.mapFromGlobal(QCursor.pos()))
