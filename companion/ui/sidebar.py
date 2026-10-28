@@ -290,6 +290,7 @@ class Sidebar(QFrame):
         layout.addLayout(self.settings_slot)
         self._rows, self._everything, self._projects, self._chats, self._extras = [], [], [], {}, {}
         self._inbox = None
+        self._working = None  # The chat where she is working on a task.
         self._current = self._current_project = self._page_project = None
         self._expanded = set()
         self.show_tab("chats")
@@ -336,6 +337,24 @@ class Sidebar(QFrame):
         button = self._tool(action)
         self.settings_slot.addWidget(button)
         return button
+
+    def set_working(self, conversation_id):
+        """Marks the chat where she is working on a task, so it is easy to find while you are elsewhere."""
+        self._working = conversation_id
+        for kind in self.trees:
+            self._fill_tree(kind)
+        self._filter(self.search.text())
+
+    def _mark_working(self, item, row, column=None):
+        if row["id"] != self._working:
+            return
+        icon, tip = glyph_icon("tool", color="#e6c28c"), " · she is working on a task here"
+        if column is None:
+            item.setIcon(icon)
+            item.setToolTip(item.toolTip() + tip)
+        else:
+            item.setIcon(column, icon)
+            item.setToolTip(column, item.toolTip(column) + tip)
 
     def set_identity(self, name, seal):
         self.title.setText(name)
@@ -412,6 +431,7 @@ class Sidebar(QFrame):
                 child.setData(0, PINNED, bool(row.get("pinned")))
                 child.setData(0, PROJECT, project["id"])
                 child.setToolTip(0, f"{row['title']} · {_when(row.get('updated_at'))}")
+                self._mark_working(child, row, 0)
                 child.setSizeHint(0, QSize(0, ROW - 4))
                 item.addChild(child)
                 child.setFirstColumnSpanned(True)  # One highlight across the row.
@@ -463,6 +483,7 @@ class Sidebar(QFrame):
                             + (f" · in {place}" if place else ""))
             if row.get("pinned"):
                 item.setIcon(moon)
+            self._mark_working(item, row)
             self.list.addItem(item)
             if row["id"] == self._current:
                 item.setSelected(True)

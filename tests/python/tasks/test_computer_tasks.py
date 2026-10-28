@@ -420,6 +420,39 @@ class WindowTaskTests(unittest.TestCase):
         self.assertIsNone(row.findChild(QPushButton))
         dialog.deleteLater()
 
+    def test_a_task_keeps_going_while_you_are_in_another_chat(self):
+        from companion.ui.approval import ApprovalDialog
+        from companion.ui.chat_view import TaskCard
+        window = self.window
+        working = window._conversation_id
+        window.input.setPlainText("/do tidy my Downloads folder")
+        window._send()
+        task = FakeTask.created[0]
+        task.step.emit("Look for files: Downloads/*")
+        window._new_conversation()  # You go elsewhere: the card goes with the transcript.
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # As the app's event loop does.
+        elsewhere = window._conversation_id
+        self.assertNotEqual(elsewhere, working)
+        self.assertEqual(window.sidebar._working, working)  # The sidebar shows where she is working.
+        task.step.emit("Read Downloads/notes.txt")
+        request = FakeRequest("PowerShell")
+        with patch.object(ApprovalDialog, "open", lambda dialog: dialog._choose("once")):
+            task.approval.emit(request)  # Used to fail on the deleted card, so the question never came.
+        self.assertEqual(request.answers, [True])
+        window._switch_conversation(working)  # Back: her progress, as it is now.
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # The old card, removed with the transcript.
+        cards = window.transcript.findChildren(TaskCard)
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0].steps, ["Look for files: Downloads/*", "Read Downloads/notes.txt",
+                                          "Run a command: dir"])
+        window._switch_conversation(elsewhere)
+        task.finished.emit("I sorted your Downloads into three folders.", True)
+        self.assertIsNone(window._task)
+        self.assertIsNone(window.sidebar._working)
+        self.assertNotIn("[Task report]", json.dumps(window._messages))  # Not this chat's history.
+        self.assertIn("She finished the task in", window.transcript.toPlainText())
+        self.assertEqual(window.store.messages(working)[-1]["display"], "I sorted your Downloads into three folders.")
+
     def test_tasks_can_be_turned_off(self):
         self.window.computer_tasks.setChecked(False)
         self.window.input.setPlainText("/do something")

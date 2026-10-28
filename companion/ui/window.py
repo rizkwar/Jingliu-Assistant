@@ -301,6 +301,8 @@ class CompanionWindow(QMainWindow):
         self._conversation_id = last or (chats[0] if chats else self.store.create_conversation(key))
         self._reminder_job = None  # A reminder she is writing in her Reminders session, out of view.
         self._session = None  # The Claude Code session the reply in progress runs in (chat/sessions.py).
+        self._task_view = None  # The running task's progress and conversation, kept apart from its card.
+        self._task_card = None
         self._task_session = (None, None, None, None)
         QTimer.singleShot(4000, self._clean_sessions)
         self._active_turn = None
@@ -2778,7 +2780,9 @@ class CompanionWindow(QMainWindow):
     def _start_task(self, request, turn, acknowledgement):
         from ..tasks.runner import ComputerTask
         if self._task is not None:
-            self.transcript.add_note("She is still working on the previous task. Stop it first to start another.", "warning")
+            where = "" if self._task_view["conversation"] == self._conversation_id else " in another chat"
+            self.transcript.add_note(f"She is still working on the previous task{where}. Stop it first to start another.",
+                                     "warning")
             return
         if not request.strip() or self._closing:
             return
@@ -2800,20 +2804,64 @@ class CompanionWindow(QMainWindow):
             conversation = self._conversation_id
             task.usage.connect(lambda counts: self._record_usage(conversation, "claude", counts))
             task.limits.connect(lambda windows: self._limits_reported("claude", windows))
-        card = self.transcript.add_task_card(self.settings.name, request)
-        self._task, self._task_card, self._task_turn, self._task_ack = task, card, turn, acknowledgement
-        task.step.connect(card.add_step)
+        # The task belongs to this conversation. Its progress is kept here, not in the card: switching to another
+        # chat removes the card, and coming back draws it again with everything so far.
+        self._task, self._task_turn, self._task_ack = task, turn, acknowledgement
+        self._task_view = {"conversation": self._conversation_id, "request": request, "steps": [],
+                           "status": ("Working…", "working"), "live": ""}
+        self._show_task_card()
+        self.sidebar.set_working(self._conversation_id)
+        task.step.connect(self._task_progress)
         task.step.connect(self._task_step)
         if hasattr(task, "activity"):
-            task.activity.connect(card.set_live)
+            task.activity.connect(self._task_live)
             task.activity.connect(self._task_activity)
-        card.steer.connect(lambda text, task=task: self._steer_task(task, text))
         task.approval.connect(self._ask_approval)
         task.finished.connect(self._task_finished)
         self.avatar.work("start", request)
         self.status.setText("Working on a task…")
         task.start()
         self._refresh_stop_button()
+
+    def _visible_task_card(self):
+        """The running task's card while its conversation is the one on screen; None otherwise."""
+        from shiboken6 import isValid
+        view, card = getattr(self, "_task_view", None), getattr(self, "_task_card", None)
+        if not view or view["conversation"] != self._conversation_id or card is None or not isValid(card):
+            return None
+        return card
+
+    def _show_task_card(self):
+        """Draws the running task's card in its conversation, with its steps, state and what she is doing now."""
+        view = self._task_view
+        card = self.transcript.add_task_card(self.settings.name, view["request"])
+        for step in view["steps"]:
+            card.add_step(step)
+        card.set_status(*view["status"])
+        card.set_live(view["live"])
+        card.steer.connect(lambda text: self._steer_task(self._task, text))
+        self._task_card = card
+        return card
+
+    def _task_progress(self, text):
+        self._task_view["steps"].append(text)
+        self._task_view["live"] = ""
+        card = self._visible_task_card()
+        if card is not None:
+            card.add_step(text)
+
+    def _task_live(self, text):
+        self._task_view["live"] = text
+        card = self._visible_task_card()
+        if card is not None:
+            card.set_live(text)
+
+    def _task_status(self, text, state):
+        if self._task_view:
+            self._task_view["status"] = (text, state)
+        card = self._visible_task_card()
+        if card is not None:
+            card.set_status(text, state)
 
     def _finish_task_session(self, task):
         """A task that reached its report leaves its session for the next task here; a stopped one ends it."""
@@ -2833,15 +2881,15 @@ class CompanionWindow(QMainWindow):
 
     def _steer_task(self, task, text):
         """Something said while she works reaches her at once; a step waiting for approval is declined with it."""
-        if task is not self._task or not hasattr(task, "steer"):
+        if task is None or task is not self._task or not hasattr(task, "steer"):
             return
         for dialog in self.findChildren(QDialog):
             if dialog.windowTitle() == "Allow this step?" and dialog.isVisible():
                 dialog.hide()
                 dialog.deleteLater()
+        self._task_view["steps"].append("You: " + text)  # The card already shows it.
         task.steer(text)
-        if self._task_card is not None:
-            self._task_card.set_status("Working…", "working")
+        self._task_status("Working…", "working")
 
     def _task_activity(self, text):
         """Her face follows what she is doing between steps, changing only when the kind of work does."""
@@ -2857,24 +2905,27 @@ class CompanionWindow(QMainWindow):
 
     def _ask_approval(self, request):
         from .approval import ApprovalDialog
-        card = self._task_card
-        card.set_status("Waiting for your approval…", "approval")
+        # The question comes whichever chat is open; the task's card says it is waiting when you go back.
+        self._task_status("Waiting for your approval…", "approval")
         self.avatar.work("wait", request.summary)
         self.show_companion()
         dialog = ApprovalDialog(self.settings.name, request, self)
         self._chrome.watch(dialog)
 
         def decided(choice, dialog=dialog):
+            running = self._task is not None and self._task_view is not None
             if choice == "deny":
                 request.answer(False, "The person did not allow this step. Do not try it another way.")
-                card.add_step("Not allowed: " + request.summary)
+                if running:
+                    self._task_progress("Not allowed: " + request.summary)
             else:
                 if choice == "task" and self._task is not None:
                     self._task.remember_approval(request)
                 request.answer(True)
-                card.add_step(request.summary)
-            if self._task is not None:
-                card.set_status("Working…", "working")
+                if running:
+                    self._task_progress(request.summary)
+            if running:
+                self._task_status("Working…", "working")
                 if choice == "deny":
                     self.avatar.work("think", "Finding another way to finish what I can…")
                 else:
@@ -2886,14 +2937,25 @@ class CompanionWindow(QMainWindow):
     def _task_finished(self, report, succeeded):
         task, self._task = self._task, None
         self._finish_task_session(task)
-        card = self._task_card
-        card.set_status("Done" if succeeded else "Stopped" if "stopped" in report.lower() else "Not finished",
-                        "done" if succeeded else "failed")
+        card = self._visible_task_card()  # None when you are in another chat.
+        view, self._task_view = self._task_view, None
+        here = bool(view) and view["conversation"] == self._conversation_id
+        if card is not None:
+            card.set_status("Done" if succeeded else "Stopped" if "stopped" in report.lower() else "Not finished",
+                            "done" if succeeded else "failed")
+        self.sidebar.set_working(None)
         for dialog in self.findChildren(QDialog):
             if dialog.windowTitle() == "Allow this step?" and dialog.isVisible():
                 dialog.reject()
-        self.transcript.add_message("assistant", self.settings.name, report)
-        self._messages.append({"role": "assistant", "content": "[Task report] " + report})
+        if here:
+            self.transcript.add_message("assistant", self.settings.name, report)
+            self._messages.append({"role": "assistant", "content": "[Task report] " + report})
+        elif view:
+            # Her report is saved in the task's own chat (below); here, a note says where to find it.
+            title = next((row["title"] for row in self.store.conversations(character_key(self.settings.character_path))
+                          if row["id"] == view["conversation"]), "another chat")
+            self.transcript.add_note(f"She finished the task in “{title}”. Her report is there.")
+            self.notify.emit(f"{self.settings.name} finished a task", report[:160])
         if self._task_turn is not None:
             # The report joins the reply that accepted the task, so later replies know the outcome.
             shown = (self._task_ack + "\n\n" if self._task_ack else "") + report
@@ -2904,8 +2966,9 @@ class CompanionWindow(QMainWindow):
         self.avatar.work("done" if succeeded else "failed", report)
         journal = getattr(task, "journal", None)
         if journal is not None and journal.undoable():
-            card.offer_undo()
-            card.undo_requested.connect(lambda card=card, journal=journal: self._undo_task(card, journal))
+            if card is not None:
+                card.offer_undo()
+                card.undo_requested.connect(lambda card=card, journal=journal: self._undo_task(card, journal))
             self._last_undo = (card, journal)
         if self.auto_speak.isChecked() and self.volume.value() > 0 and not self._closing:
             self.speech.speak(report, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
@@ -4297,6 +4360,8 @@ class CompanionWindow(QMainWindow):
                 self._last_reply = row["display"]
                 self._last_reply_id = row["id"]
         self.replay.setEnabled(bool(self._last_reply))
+        if getattr(self, "_task", None) is not None and self._task_view and self._task_view["conversation"] == conversation_id:
+            self._show_task_card()  # Back in the chat where she is working: her progress, as it is now.
         self._update_conversation_title()
         if hasattr(self, "sidebar") and self._current_project():
             self._show_tab_for(self._current_project())  # Opening a project's chat shows its tab.
