@@ -379,6 +379,32 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(self.window.windowState() & Qt.WindowState.WindowMaximized)
         self.assertFalse(self.window.windowState() & Qt.WindowState.WindowMinimized)
 
+    def test_title_bar_areas_drag_resize_and_maximize_like_a_native_window(self):
+        from PySide6.QtCore import QPoint
+        from companion.ui import frameless
+        window = self.window
+        window.resize(1100, 800)
+        window.show()
+        self.app.processEvents()
+        frame = window._frame
+        controls = window.window_controls
+        controls.show()
+        window.title_bar.resize(window.title_bar.width(), window.title_bar.height())  # Places the buttons.
+        self.app.processEvents()
+        header = window.title_bar.mapTo(window, QPoint(window.title_bar.width() // 2, 8))
+        self.assertEqual(frame.hit(QPoint(2, 400)), frameless.HTLEFT)
+        self.assertEqual(frame.hit(QPoint(1097, 797)), frameless.HTBOTTOMRIGHT)
+        self.assertEqual(frame.hit(controls.maximize.mapTo(window, QPoint(20, 15))), frameless.HTMAXBUTTON)
+        self.assertEqual(frame.hit(controls.close.mapTo(window, QPoint(20, 15))), 0)       # Qt's own button.
+        self.assertEqual(frame.hit(header), frameless.HTCAPTION)                             # Drags the window.
+        self.assertEqual(frame.hit(window.conversation_title.mapTo(window, QPoint(4, 6))), 0)  # Renames.
+        self.assertEqual(frame.hit(window.sidebar.search_button.mapTo(window, QPoint(4, 4))), 0)
+        self.assertEqual(frame.hit(window.input.mapTo(window, QPoint(10, 10))), 0)
+        controls.toggle()
+        self.app.processEvents()
+        self.assertTrue(window.isMaximized())
+        self.assertEqual(controls.maximize.text(), frameless.GLYPHS["restore"])
+
     def test_invalid_character_reload_keeps_current_profile_and_draft(self):
         self.window.input.setPlainText("An unsent thought")
         previous = self.window.settings

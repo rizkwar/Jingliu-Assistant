@@ -40,6 +40,7 @@ from ..voice.reference import inspect_reference, VoiceSetupError
 from ..chat import attachments
 from ..chat import reminders
 from .chat_view import AttachmentCard, ChatView
+from .frameless import Frame, WindowControls
 from .inline import InlineBar, ask, edit_in_place, tell
 from .projects import ProjectPage, project_icon
 from .sidebar import Sidebar
@@ -414,6 +415,15 @@ class CompanionWindow(QMainWindow):
         # Double-click her title to rename the conversation right there.
         self.conversation_title.setToolTip("Double-click to rename")
         self.conversation_title.installEventFilter(self)
+        # No Windows title bar, like Claude's app: the header is the title bar, with the window's buttons in
+        # its corner (see frameless.py).
+        self.title_bar = header
+        self.window_controls = WindowControls(self, header)
+        self._frame = Frame(self, self.window_controls, self._is_title_bar)
+        if self._frame.active:
+            margins = heading.contentsMargins()
+            heading.setContentsMargins(margins.left(), margins.top(), margins.right() + 138, margins.bottom())
+        header.installEventFilter(self)
 
         centring = QHBoxLayout()
         centring.setContentsMargins(0, 0, 0, 0)
@@ -1161,11 +1171,34 @@ class CompanionWindow(QMainWindow):
         self.avatar.placed.connect(self._avatar_save.start)
         self.input.setFocus()
 
+    def _is_title_bar(self, point):
+        """Window points that drag the window: the header, and the sidebar's top beside her name."""
+        header = self.title_bar
+        if header.rect().contains(header.mapFrom(self, point)):
+            # The title's own words are not: double-clicking them renames the conversation.
+            title = self.conversation_title
+            local = title.mapFrom(self, point)
+            words = title.fontMetrics().horizontalAdvance(title.text()) + 8
+            return not (title.rect().contains(local) and local.x() <= words)
+        if self.sidebar.isVisible():
+            local = self.sidebar.mapFrom(self, point)
+            return self.sidebar.rect().contains(local) and local.y() < header.height()
+        return False
+
+    def nativeEvent(self, event_type, message):
+        answer = self._frame.native_event(event_type, message) if hasattr(self, "_frame") else None
+        return answer if answer is not None else super().nativeEvent(event_type, message)
+
     def eventFilter(self, watched, event):
+        if watched is getattr(self, "title_bar", None) and event.type() == QEvent.Type.Resize:
+            controls = self.window_controls
+            controls.adjustSize()
+            controls.move(watched.width() - controls.width(), 0)
+            controls.raise_()
         if watched is getattr(self, "conversation_title", None) and event.type() == QEvent.Type.MouseButtonDblClick:
             self._rename_here()
             return True
-        if watched is self.input and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+        if watched is getattr(self, "input", None) and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
             repolish(self.composer, focused=event.type() == QEvent.Type.FocusIn)
         return super().eventFilter(watched, event)
 

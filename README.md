@@ -103,6 +103,9 @@ shows its tab; New chat is an everyday chat.
   brings you back to her latest words.
 - **Code in its own box**: `</>` and the language or file name, icon buttons to **wrap long lines** and
   **copy** (it turns into a check), and colours for keywords, strings, comments and numbers.
+- **No Windows title bar**, like Claude's app: her header is the title bar (drag it, double-click to maximize,
+  drag to a screen edge to snap, hover maximize for Snap Layouts), with thin minimize, maximize and close
+  buttons in its corner; the shadow, rounded corners and animations stay.
 - **No popups**: rename a chat, project or subject right where its name is (double-click it, or the title above the chat); questions like "Delete …?" and notices appear in a bar inside the window.
 - **Fonts**: Inter (bundled, like ChatGPT; the default), Segoe UI Variable, Sitka, Bahnschrift or Calibri, in four text sizes.
 - **Themes** (Settings → App → Window → Theme): Moonlit frost, Crimson moon, Jade grove, Lunar gold, Violet

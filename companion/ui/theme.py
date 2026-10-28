@@ -153,6 +153,12 @@ QPushButton#codeAction {{ font-family: '{ICON_FONT}'; background: transparent; b
     font-size: 14px; padding: 0; border-radius: 8px; min-width: 30px; max-width: 30px; min-height: 28px; max-height: 28px; }}
 QPushButton#codeAction:hover {{ background: rgba(168, 212, 255, 0.10); color: {FROST}; }}
 QPushButton#codeAction:checked {{ color: {ICE}; background: rgba(168, 212, 255, 0.10); }}
+QPushButton#caption, QPushButton#captionClose {{ font-family: '{ICON_FONT}'; font-size: 10px; color: {FROST};
+    background: transparent; border: none; border-radius: 0; padding: 0; }}
+QPushButton#caption:hover, QPushButton#caption[state="hover"] {{ background: rgba(255, 255, 255, 0.08); }}
+QPushButton#caption:pressed, QPushButton#caption[state="pressed"] {{ background: rgba(255, 255, 255, 0.05); }}
+QPushButton#captionClose:hover {{ background: #c42b1c; color: #ffffff; }}
+QPushButton#captionClose:pressed {{ background: #b02718; color: #ffffff; }}
 QPushButton#jumpLatest {{ font-family: '{ICON_FONT}'; font-size: 13px; color: {FROST}; padding: 0;
     background: rgba(18, 29, 52, 0.96); border: 1px solid rgba(168, 212, 255, 0.22); border-radius: 18px; }}
 QPushButton#jumpLatest:hover {{ background: rgba(30, 46, 78, 0.98); border-color: rgba(168, 212, 255, 0.40); }}
