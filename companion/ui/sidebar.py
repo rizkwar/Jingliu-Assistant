@@ -461,7 +461,7 @@ class Sidebar(QFrame):
             font = QFont()
             font.setBold(True)
             item.setFont(font)
-        item.setToolTip("Where she reminds you, apart from your chats"
+        item.setToolTip("Where she reminds you and checks in, apart from your chats"
                         + (f" · {unread} new" if unread else f" · {_when(row.get('updated_at'))}"))
         self.list.addItem(item)
         if row["id"] == self._current:

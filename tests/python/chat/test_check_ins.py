@@ -72,7 +72,9 @@ class WindowCheckInTests(unittest.TestCase):
         started = []
         with patch("companion.chat.reminders.now_local", return_value=now.astimezone()), \
                 patch("companion.chat.check_ins.idle_seconds", return_value=idle), \
-                patch.object(self.window, "_begin_reply", side_effect=lambda *a, **k: started.append((a, k)) or True):
+                patch.object(self.window, "_begin_reply", side_effect=lambda *a, **k: started.append(("here", a, k)) or True), \
+                patch.object(self.window, "_remind_out_of_view",
+                             side_effect=lambda inbox, line, item: started.append(("away", (inbox, line), item)) or True):
             self.window._check_in()
         return started
 
@@ -82,12 +84,30 @@ class WindowCheckInTests(unittest.TestCase):
 
     def test_when_on_she_greets_on_arrival_and_it_is_remembered(self):
         self.window.check_ins.setChecked(True)
+        chat = self.window._conversation_id
         started = self.run_check(datetime(2026, 10, 26, 8, 0), 1)
-        (line,), options = started[0]
+        where, (inbox, line), item = started[0]
+        self.assertEqual(where, "away")                      # Not in the chat you are in…
+        self.assertNotEqual(inbox, chat)
+        self.assertEqual(self.window.store.conversation(inbox)["kind"], "reminders")  # …but in her Reminders.
         self.assertTrue(line.startswith(check_ins.MARK))
-        self.assertEqual(options["note"], ("Check-in · good morning", "moon"))  # 08:00
+        self.assertEqual(item, {"text": "Check-in · good morning", "check_in": True})  # 08:00
         self.assertEqual(self.window.settings.check_in_greeted, "2026-10-26")
         self.assertEqual(self.run_check(datetime(2026, 10, 26, 9, 0), 1), [])
+
+    def test_with_her_reminders_open_she_checks_in_there_and_it_reads_as_a_note(self):
+        self.window.check_ins.setChecked(True)
+        inbox = self.window._reminder_session()
+        self.window._restore_conversation(inbox)
+        started = self.run_check(datetime(2026, 10, 26, 8, 0), 1)
+        where, (line,), options = started[0]
+        self.assertEqual((where, options["note"]), ("here", ("Check-in · good morning", "moon")))
+        turn = self.window.store.start_turn(inbox, line)        # Saved, then the session opened again:
+        self.window.store.save_turn(turn, "Good morning.", "Good morning.", "complete")
+        self.window._restore_conversation(inbox)
+        text = self.window.transcript.toPlainText()
+        self.assertIn("Check-in · 08:00", text)                  # A short note, not her instructions.
+        self.assertNotIn("Greet them", text)
 
     def test_never_while_she_is_busy(self):
         self.window.check_ins.setChecked(True)

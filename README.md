@@ -112,7 +112,8 @@ shows its tab; New chat is an everyday chat.
   dusk, Midnight ink, and two light ones, Snowfield and Blossom day. The whole window changes at once.
 - Lives in the **system tray** when closed (Quit from there); in Windows Search / Start as **Jingliu**.
 - **Start with Windows** (quietly, in the tray) and **gentle check-ins** (off by default: a greeting
-  that fits the time of day, and a nudge to rest after about three hours) in Settings → App.
+  that fits the time of day, and a nudge to rest after about three hours) in Settings → App. Like
+  reminders, check-ins arrive in her Reminders session, not in the chat you are in.
 - **Back up, restore, export** in Settings → App → Your data.
 - **Light in the background:** hidden in the tray with the avatar off, it uses about 11 MB of memory.
 

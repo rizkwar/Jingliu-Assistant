@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -39,6 +40,7 @@ from ..avatar.cues import TEST_GROUPS, CueFilter
 from ..voice.reference import inspect_reference, VoiceSetupError
 from ..chat import attachments
 from ..chat import reminders
+from ..chat import check_ins as check_in_lines
 from .chat_view import AttachmentCard, ChatView
 from .frameless import Frame, WindowControls
 from .inline import InlineBar, ask, edit_in_place, tell
@@ -2428,7 +2430,7 @@ class CompanionWindow(QMainWindow):
     def _check_in(self):
         """Once a minute, when chosen: greet in the morning, or suggest a rest after a long stretch."""
         from ..chat import check_ins
-        if (not self.check_ins.isChecked() or self._closing or self.suspended or self._worker
+        if (not self.check_ins.isChecked() or self._closing or self.suspended or self._worker or self._reminder_job
                 or self._task is not None or self.microphone.busy or self.speech.busy):
             return
         now, idle = reminders.now_local(), check_ins.idle_seconds()
@@ -2446,11 +2448,17 @@ class CompanionWindow(QMainWindow):
                                    f"Check-in · about {hours} hours at the computer")
 
     def _deliver_check_in(self, line, label):
+        """Like a reminder, in her Reminders session, not the chat you are in: there if it is open, otherwise
+        written out of view, said aloud, and the session marked unread."""
         try:
             self.settings.validate_connection()
-        except ValueError:
+            inbox = self._reminder_session()
+        except (ValueError, sqlite3.Error):
             return  # Without a model she cannot say it herself; a check-in is not worth an error.
-        self._begin_reply(line, reminder=True, note=(label, "moon"))
+        if self._in_conversation(inbox):
+            self._begin_reply(line, reminder=True, note=(label, "moon"))
+        else:
+            self._remind_out_of_view(inbox, line, {"text": label, "check_in": True})
 
     @Slot(bool)
     def _start_with_windows_toggled(self, enabled):
@@ -2838,6 +2846,8 @@ class CompanionWindow(QMainWindow):
         worker.deleteLater()
         stopped = worker.error or worker.stop_requested.is_set()
         said = "" if stopped else (job["text"] + job["cues"].finish()).strip()
+        if not said and job["reminder"].get("check_in"):
+            return  # A check-in she could not write is simply skipped.
         self._leave_reminder(job["inbox"], job["line"], said or f"Reminder: {job['reminder']['text']}",
                              job["reminder"], spoken=bool(said))
 
@@ -2858,7 +2868,8 @@ class CompanionWindow(QMainWindow):
             self._restore_conversation(inbox)
         else:
             self._refresh_sidebar()
-            self._flash(f"{self.settings.name} reminded you: “{reminder['text']}” · see Reminders in the sidebar")
+            self._flash(f"{self.settings.name} checked in · see Reminders in the sidebar" if reminder.get("check_in")
+                        else f"{self.settings.name} reminded you: “{reminder['text']}” · see Reminders in the sidebar")
         if (spoken and self.auto_speak.isChecked() and self.volume.value() > 0 and not self._worker
                 and not self.speech.busy and not self.microphone.busy):
             self.speech.speak(said, self._speech_voice(), self.volume.value(), self.delivery_rate.value())
@@ -3979,6 +3990,12 @@ class CompanionWindow(QMainWindow):
             if hasattr(self, "sidebar"):
                 self.sidebar.show_tab("chats")  # It sits at the top of your chats.
         for row in rows:
+            if row["role"] == "user" and row["display"].startswith(check_in_lines.MARK):
+                # Her instructions for a check-in are for her; you see when it was.
+                moment = re.match(r"\S+ Check-in \((\d{1,2}:\d{2})", row["display"])
+                self.transcript.add_memory_note("Check-in" + (f" · {moment.group(1)}" if moment else ""),
+                                                can_undo=False, icon="moon")
+                continue
             if row["role"] == "user" and row["display"].startswith(reminders.MARK):
                 self.transcript.add_memory_note(row["display"].replace(reminders.MARK, "Reminder", 1),
                                                 can_undo=False, icon="clock")
