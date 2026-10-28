@@ -33,7 +33,7 @@ ICONS = {
     'chevron': '', 'shield': '', 'bell': '', 'quote': '',
     'tool': '', 'folder': '', 'project': '', 'open': '', 'plug': '',
     'study': '', 'cards': '', 'timer': '', 'quiz': '', 'idea': '', 'notes': '',
-    'folder_open': '', 'chevron_right': '',
+    'chats': '\ue8bd', 'folder_open': '', 'chevron_right': '',
 }
 # Activity → status dot colour.
 ACTIVITY_COLORS = {
@@ -246,7 +246,15 @@ QSlider::sub-page:horizontal {{ background: {ICE_DEEP}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: {FROST}; width: 14px; height: 14px; margin: -6px 0; border-radius: 7px; border: 2px solid {ICE_DEEP}; }}
 
 /* Sidebar: who she is, new chat, quick pages and the conversation list. */
-QWidget#shell {{ background: #060913; }}
+QWidget#shell {{ background: #161f33; }}  /* The frame is the lightest, as in ChatGPT. */
+/* ChatGPT's frame: a bar across the top and a rail of icons on the left, around the rounded inner panel. */
+QWidget#topBar, QWidget#rail {{ background: transparent; }}
+QToolButton#railButton, QToolButton#topButton {{ background: transparent; border: none; border-radius: 10px; padding: 0; }}
+QToolButton#railButton {{ min-width: 40px; max-width: 40px; min-height: 40px; max-height: 40px; }}
+QToolButton#topButton {{ min-width: 32px; max-width: 32px; min-height: 30px; max-height: 30px; border-radius: 8px; }}
+QToolButton#railButton:hover, QToolButton#topButton:hover {{ background: rgba(168, 212, 255, 0.08); }}
+QToolButton#railButton:checked {{ background: rgba(168, 212, 255, 0.14); }}
+QLabel#topTitle {{ color: {MUTED}; font-size: 13px; font-weight: 500; padding-left: 4px; }}
 QFrame#sidebar {{ background: transparent; border: none; }}
 QLabel#sideTitle {{ font-family: 'Segoe UI Variable Display Semibold', 'Segoe UI Semibold'; font-size: 17px; color: {FROST}; }}
 QFrame#sidebar QLabel#seal {{ font-size: 13px; padding-top: 2px; }}
@@ -515,7 +523,7 @@ ICON_FILES = {
     "shield": "shield", "bell": "bell", "quote": "quote", "tool": "wrench", "folder": "folder", "project": "briefcase",
     "open": "external-link", "plug": "plug", "study": "graduation-cap", "cards": "layers", "timer": "timer",
     "quiz": "list-checks", "idea": "lightbulb", "notes": "sticky-note", "folder_open": "folder-open",
-    "chevron_right": "chevron-right",
+    "chevron_right": "chevron-right", "chats": "message-square",
 }
 
 
@@ -608,11 +616,12 @@ def moon_icon(size=64):
 class NightSky(QWidget):
     """Static backdrop: deep night gradient, a faint moon halo and drifting frost motes. `panel`: drawn as a panel
     with rounded left corners on the window's darker base, as ChatGPT and Codex set their conversation."""
-    RADIUS = 14
+    RADIUS = 12
 
     def __init__(self, parent=None, panel=False):
         super().__init__(parent)
         self.panel = panel
+        self.side = None  # The sidebar inside the panel: shaded a little darker, with a line beside it.
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         generator = random.Random(1123)  # Fixed seed: the sky never flickers between repaints.
         self._motes = [(generator.random(), generator.random() ** 1.6, generator.uniform(0.6, 1.8),
@@ -648,23 +657,24 @@ class NightSky(QWidget):
             painter.setBrush(colour(200, 225, 255, alpha * 2 // 3) if not is_light() else colour(120, 150, 200, alpha // 3))
             painter.drawEllipse(QPointF(x * width, y * height), size * .8, size * .8)
         if self.panel:
+            side = self.side
+            if side is not None and side.isVisible():
+                edge = side.geometry().right() + 1
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(colour(168, 212, 255, 9))  # A shade lighter than the conversation.
+                painter.drawRect(QRectF(0, 0, edge, height))
+                painter.setPen(QPen(colour(168, 212, 255, 18), 1))
+                painter.drawLine(QPointF(edge + .5, 0), QPointF(edge + .5, height))
             painter.setClipping(False)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(colour(168, 212, 255, 22), 1))
+            painter.setPen(QPen(colour(168, 212, 255, 24), 1))
             painter.drawPath(shape)
         painter.end()
 
     def _panel_shape(self):
-        """Rounded on the left, where it meets the sidebar; square on the right, at the window's edge."""
-        width, height, radius = self.width(), self.height(), self.RADIUS
+        """The inner panel, rounded on every corner."""
         path = QPainterPath()
-        path.moveTo(width + 1, -1)
-        path.lineTo(radius + .5, -1 + .5)
-        path.quadTo(.5, .5, .5, radius + .5)
-        path.lineTo(.5, height - radius - .5)
-        path.quadTo(.5, height - .5, radius + .5, height - .5)
-        path.lineTo(width + 1, height - .5)
-        path.closeSubpath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), self.RADIUS, self.RADIUS)
         return path
 
 

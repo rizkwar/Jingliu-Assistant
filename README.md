@@ -147,8 +147,10 @@ shows its tab; New chat is an everyday chat.
 - **Themes** (Settings → App → Window → Theme): Moonlit frost, Crimson moon, Jade grove, Lunar gold, Violet
   dusk, Midnight ink, Graphite (ChatGPT's neutral greys, with her crimson kept), and two light ones, Snowfield and
   Blossom day. The whole window changes at once.
-- **Laid out like ChatGPT:** the conversation sits on a rounded panel beside the sidebar, in a centred reading
-  column, with pill-shaped messages of yours, her replies as plain text, and a large rounded message box.
+- **Laid out like ChatGPT:** a light frame (a top bar with the sidebar toggle, search and the window's buttons, and a
+  rail with Chats, Projects, Study, Usage and Settings) around a darker rounded panel that holds the sidebar and the
+  conversation, with a line between them. The conversation is a centred reading column, with pill-shaped messages
+  of yours, her replies as plain text, and a large rounded message box.
 - Lives in the **system tray** when closed (Quit from there); in Windows Search / Start as **Jingliu**.
 - **Start with Windows** (quietly, in the tray) and **gentle check-ins** (off by default: a greeting
   that fits the time of day, and a nudge to rest after about three hours) in Settings → App. Like

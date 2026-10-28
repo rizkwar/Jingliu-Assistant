@@ -113,7 +113,8 @@ class Sidebar(QFrame):
     rename_project = Signal(str)
     delete_project = Signal(str)
     review_cards = Signal(str)
-    tab_changed = Signal(str)
+    tab_changed = Signal(str)  # You chose a tab.
+    shown = Signal(str)  # A tab is showing, however it came to (the window's rail follows it).
     show_all = Signal()
     collapse = Signal()
 
@@ -261,6 +262,7 @@ class Sidebar(QFrame):
         # The tab bar sits just above Settings.
         bar = QFrame()
         bar.setObjectName("sideTabs")
+        self.tab_bar = bar  # The window's rail can take its place (see window.py).
         tabs = QHBoxLayout(bar)
         tabs.setContentsMargins(3, 3, 3, 3)
         tabs.setSpacing(2)
@@ -369,6 +371,7 @@ class Sidebar(QFrame):
             return
         self.stack.setCurrentIndex(TABS.index(tab))
         self.tab_buttons[tab].setChecked(True)
+        self.shown.emit(tab)
         if user:
             self.tab_changed.emit(tab)
 

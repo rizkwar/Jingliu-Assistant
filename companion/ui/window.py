@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMenu,
     QMessageBox,
     QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSlider,
-    QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
+    QStackedWidget, QTabWidget, QToolButton, QButtonGroup, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import QEventLoop
 
@@ -341,16 +341,43 @@ class CompanionWindow(QMainWindow):
         self.settings_button = action("settings", "Settings", "Settings · Ctrl+,")
         self.suspend_button = action("pause", "Suspend")
 
+        # ChatGPT's frame: a bar across the top (the title bar, with the window's buttons), a rail of icons on the
+        # left, and a rounded inner panel holding the sidebar and the conversation, with a line between them.
         root = QWidget()
-        root.setObjectName("shell")  # The darker base the sidebar sits on.
+        root.setObjectName("shell")
         root.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setCentralWidget(root)
-        shell = QHBoxLayout(root)
+        frame = QVBoxLayout(root)
+        frame.setContentsMargins(0, 0, 0, 0)
+        frame.setSpacing(0)
+        top = QWidget()
+        top.setObjectName("topBar")
+        top.setFixedHeight(42)
+        top_row = QHBoxLayout(top)
+        top_row.setContentsMargins(14, 4, 14, 2)
+        top_row.setSpacing(4)
+        frame.addWidget(top)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 8, 8)
+        body.setSpacing(0)
+        frame.addLayout(body, 1)
+        rail = QWidget()
+        rail.setObjectName("rail")
+        rail.setFixedWidth(60)
+        rail_column = QVBoxLayout(rail)
+        rail_column.setContentsMargins(10, 2, 10, 4)
+        rail_column.setSpacing(6)
+        body.addWidget(rail)
+        inner = NightSky(panel=True)  # Her night sky, inside the panel.
+        inner.setObjectName("inner")
+        self.inner = inner
+        body.addWidget(inner, 1)
+        shell = QHBoxLayout(inner)
         shell.setContentsMargins(0, 0, 0, 0)
         shell.setSpacing(0)
         self.sidebar = Sidebar(settings.name, SEALS.get(settings.name.lower(), ""),
                                (self.memory_button, self.reminders_button, self.tasks_button, self.usage_button))
-        self.sidebar.add_bottom(self.settings_button)
+        self.sidebar.add_bottom(self.settings_button).hide()  # Settings sits at the foot of the rail.
         self.title, self.seal, self.new_chat = self.sidebar.title, self.sidebar.seal, self.sidebar.new_chat
         self.sidebar.open_conversation.connect(self._switch_conversation)
         self.sidebar.pin_requested.connect(self._pin_conversation)
@@ -369,8 +396,52 @@ class CompanionWindow(QMainWindow):
         self.sidebar.show_tab(settings.sidebar_tab)
         self._sidebar_wanted = True
         shell.addWidget(self.sidebar)
+        inner.side = self.sidebar
+        # The rail takes the place of the sidebar's tab bar and its collapse button (the top bar has that).
+        self.sidebar.tab_bar.hide()
+        self.sidebar.collapse_button.hide()
 
-        main = NightSky(panel=True)  # The conversation, on a rounded panel with her night sky.
+        def rail_button(icon, tip, action=None):
+            button = QToolButton()
+            button.setObjectName("railButton")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setIconSize(QSize(22, 22))
+            if action is not None:
+                button.setDefaultAction(action)
+            else:
+                button.setIcon(glyph_icon(icon, color="#c3d3ea"))
+            button.setToolTip(tip)
+            return button
+        self.rail_tabs = {}
+        tabs = QButtonGroup(self)
+        for tab, icon, tip in (("chats", "chats", "Chats"), ("projects", "folder", "Projects"),
+                               ("study", "study", "Study: subjects, quizzes, flashcards and a focus timer")):
+            button = rail_button(icon, tip)
+            button.setCheckable(True)
+            button.clicked.connect(lambda _=False, tab=tab: self._rail_tab(tab))
+            tabs.addButton(button)
+            rail_column.addWidget(button)
+            self.rail_tabs[tab] = button
+        rail_column.addStretch()
+        rail_column.addWidget(rail_button("", "Usage: how much of her plan is left", self.usage_button))
+        rail_column.addWidget(rail_button("", "Settings · Ctrl+,", self.settings_button))
+        self.sidebar.shown.connect(self._rail_follow)
+        self._rail_follow(self.sidebar.tab)
+        # The top bar: show or hide the sidebar, and search, beside her name.
+        for icon, tip, slot in (("sidebar", "Show or hide the sidebar · Ctrl+B", self._toggle_sidebar),
+                                ("search", "Search conversations · Ctrl+K", self._search_conversations)):
+            button = QToolButton()
+            button.setObjectName("topButton")
+            button.setIcon(glyph_icon(icon, color="#8fa3c2"))
+            button.setIconSize(QSize(19, 19))
+            button.setToolTip(tip)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(slot)
+            top_row.addWidget(button)
+        top_row.addStretch()
+        self.top_bar = top
+
+        main = QWidget()  # The conversation, beside the sidebar inside the panel.
         main.setObjectName("column")
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -429,13 +500,11 @@ class CompanionWindow(QMainWindow):
         self.conversation_title.installEventFilter(self)
         # No Windows title bar, like Claude's app: the header is the title bar, with the window's buttons in
         # its corner (see frameless.py).
-        self.title_bar = header
-        self.window_controls = WindowControls(self, header)
+        self.title_bar = top  # The window's buttons sit in the top bar's corner.
+        self.header = header
+        self.window_controls = WindowControls(self, top)
         self._frame = Frame(self, self.window_controls, self._is_title_bar)
-        if self._frame.active:
-            margins = heading.contentsMargins()
-            heading.setContentsMargins(margins.left(), margins.top(), margins.right() + 138, margins.bottom())
-        header.installEventFilter(self)
+        top.installEventFilter(self)
 
         centring = QHBoxLayout()
         centring.setContentsMargins(0, 0, 0, 0)
@@ -1234,17 +1303,16 @@ class CompanionWindow(QMainWindow):
         self.input.setFocus()
 
     def _is_title_bar(self, point):
-        """Window points that drag the window: the header, and the sidebar's top beside her name."""
-        header = self.title_bar
+        """Window points that drag the window: the top bar, and the conversation's header."""
+        if self.top_bar.rect().contains(self.top_bar.mapFrom(self, point)):
+            return True
+        header = self.header
         if header.rect().contains(header.mapFrom(self, point)):
             # The title's own words are not: double-clicking them renames the conversation.
             title = self.conversation_title
             local = title.mapFrom(self, point)
             words = title.fontMetrics().horizontalAdvance(title.text()) + 8
             return not (title.rect().contains(local) and local.x() <= words)
-        if self.sidebar.isVisible():
-            local = self.sidebar.mapFrom(self, point)
-            return self.sidebar.rect().contains(local) and local.y() < header.height()
         return False
 
     def nativeEvent(self, event_type, message):
@@ -2033,6 +2101,20 @@ class CompanionWindow(QMainWindow):
         visible = self._sidebar_wanted and (self.width() >= 760 or self.sidebar.search.hasFocus())
         self.sidebar.setVisible(visible)
         self.show_sidebar.setVisible(not visible)
+        if hasattr(self, "inner"):
+            self.inner.update()  # Its shade and line follow the sidebar.
+
+    def _rail_tab(self, tab):
+        """A rail icon: that part of the sidebar, opening the sidebar if it was hidden."""
+        if not self.sidebar.isVisible():
+            self._sidebar_wanted = True
+            self._place_sidebar()
+        self.sidebar.show_tab(tab, user=True)
+
+    def _rail_follow(self, tab):
+        button = getattr(self, "rail_tabs", {}).get(tab)
+        if button is not None:
+            button.setChecked(True)
 
     def _search_conversations(self):
         self._sidebar_wanted = True
